@@ -1,0 +1,21 @@
+{
+  "expo": {
+    "name": "Expense Tracker",
+    "slug": "expense-tracker",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "expensetracker",
+    "userInterfaceStyle": "dark",
+    "android": {
+      "package": "com.expensetracker.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#0B1120"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "plugins": [
+      "expo-dev-client"
+    ]
+  }
+}
