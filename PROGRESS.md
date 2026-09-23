@@ -5,6 +5,34 @@ Foundational architecture build for a high-performance cross-platform personal f
 
 ---
 
+## Repository Structure
+```
+/
+├── PROGRESS.md            # Comprehensive build log and architecture decisions
+├── supabase/              # Supabase CLI configuration, versioned SQL migrations
+│   ├── config.toml
+│   └── migrations/
+│       ├── 20260924000001_initial_schema.sql
+│       └── 20260924000002_default_accounts_trigger.sql
+└── app/                   # Expo dev-client mobile application (renamed from temporary scaffold)
+    ├── package.json       # App metadata ("name": "app") and dependencies
+    ├── app.json           # Expo config ("name": "Expense Tracker", "slug": "expense-tracker")
+    ├── babel.config.js    # Reanimated plugin configuration
+    ├── tsconfig.json
+    ├── .env               # Supabase project URL & Anon Key
+    ├── assets/
+    └── src/
+        ├── theme/         # Strict tokens (4/8/12/16/24px spacing, deep slate, emerald accent)
+        ├── types/         # TypeScript database & view models
+        ├── services/      # Supabase client with AsyncStorage session persistence
+        ├── store/         # Zustand stores (authStore, optimistic financeStore)
+        ├── components/    # ReanimatedNumber, TactileButton, TransactionRow, InlineError
+        ├── navigation/    # RootNavigator, AuthStack, MainTabs
+        └── screens/       # Login, SignUp, Dashboard, AddTransaction, Budgets, Borrows
+```
+
+---
+
 ## What's Done
 
 ### 1. Backend & Database (Supabase)
@@ -24,21 +52,19 @@ Foundational architecture build for a high-performance cross-platform personal f
 - [x] Created migration `20260924000002_default_accounts_trigger.sql` to auto-provision initial 'Primary Bank' and 'Cash Wallet' accounts upon user registration.
 - [x] Applied all migrations to remote Postgres 17.6 instance via `npx supabase db push`.
 
-### 2. App Scaffold & Dependencies
-- [x] Initialized Expo project configured for `expo-dev-client` and Android (`com.expensetracker.app`).
-- [x] Configured Babel plugin for Reanimated (`babel.config.js`).
-- [x] Installed and configured dependencies:
-  - `expo-dev-client`
-  - `react-native-reanimated` & `react-native-worklets`
-  - `react-native-paper` (MD3 Theme with custom flat dark tokens)
-  - `@supabase/supabase-js` (configured with `@react-native-async-storage/async-storage`)
-  - `@react-navigation/native`, `@react-navigation/bottom-tabs`, `@react-navigation/native-stack`
-  - `zustand` (offline caching + optimistic mutations)
-- [x] Ran `npx expo-doctor` — passed 21/21 health checks.
-- [x] Ran `npx tsc --noEmit` — 0 TypeScript compilation errors.
+### 2. App Scaffold & Repository Structure
+- [x] Consolidated mobile codebase inside `/app/` matching standard clean structure.
+- [x] Verified `app/package.json` "name" is `"app"`.
+- [x] Verified `app/app.json` contains sensible identifiers:
+  - `"name": "Expense Tracker"`
+  - `"slug": "expense-tracker"`
+  - `"package": "com.expensetracker.app"`
+- [x] Ran `npm install` inside `/app/` — 0 errors, up to date.
+- [x] Ran `npx expo-doctor` inside `/app/` — passed 21/21 health checks.
+- [x] Ran `npx tsc --noEmit` inside `/app/` — 0 TypeScript compilation errors.
 
 ### 3. Design Tokens & Visual Direction
-- [x] Built `src/theme/tokens.ts` and `src/theme/theme.ts`:
+- [x] Built `app/src/theme/tokens.ts` and `app/src/theme/theme.ts`:
   - Enforced strict 4/8/12/16/24px spacing scale.
   - Charcoal/Slate dark theme (`#0B1120`, `#0F172A`, `#1E293B`, `#27354A`).
   - Single crisp emerald accent (`#00D09C`), alert/expense coral (`#FF5A5F`), warning amber (`#F59E0B`).
@@ -46,12 +72,12 @@ Foundational architecture build for a high-performance cross-platform personal f
   - Tabular figure typography (`fontVariant: ['tabular-nums']`) for hero balances and currency values.
 
 ### 4. Authentication Flow
-- [x] Created `src/store/authStore.ts` using Supabase Auth with automatic session persistence and restoration via AsyncStorage.
+- [x] Created `app/src/store/authStore.ts` using Supabase Auth with automatic session persistence and restoration via AsyncStorage.
 - [x] Created `LoginScreen.tsx` and `SignUpScreen.tsx` with high-contrast inputs and tactile feedback.
 - [x] Created `AuthStack.tsx` and `RootNavigator.tsx` routing dynamically between Auth Stack and Main App Tabs.
 
 ### 5. Optimistic State Management & Realtime
-- [x] Created `src/store/financeStore.ts`:
+- [x] Created `app/src/store/financeStore.ts`:
   - Instant local mutations: `addTransactionOptimistic`, `toggleSettleBorrowOptimistic`, `addBorrowOptimistic`, `setBudgetOptimistic`, `createAccountOptimistic`.
   - State snapshotting before mutation with automatic rollback and `InlineError` banner on network failure.
   - Multi-table Supabase Realtime channel subscriptions (`accounts`, `transactions`, `borrows`, `budgets`) keeping cross-session data synchronized without manual refresh.
@@ -65,7 +91,7 @@ Foundational architecture build for a high-performance cross-platform personal f
   - Recent transactions list (last 8) with clean empty state.
   - Pull-to-refresh control.
 - [x] **Add Transaction (`AddTransactionScreen.tsx`)**:
-  - Type toggle (Expense, Income, Lent, Borrowed).
+  - Type selector (Expense, Income, Lent, Borrowed).
   - Hero amount input with tabular figures.
   - Account horizontal selector and category chip grid.
   - Date picker with quick toggles (Today, Yesterday) and optional note.
@@ -76,7 +102,7 @@ Foundational architecture build for a high-performance cross-platform personal f
   - Category breakdown cards pulling directly from `v_budget_summary`.
   - Collapsible "+ Set Budget" form for setting overall or per-category monthly limits.
 - [x] **Borrows (`BorrowsScreen.tsx`)**:
-  - Total Pending vs Total Settled summary cards.
+  - Total Pending vs Settled summary cards.
   - Status filter tabs (All, Pending, Settled).
   - Lent/Owed entries with instant one-tap Settle/Reopen toggle (`toggleSettleBorrowOptimistic`).
   - Collapsible "+ Add Entry" form for quickly recording loans and splits.
@@ -84,10 +110,11 @@ Foundational architecture build for a high-performance cross-platform personal f
 ---
 
 ## Architectural Decisions & Rationale
-1. **Zustand + AsyncStorage**: Zero-overhead state management with predictable optimistic updates and disk caching.
-2. **Reanimated Worklets**: Installed `react-native-worklets` matching Expo SDK 57 for crash-free UI-thread animations.
-3. **Flat Card Elevation**: React Native Paper default elevated shadow styling was customized with 1px `#334155` borders to achieve the requested clean, data-dense Cred/Walnut look.
-4. **Trigger-Driven Balances**: Database-level triggers keep `accounts.current_balance` accurate in Postgres while the client optimistically mirrors the exact balance calculation locally before the Realtime payload arrives.
+1. **Repository Structure**: Mobile code cleanly contained in `/app/`, with backend migrations in `/supabase/` and repo docs in `/PROGRESS.md`.
+2. **Zustand + AsyncStorage**: Zero-overhead state management with predictable optimistic updates and disk caching.
+3. **Reanimated Worklets**: Installed `react-native-worklets` matching Expo SDK 57 for crash-free UI-thread animations.
+4. **Flat Card Elevation**: React Native Paper default elevated shadow styling was customized with 1px `#334155` borders to achieve the requested clean, data-dense Cred/Walnut look.
+5. **Trigger-Driven Balances**: Database-level triggers keep `accounts.current_balance` accurate in Postgres while the client optimistically mirrors the exact balance calculation locally before the Realtime payload arrives.
 
 ---
 
