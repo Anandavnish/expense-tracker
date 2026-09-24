@@ -10,6 +10,9 @@ export const SPACING = {
   xl: 24,
 } as const;
 
+export const DEFAULT_ACCENT = '#00D09C';
+export const DEFAULT_ACCENT_MUTED = '#00D09C1A';
+
 export const COLORS = {
   // Pure deep slate tones - no purple gradients
   background: '#0B1120',
@@ -19,9 +22,9 @@ export const COLORS = {
   border: '#334155',
   borderFocus: '#00D09C',
   
-  // Single crisp accent color
-  accent: '#00D09C',        // Emerald mint
-  accentMuted: '#00D09C1A',  // 10% opacity for chips/highlights
+  // Single crisp accent color (default emerald)
+  accent: DEFAULT_ACCENT,
+  accentMuted: DEFAULT_ACCENT_MUTED,
   
   // Semantic status colors
   alert: '#FF5A5F',         // Red/Coral for expense/over-budget

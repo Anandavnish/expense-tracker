@@ -1,6 +1,7 @@
 // src/types/database.ts
 
 export type AccountType = 'cash' | 'bank' | 'credit_card';
+export type BankPreset = 'HDFC' | 'SBI' | 'ICICI' | 'Axis' | 'Kotak' | 'Other';
 
 export interface Account {
   id: string;
@@ -9,6 +10,7 @@ export interface Account {
   type: AccountType;
   current_balance: number;
   credit_limit: number | null;
+  bank_preset?: BankPreset | string | null;
   created_at: string;
   updated_at: string;
 }

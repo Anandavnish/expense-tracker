@@ -9,10 +9,24 @@ import {
   Budget,
   BudgetSummary,
   AccountOverview,
+  BankPreset,
 } from '../types/database';
 import { RealtimeChannel } from '@supabase/supabase-js';
 
-const STORAGE_KEY = '@finance_store_cache_v1';
+const STORAGE_KEY = '@finance_store_cache_v2';
+const CATEGORIES_STORAGE_KEY = '@finance_categories_v1';
+
+export const DEFAULT_STUDENT_CATEGORIES = [
+  'Food',
+  'Travel',
+  'Hostel/Rent',
+  'Recharge/Data',
+  'Subscriptions',
+  'Books/Stationery',
+  'Shopping',
+  'Entertainment',
+  'Other',
+];
 
 interface FinanceState {
   accounts: Account[];
@@ -20,16 +34,24 @@ interface FinanceState {
   borrows: Borrow[];
   budgets: Budget[];
   budgetSummaries: BudgetSummary[];
+  selectedMonth: string; // 'YYYY-MM'
+  categories: string[];
   isInitialLoading: boolean;
   inlineError: string | null;
   activeChannel: RealtimeChannel | null;
 
   // Actions
   setInlineError: (error: string | null) => void;
+  setSelectedMonth: (month: string, userId?: string) => Promise<void>;
   loadCachedData: () => Promise<void>;
   fetchInitialData: (userId: string) => Promise<void>;
   subscribeRealtime: (userId: string) => void;
   unsubscribeRealtime: () => void;
+
+  // Category management
+  addCategory: (category: string) => void;
+  reorderCategories: (categories: string[]) => void;
+  removeCategory: (category: string) => void;
 
   // Optimistic mutations
   addTransactionOptimistic: (
@@ -51,6 +73,23 @@ interface FinanceState {
   createAccountOptimistic: (
     accData: Omit<Account, 'id' | 'created_at' | 'updated_at'>
   ) => Promise<{ success: boolean; error?: string }>;
+
+  updateAccountOptimistic: (
+    accountId: string,
+    updates: Partial<Pick<Account, 'name' | 'type' | 'credit_limit' | 'bank_preset'>>
+  ) => Promise<{ success: boolean; error?: string }>;
+
+  deleteAccountOptimistic: (
+    accountId: string
+  ) => Promise<{ success: boolean; error?: string }>;
+
+  // Calibration flow
+  calibrateAccountBalance: (
+    accountId: string,
+    newBalance: number,
+    logAsTransaction: boolean,
+    userId: string
+  ) => Promise<{ success: boolean; error?: string }>;
 }
 
 export const useFinanceStore = create<FinanceState>((set, get) => ({
@@ -59,15 +98,58 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
   borrows: [],
   budgets: [],
   budgetSummaries: [],
+  selectedMonth: new Date().toISOString().substring(0, 7), // 'YYYY-MM'
+  categories: DEFAULT_STUDENT_CATEGORIES,
   isInitialLoading: true,
   inlineError: null,
   activeChannel: null,
 
   setInlineError: (error: string | null) => set({ inlineError: error }),
 
+  setSelectedMonth: async (month: string, userId?: string) => {
+    set({ selectedMonth: month });
+    if (!userId) return;
+
+    try {
+      const [budgetsRes, summaryRes] = await Promise.all([
+        supabase
+          .from('budgets')
+          .select('*')
+          .eq('user_id', userId)
+          .eq('month', month),
+        supabase
+          .from('v_budget_summary')
+          .select('*')
+          .eq('user_id', userId)
+          .eq('month', month),
+      ]);
+
+      set({
+        budgets: (budgetsRes.data as Budget[]) || [],
+        budgetSummaries: (summaryRes.data as BudgetSummary[]) || [],
+      });
+    } catch (err: any) {
+      set({ inlineError: `Failed to load data for ${month}: ${err.message}` });
+    }
+  },
+
   loadCachedData: async () => {
     try {
-      const cached = await AsyncStorage.getItem(STORAGE_KEY);
+      const [cached, cachedCats] = await Promise.all([
+        AsyncStorage.getItem(STORAGE_KEY),
+        AsyncStorage.getItem(CATEGORIES_STORAGE_KEY),
+      ]);
+
+      let categories = DEFAULT_STUDENT_CATEGORIES;
+      if (cachedCats) {
+        try {
+          const parsedCats = JSON.parse(cachedCats);
+          if (Array.isArray(parsedCats) && parsedCats.length > 0) {
+            categories = parsedCats;
+          }
+        } catch {}
+      }
+
       if (cached) {
         const parsed = JSON.parse(cached);
         set({
@@ -76,19 +158,42 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
           borrows: parsed.borrows || [],
           budgets: parsed.budgets || [],
           budgetSummaries: parsed.budgetSummaries || [],
+          categories,
           isInitialLoading: false,
         });
+      } else {
+        set({ categories, isInitialLoading: false });
       }
     } catch {
-      // Ignore cache read failures
+      set({ isInitialLoading: false });
     }
+  },
+
+  addCategory: (category: string) => {
+    const trimmed = category.trim();
+    if (!trimmed) return;
+    const current = get().categories;
+    if (current.includes(trimmed)) return;
+    const updated = [...current, trimmed];
+    set({ categories: updated });
+    AsyncStorage.setItem(CATEGORIES_STORAGE_KEY, JSON.stringify(updated)).catch(() => {});
+  },
+
+  reorderCategories: (categories: string[]) => {
+    set({ categories });
+    AsyncStorage.setItem(CATEGORIES_STORAGE_KEY, JSON.stringify(categories)).catch(() => {});
+  },
+
+  removeCategory: (category: string) => {
+    const updated = get().categories.filter((c) => c !== category);
+    set({ categories: updated });
+    AsyncStorage.setItem(CATEGORIES_STORAGE_KEY, JSON.stringify(updated)).catch(() => {});
   },
 
   fetchInitialData: async (userId: string) => {
     try {
-      const currentMonth = new Date().toISOString().substring(0, 7); // 'YYYY-MM'
+      const month = get().selectedMonth;
 
-      // Parallel fetch from Supabase
       const [accountsRes, txRes, borrowsRes, budgetsRes, summaryRes] = await Promise.all([
         supabase
           .from('accounts')
@@ -101,7 +206,7 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
           .eq('user_id', userId)
           .order('date', { ascending: false })
           .order('created_at', { ascending: false })
-          .limit(100),
+          .limit(150),
         supabase
           .from('borrows')
           .select('*')
@@ -111,12 +216,12 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
           .from('budgets')
           .select('*')
           .eq('user_id', userId)
-          .eq('month', currentMonth),
+          .eq('month', month),
         supabase
           .from('v_budget_summary')
           .select('*')
           .eq('user_id', userId)
-          .eq('month', currentMonth),
+          .eq('month', month),
       ]);
 
       const accounts = (accountsRes.data as Account[]) || [];
@@ -134,7 +239,6 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
         isInitialLoading: false,
       });
 
-      // Cache snapshot locally
       AsyncStorage.setItem(
         STORAGE_KEY,
         JSON.stringify({ accounts, transactions, borrows, budgets, budgetSummaries })
@@ -155,7 +259,6 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
 
     const channel = supabase
       .channel(`realtime_finance_${userId}`)
-      // Accounts changes
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'accounts', filter: `user_id=eq.${userId}` },
@@ -177,7 +280,6 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
           }
         }
       )
-      // Transactions changes
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'transactions', filter: `user_id=eq.${userId}` },
@@ -185,7 +287,6 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
           const current = get().transactions;
           if (payload.eventType === 'INSERT') {
             const newTx = payload.new as Transaction;
-            // Check if already in store (either via optimistic temp or already arrived)
             const exists = current.some((t) => t.id === newTx.id);
             if (!exists) {
               set({ transactions: [newTx, ...current] });
@@ -200,19 +301,17 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
             set({ transactions: current.filter((t) => t.id !== oldId) });
           }
 
-          // Refresh budget summaries on transaction changes
-          const currentMonth = new Date().toISOString().substring(0, 7);
+          const month = get().selectedMonth;
           const { data } = await supabase
             .from('v_budget_summary')
             .select('*')
             .eq('user_id', userId)
-            .eq('month', currentMonth);
+            .eq('month', month);
           if (data) {
             set({ budgetSummaries: data as BudgetSummary[] });
           }
         }
       )
-      // Borrows changes
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'borrows', filter: `user_id=eq.${userId}` },
@@ -234,7 +333,6 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
           }
         }
       )
-      // Budgets changes
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'budgets', filter: `user_id=eq.${userId}` },
@@ -249,12 +347,12 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
             set({ budgets: current.filter((b) => b.id !== payload.old.id) });
           }
 
-          const currentMonth = new Date().toISOString().substring(0, 7);
+          const month = get().selectedMonth;
           const { data } = await supabase
             .from('v_budget_summary')
             .select('*')
             .eq('user_id', userId)
-            .eq('month', currentMonth);
+            .eq('month', month);
           if (data) {
             set({ budgetSummaries: data as BudgetSummary[] });
           }
@@ -273,7 +371,6 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
     }
   },
 
-  // 1. Optimistic Add Transaction
   addTransactionOptimistic: async (txData) => {
     const tempId = `temp_${Date.now()}_${Math.random().toString(36).substring(7)}`;
     const optimisticTx: Transaction = {
@@ -282,12 +379,10 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
       created_at: new Date().toISOString(),
     };
 
-    // 1. Snapshot previous state for rollback
     const prevTransactions = [...get().transactions];
     const prevAccounts = [...get().accounts];
     const prevSummaries = [...get().budgetSummaries];
 
-    // 2. Optimistic local update
     const updatedAccounts = prevAccounts.map((acc) => {
       if (acc.id === txData.account_id) {
         let delta = 0;
@@ -304,7 +399,6 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
       return acc;
     });
 
-    // Update optimistic budget summary if it is an expense
     const updatedSummaries = prevSummaries.map((bs) => {
       if (txData.type === 'expense') {
         const matchesCategory = bs.category === txData.category || bs.category === null;
@@ -331,7 +425,6 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
       inlineError: null,
     });
 
-    // 3. Background Supabase write
     try {
       const { data, error } = await supabase
         .from('transactions')
@@ -350,7 +443,6 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
 
       if (error) throw error;
 
-      // Reconcile temporary ID with real DB ID
       const realTx = data as Transaction;
       set((state) => ({
         transactions: state.transactions.map((t) => (t.id === tempId ? realTx : t)),
@@ -358,7 +450,6 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
 
       return { success: true };
     } catch (err: any) {
-      // 4. Rollback on failure & surface subtle inline error
       set({
         transactions: prevTransactions,
         accounts: prevAccounts,
@@ -369,7 +460,6 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
     }
   },
 
-  // 2. Optimistic Toggle Settle Borrow
   toggleSettleBorrowOptimistic: async (borrowId: string) => {
     const prevBorrows = [...get().borrows];
     const targetBorrow = prevBorrows.find((b) => b.id === borrowId);
@@ -377,7 +467,6 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
 
     const newStatus = targetBorrow.status === 'pending' ? 'settled' : 'pending';
 
-    // Optimistic update
     set({
       borrows: prevBorrows.map((b) => (b.id === borrowId ? { ...b, status: newStatus } : b)),
       inlineError: null,
@@ -392,7 +481,6 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
       if (error) throw error;
       return { success: true };
     } catch (err: any) {
-      // Rollback
       set({
         borrows: prevBorrows,
         inlineError: `Failed to update borrow: ${err.message || 'Network error'}. Reverted.`,
@@ -401,7 +489,6 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
     }
   },
 
-  // 3. Optimistic Add Borrow
   addBorrowOptimistic: async (borrowData) => {
     const tempId = `temp_borrow_${Date.now()}`;
     const optimisticBorrow: Borrow = {
@@ -447,12 +534,10 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
     }
   },
 
-  // 4. Optimistic Set Budget
   setBudgetOptimistic: async (budgetData) => {
     const prevBudgets = [...get().budgets];
     const prevSummaries = [...get().budgetSummaries];
 
-    // Find if budget already exists for this category/month
     const existingIndex = prevBudgets.findIndex(
       (b) => b.category === budgetData.category && b.month === budgetData.month
     );
@@ -476,8 +561,7 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
     set({ budgets: updatedBudgets, inlineError: null });
 
     try {
-      // Upsert into Supabase
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('budgets')
         .upsert(
           {
@@ -493,7 +577,6 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
 
       if (error) throw error;
 
-      // Re-query budget summaries view
       const { data: summaryData } = await supabase
         .from('v_budget_summary')
         .select('*')
@@ -515,7 +598,6 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
     }
   },
 
-  // 5. Optimistic Create Account
   createAccountOptimistic: async (accData) => {
     const tempId = `temp_acc_${Date.now()}`;
     const optimisticAcc: Account = {
@@ -557,6 +639,107 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
         inlineError: `Could not create account: ${err.message || 'Network error'}. Rolled back.`,
       });
       return { success: false, error: err.message };
+    }
+  },
+
+  updateAccountOptimistic: async (accountId, updates) => {
+    const prevAccounts = [...get().accounts];
+    set({
+      accounts: prevAccounts.map((a) => (a.id === accountId ? { ...a, ...updates } : a)),
+      inlineError: null,
+    });
+
+    try {
+      const { error } = await supabase
+        .from('accounts')
+        .update({ ...updates, updated_at: new Date().toISOString() })
+        .eq('id', accountId);
+
+      if (error) throw error;
+      return { success: true };
+    } catch (err: any) {
+      set({
+        accounts: prevAccounts,
+        inlineError: `Could not update account: ${err.message || 'Network error'}`,
+      });
+      return { success: false, error: err.message };
+    }
+  },
+
+  deleteAccountOptimistic: async (accountId) => {
+    const prevAccounts = [...get().accounts];
+    set({
+      accounts: prevAccounts.filter((a) => a.id !== accountId),
+      inlineError: null,
+    });
+
+    try {
+      const { error } = await supabase.from('accounts').delete().eq('id', accountId);
+      if (error) throw error;
+      return { success: true };
+    } catch (err: any) {
+      set({
+        accounts: prevAccounts,
+        inlineError: `Could not delete account: ${err.message || 'Network error'}`,
+      });
+      return { success: false, error: err.message };
+    }
+  },
+
+  // Calibration Flow
+  calibrateAccountBalance: async (accountId, newBalance, logAsTransaction, userId) => {
+    const prevAccounts = [...get().accounts];
+    const targetAccount = prevAccounts.find((a) => a.id === accountId);
+    if (!targetAccount) return { success: false, error: 'Account not found' };
+
+    const oldBalance = Number(targetAccount.current_balance);
+    const diff = newBalance - oldBalance;
+
+    if (diff === 0) return { success: true };
+
+    if (logAsTransaction) {
+      const txType = diff > 0 ? 'income' : 'expense';
+      const absAmount = Math.abs(diff);
+
+      const res = await get().addTransactionOptimistic({
+        user_id: userId,
+        account_id: accountId,
+        type: txType,
+        amount: absAmount,
+        category: 'Adjustment',
+        note: `Manual balance calibration (${diff > 0 ? '+' : '-'}₹${absAmount.toLocaleString('en-IN')})`,
+        date: new Date().toISOString().substring(0, 10),
+        source: 'manual',
+      });
+
+      return res;
+    } else {
+      // Just adjust silently
+      set({
+        accounts: prevAccounts.map((a) =>
+          a.id === accountId ? { ...a, current_balance: newBalance } : a
+        ),
+        inlineError: null,
+      });
+
+      try {
+        const { error } = await supabase
+          .from('accounts')
+          .update({
+            current_balance: newBalance,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', accountId);
+
+        if (error) throw error;
+        return { success: true };
+      } catch (err: any) {
+        set({
+          accounts: prevAccounts,
+          inlineError: `Could not calibrate balance: ${err.message || 'Network error'}`,
+        });
+        return { success: false, error: err.message };
+      }
     }
   },
 }));

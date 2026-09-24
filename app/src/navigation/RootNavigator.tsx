@@ -3,14 +3,21 @@ import React, { useEffect } from 'react';
 import { View, StyleSheet } from 'react-native';
 import { ActivityIndicator } from 'react-native-paper';
 import { NavigationContainer } from '@react-navigation/native';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useAuthStore } from '../store/authStore';
 import { useFinanceStore } from '../store/financeStore';
+import { useSettingsStore } from '../store/settingsStore';
 import { AuthStack } from './AuthStack';
 import { MainTabs } from './MainTabs';
+import { SettingsScreen } from '../screens/main/SettingsScreen';
+import { AddTransactionScreen } from '../screens/main/AddTransactionScreen';
 import { COLORS } from '../theme/tokens';
+
+const AppStack = createNativeStackNavigator();
 
 export const RootNavigator = () => {
   const { session, user, isLoading, initializeAuth } = useAuthStore();
+  const { loadSettings, accent } = useSettingsStore();
   const {
     loadCachedData,
     fetchInitialData,
@@ -20,17 +27,13 @@ export const RootNavigator = () => {
 
   useEffect(() => {
     initializeAuth();
-  }, [initializeAuth]);
+    loadSettings();
+  }, [initializeAuth, loadSettings]);
 
   useEffect(() => {
     if (user) {
-      // 1. Load cached state immediately (optimistic UI rendering)
       loadCachedData();
-
-      // 2. Fetch fresh initial data from Supabase
       fetchInitialData(user.id);
-
-      // 3. Subscribe to Supabase Realtime channel
       subscribeRealtime(user.id);
     } else {
       unsubscribeRealtime();
@@ -44,14 +47,30 @@ export const RootNavigator = () => {
   if (isLoading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={COLORS.accent} />
+        <ActivityIndicator size="large" color={accent.value || COLORS.accent} />
       </View>
     );
   }
 
   return (
     <NavigationContainer>
-      {session ? <MainTabs /> : <AuthStack />}
+      {session ? (
+        <AppStack.Navigator screenOptions={{ headerShown: false }}>
+          <AppStack.Screen name="MainTabs" component={MainTabs} />
+          <AppStack.Screen
+            name="Settings"
+            component={SettingsScreen}
+            options={{ animation: 'slide_from_right' }}
+          />
+          <AppStack.Screen
+            name="AddTransaction"
+            component={AddTransactionScreen}
+            options={{ animation: 'slide_from_bottom' }}
+          />
+        </AppStack.Navigator>
+      ) : (
+        <AuthStack />
+      )}
     </NavigationContainer>
   );
 };

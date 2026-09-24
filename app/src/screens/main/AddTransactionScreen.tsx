@@ -13,6 +13,7 @@ import {
 import { TextInput } from 'react-native-paper';
 import { useAuthStore } from '../../store/authStore';
 import { useFinanceStore } from '../../store/financeStore';
+import { useSettingsStore } from '../../store/settingsStore';
 import { COLORS, SPACING, TYPOGRAPHY } from '../../theme/tokens';
 import { TactileButton } from '../../components/TactileButton';
 import { TransactionType } from '../../types/database';
@@ -21,22 +22,11 @@ interface AddTransactionScreenProps {
   navigation: any;
 }
 
-const EXPENSE_CATEGORIES = [
-  'Food & Dining',
-  'Groceries',
-  'Shopping',
-  'Transport',
-  'Bills & Utilities',
-  'Rent',
-  'Entertainment',
-  'Health',
-  'Other',
-];
-
 const INCOME_CATEGORIES = [
   'Salary',
   'Freelance',
   'Investments',
+  'Allowance',
   'Gift',
   'Refund',
   'Other',
@@ -52,34 +42,38 @@ const BORROW_CATEGORIES = [
 
 export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navigation }) => {
   const { user } = useAuthStore();
-  const { accounts, addTransactionOptimistic, addBorrowOptimistic } = useFinanceStore();
+  const { accent } = useSettingsStore();
+  const {
+    accounts,
+    categories,
+    addTransactionOptimistic,
+    addBorrowOptimistic,
+  } = useFinanceStore();
 
   const [type, setType] = useState<TransactionType>('expense');
   const [amount, setAmount] = useState('');
   const [selectedAccountId, setSelectedAccountId] = useState(accounts[0]?.id || '');
-  const [category, setCategory] = useState(EXPENSE_CATEGORIES[0]);
+  const [category, setCategory] = useState(categories[0] || 'Food');
   const [note, setNote] = useState('');
   const [personName, setPersonName] = useState('');
   const [date, setDate] = useState(new Date().toISOString().substring(0, 10)); // YYYY-MM-DD
   const [formError, setFormError] = useState<string | null>(null);
 
-  // Synchronize initial account if loaded late
   React.useEffect(() => {
     if (!selectedAccountId && accounts.length > 0) {
       setSelectedAccountId(accounts[0].id);
     }
   }, [accounts, selectedAccountId]);
 
-  // Adjust categories when type changes
   const handleTypeChange = (newType: TransactionType) => {
     setType(newType);
-    if (newType === 'expense') setCategory(EXPENSE_CATEGORIES[0]);
+    if (newType === 'expense') setCategory(categories[0] || 'Food');
     else if (newType === 'income') setCategory(INCOME_CATEGORIES[0]);
     else setCategory(BORROW_CATEGORIES[0]);
   };
 
   const getAvailableCategories = () => {
-    if (type === 'expense') return EXPENSE_CATEGORIES;
+    if (type === 'expense') return categories;
     if (type === 'income') return INCOME_CATEGORIES;
     return BORROW_CATEGORIES;
   };
@@ -92,11 +86,11 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
       return;
     }
     if (!selectedAccountId) {
-      setFormError('Please select an account');
+      setFormError('Please select a source account to deduct from');
       return;
     }
     if ((type === 'borrow_given' || type === 'borrow_taken') && !personName.trim()) {
-      setFormError('Please enter person name for borrow');
+      setFormError('Please enter person name for borrow entry');
       return;
     }
 
@@ -126,17 +120,30 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
       });
     }
 
-    // 3. Reset form and navigate to Dashboard immediately (non-blocking)
+    // 3. Reset form and navigate back immediately (non-blocking)
     setAmount('');
     setNote('');
     setPersonName('');
-    navigation.navigate('Dashboard');
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+    } else {
+      navigation.navigate('Dashboard');
+    }
   };
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.header}>
+        {navigation.canGoBack() && (
+          <TouchableOpacity
+            onPress={() => navigation.goBack()}
+            style={styles.backBtn}
+          >
+            <Text style={[styles.backText, { color: accent.value }]}>‹ Cancel</Text>
+          </TouchableOpacity>
+        )}
         <Text style={styles.headerTitle}>LOG TRANSACTION</Text>
+        {navigation.canGoBack() && <View style={styles.headerSpacer} />}
       </View>
 
       <KeyboardAvoidingView
@@ -175,7 +182,7 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
                       styles.typeTabText,
                       active && styles.typeTabTextActive,
                       active && item.key === 'expense' && { color: COLORS.alert },
-                      active && item.key === 'income' && { color: COLORS.accent },
+                      active && item.key === 'income' && { color: accent.value },
                     ]}
                   >
                     {item.label}
@@ -187,7 +194,7 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
 
           {/* 2. Hero Amount Input */}
           <View style={styles.amountContainer}>
-            <Text style={styles.currencyPrefix}>₹</Text>
+            <Text style={[styles.currencyPrefix, { color: accent.value }]}>₹</Text>
             <TextInput
               value={amount}
               onChangeText={(text) => {
@@ -204,9 +211,9 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
             />
           </View>
 
-          {/* 3. Account Selector */}
+          {/* 3. Account / Money Source Picker (Source to deduct from) */}
           <View style={styles.section}>
-            <Text style={styles.sectionLabel}>ACCOUNT</Text>
+            <Text style={styles.sectionLabel}>MONEY SOURCE (DEDUCT FROM)</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
               {accounts.map((acc) => {
                 const active = selectedAccountId === acc.id;
@@ -217,9 +224,23 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
                       setFormError(null);
                       setSelectedAccountId(acc.id);
                     }}
-                    style={[styles.chip, active && styles.chipActive]}
+                    style={[
+                      styles.chip,
+                      active && {
+                        borderColor: accent.value,
+                        backgroundColor: accent.muted,
+                      },
+                    ]}
                   >
-                    <Text style={[styles.chipText, active && styles.chipTextActive]}>
+                    <Text style={styles.chipIcon}>
+                      {acc.type === 'cash' ? '💵' : acc.type === 'credit_card' ? '💳' : '🏦'}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.chipText,
+                        active && { color: accent.value, fontWeight: '700' },
+                      ]}
+                    >
                       {acc.name}
                     </Text>
                   </TouchableOpacity>
@@ -229,10 +250,10 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
           </View>
 
           {/* If borrow, show Person Name input */}
-          {type === 'borrow_given' || type === 'borrow_taken' ? (
+          {(type === 'borrow_given' || type === 'borrow_taken') && (
             <View style={styles.section}>
               <Text style={styles.sectionLabel}>
-                {type === 'borrow_given' ? 'LENT TO (PERSON NAME)' : 'BORROWED FROM'}
+                {type === 'borrow_given' ? 'LENT TO (PERSON NAME)' : 'BORROWED FROM (PERSON NAME)'}
               </Text>
               <TextInput
                 value={personName}
@@ -241,12 +262,12 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
                 placeholderTextColor={COLORS.textMuted}
                 mode="outlined"
                 outlineColor={COLORS.border}
-                activeOutlineColor={COLORS.accent}
+                activeOutlineColor={accent.value}
                 textColor={COLORS.textPrimary}
                 style={styles.textInput}
               />
             </View>
-          ) : null}
+          )}
 
           {/* 4. Category Selector */}
           <View style={styles.section}>
@@ -258,12 +279,18 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
                   <TouchableOpacity
                     key={cat}
                     onPress={() => setCategory(cat)}
-                    style={[styles.categoryPill, active && styles.categoryPillActive]}
+                    style={[
+                      styles.categoryPill,
+                      active && {
+                        borderColor: accent.value,
+                        backgroundColor: accent.muted,
+                      },
+                    ]}
                   >
                     <Text
                       style={[
                         styles.categoryPillText,
-                        active && styles.categoryPillTextActive,
+                        active && { color: accent.value, fontWeight: '700' },
                       ]}
                     >
                       {cat}
@@ -283,7 +310,7 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
                   onPress={() => setDate(new Date().toISOString().substring(0, 10))}
                   style={styles.quickDateBtn}
                 >
-                  <Text style={styles.quickDateText}>Today</Text>
+                  <Text style={[styles.quickDateText, { color: accent.value }]}>Today</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   onPress={() => {
@@ -293,7 +320,7 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
                   }}
                   style={styles.quickDateBtn}
                 >
-                  <Text style={styles.quickDateText}>Yesterday</Text>
+                  <Text style={[styles.quickDateText, { color: accent.value }]}>Yesterday</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -303,7 +330,7 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
               placeholder="YYYY-MM-DD"
               mode="outlined"
               outlineColor={COLORS.border}
-              activeOutlineColor={COLORS.accent}
+              activeOutlineColor={accent.value}
               textColor={COLORS.textPrimary}
               style={styles.textInput}
             />
@@ -315,18 +342,21 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
             <TextInput
               value={note}
               onChangeText={setNote}
-              placeholder="e.g. Team lunch, Metro card recharge"
+              placeholder="e.g. Lunch with friends, Book purchase"
               placeholderTextColor={COLORS.textMuted}
               mode="outlined"
               outlineColor={COLORS.border}
-              activeOutlineColor={COLORS.accent}
+              activeOutlineColor={accent.value}
               textColor={COLORS.textPrimary}
               style={styles.textInput}
             />
           </View>
 
           {/* Submit Button */}
-          <TactileButton onPress={handleSubmit} style={styles.submitBtn}>
+          <TactileButton
+            onPress={handleSubmit}
+            style={[styles.submitBtn, { backgroundColor: accent.value }]}
+          >
             <Text style={styles.submitBtnText}>Save Transaction</Text>
           </TactileButton>
         </ScrollView>
@@ -341,17 +371,30 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.background,
   },
   header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: SPACING.lg,
     paddingTop: SPACING.md,
     paddingBottom: SPACING.sm,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
   },
+  backBtn: {
+    paddingVertical: SPACING.xs,
+  },
+  backText: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
   headerTitle: {
-    color: COLORS.accent,
-    fontSize: 12,
+    color: COLORS.textPrimary,
+    fontSize: 14,
     fontWeight: '800',
-    letterSpacing: 1.2,
+    letterSpacing: 1,
+  },
+  headerSpacer: {
+    width: 48,
   },
   keyboardContainer: {
     flex: 1,
@@ -413,7 +456,6 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.lg,
   },
   currencyPrefix: {
-    color: COLORS.accent,
     fontSize: 28,
     fontWeight: '800',
     marginRight: SPACING.xs,
@@ -438,6 +480,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
   },
   chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: COLORS.surface,
     borderColor: COLORS.border,
     borderWidth: 1,
@@ -445,19 +489,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.sm,
     marginRight: SPACING.sm,
+    gap: 6,
   },
-  chipActive: {
-    borderColor: COLORS.accent,
-    backgroundColor: COLORS.surfaceLight,
+  chipIcon: {
+    fontSize: 14,
   },
   chipText: {
     color: COLORS.textSecondary,
     fontSize: 13,
     fontWeight: '500',
-  },
-  chipTextActive: {
-    color: COLORS.accent,
-    fontWeight: '700',
   },
   categoriesGrid: {
     flexDirection: 'row',
@@ -472,17 +512,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.sm,
   },
-  categoryPillActive: {
-    borderColor: COLORS.accent,
-    backgroundColor: COLORS.surfaceLight,
-  },
   categoryPillText: {
     color: COLORS.textSecondary,
     fontSize: 12,
-  },
-  categoryPillTextActive: {
-    color: COLORS.accent,
-    fontWeight: '600',
   },
   dateHeader: {
     flexDirection: 'row',
@@ -501,7 +533,6 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   quickDateText: {
-    color: COLORS.accent,
     fontSize: 11,
     fontWeight: '600',
   },
@@ -509,7 +540,6 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.surface,
   },
   submitBtn: {
-    backgroundColor: COLORS.accent,
     borderRadius: 8,
     paddingVertical: SPACING.md,
     alignItems: 'center',

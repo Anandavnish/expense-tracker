@@ -11,6 +11,7 @@ import {
 import { TextInput } from 'react-native-paper';
 import { useAuthStore } from '../../store/authStore';
 import { useFinanceStore } from '../../store/financeStore';
+import { useSettingsStore } from '../../store/settingsStore';
 import { COLORS, SPACING, TYPOGRAPHY } from '../../theme/tokens';
 import { TactileButton } from '../../components/TactileButton';
 import { InlineError } from '../../components/InlineError';
@@ -18,6 +19,7 @@ import { Borrow } from '../../types/database';
 
 export const BorrowsScreen = () => {
   const { user } = useAuthStore();
+  const { accent } = useSettingsStore();
   const {
     borrows,
     toggleSettleBorrowOptimistic,

@@ -13,30 +13,25 @@ import {
 import { ProgressBar, TextInput } from 'react-native-paper';
 import { useAuthStore } from '../../store/authStore';
 import { useFinanceStore } from '../../store/financeStore';
+import { useSettingsStore } from '../../store/settingsStore';
 import { COLORS, SPACING, TYPOGRAPHY } from '../../theme/tokens';
 import { TactileButton } from '../../components/TactileButton';
 import { InlineError } from '../../components/InlineError';
 
-const POPULAR_CATEGORIES = [
-  'Overall Budget',
-  'Food & Dining',
-  'Groceries',
-  'Shopping',
-  'Transport',
-  'Bills & Utilities',
-  'Rent',
-  'Entertainment',
-  'Health',
-];
-
 export const BudgetsScreen = () => {
   const { user } = useAuthStore();
-  const { budgetSummaries, setBudgetOptimistic, inlineError, setInlineError } =
-    useFinanceStore();
+  const { accent } = useSettingsStore();
+  const {
+    budgetSummaries,
+    categories,
+    selectedMonth,
+    setBudgetOptimistic,
+    inlineError,
+    setInlineError,
+  } = useFinanceStore();
 
-  const currentMonth = new Date().toISOString().substring(0, 7); // 'YYYY-MM'
-
-  const [selectedCategory, setSelectedCategory] = useState(POPULAR_CATEGORIES[0]);
+  const availableCategories = ['Overall Budget', ...categories];
+  const [selectedCategory, setSelectedCategory] = useState('Overall Budget');
   const [limitAmount, setLimitAmount] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -60,7 +55,7 @@ export const BudgetsScreen = () => {
       user_id: user.id,
       category: categoryToSave,
       monthly_limit: numLimit,
-      month: currentMonth,
+      month: selectedMonth,
     });
 
     setLimitAmount('');
@@ -70,21 +65,21 @@ export const BudgetsScreen = () => {
   const getStatusColor = (pct: number) => {
     if (pct >= 100) return COLORS.alert;
     if (pct >= 80) return COLORS.warning;
-    return COLORS.accent;
+    return accent.value;
   };
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.topHeader}>
         <View>
-          <Text style={styles.appTitle}>BUDGETS</Text>
-          <Text style={styles.monthText}>Current Period: {currentMonth}</Text>
+          <Text style={[styles.appTitle, { color: accent.value }]}>BUDGETS</Text>
+          <Text style={styles.monthText}>Current Period: {selectedMonth}</Text>
         </View>
         <TouchableOpacity
           onPress={() => setShowForm(!showForm)}
           style={styles.addBudgetBtn}
         >
-          <Text style={styles.addBudgetText}>
+          <Text style={[styles.addBudgetText, { color: accent.value }]}>
             {showForm ? 'Cancel' : '+ Set Budget'}
           </Text>
         </TouchableOpacity>
@@ -95,7 +90,7 @@ export const BudgetsScreen = () => {
       <ScrollView contentContainerStyle={styles.scrollContent}>
         {/* Set Budget Form (Collapsible) */}
         {showForm ? (
-          <View style={styles.formCard}>
+          <View style={[styles.formCard, { borderColor: accent.value }]}>
             <Text style={styles.formTitle}>CONFIGURE MONTHLY LIMIT</Text>
             {formError ? (
               <View style={styles.errorBox}>
@@ -109,13 +104,19 @@ export const BudgetsScreen = () => {
               showsHorizontalScrollIndicator={false}
               style={styles.catChipsScroll}
             >
-              {POPULAR_CATEGORIES.map((cat) => {
+              {availableCategories.map((cat) => {
                 const active = selectedCategory === cat;
                 return (
                   <TouchableOpacity
                     key={cat}
                     onPress={() => setSelectedCategory(cat)}
-                    style={[styles.catChip, active && styles.catChipActive]}
+                    style={[
+                      styles.catChip,
+                      active && {
+                        borderColor: accent.value,
+                        backgroundColor: accent.muted,
+                      },
+                    ]}
                   >
                     <Text
                       style={[
@@ -212,7 +213,7 @@ export const BudgetsScreen = () => {
           <View style={styles.emptyCard}>
             <Text style={styles.emptyTitle}>No overall budget configured</Text>
             <Text style={styles.emptySubtitle}>
-              Tap "+ Set Budget" above to set a target for {currentMonth}.
+              Tap "+ Set Budget" above to set a target for {selectedMonth}.
             </Text>
           </View>
         )}

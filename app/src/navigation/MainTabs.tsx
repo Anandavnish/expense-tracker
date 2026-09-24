@@ -1,16 +1,17 @@
 // src/navigation/MainTabs.tsx
 import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Text, StyleSheet } from 'react-native';
+import { Text } from 'react-native';
 import { DashboardScreen } from '../screens/main/DashboardScreen';
-import { AddTransactionScreen } from '../screens/main/AddTransactionScreen';
+import { TransactionsScreen } from '../screens/main/TransactionsScreen';
 import { BudgetsScreen } from '../screens/main/BudgetsScreen';
 import { BorrowsScreen } from '../screens/main/BorrowsScreen';
+import { useSettingsStore } from '../store/settingsStore';
 import { COLORS, SPACING } from '../theme/tokens';
 
 export type MainTabsParamList = {
   Dashboard: undefined;
-  AddTransaction: undefined;
+  Transactions: undefined;
   Budgets: undefined;
   Borrows: undefined;
 };
@@ -18,6 +19,8 @@ export type MainTabsParamList = {
 const Tab = createBottomTabNavigator<MainTabsParamList>();
 
 export const MainTabs = () => {
+  const { accent } = useSettingsStore();
+
   return (
     <Tab.Navigator
       screenOptions={{
@@ -30,7 +33,7 @@ export const MainTabs = () => {
           paddingBottom: SPACING.xs,
           paddingTop: SPACING.xs,
         },
-        tabBarActiveTintColor: COLORS.accent,
+        tabBarActiveTintColor: accent.value,
         tabBarInactiveTintColor: COLORS.textMuted,
         tabBarLabelStyle: {
           fontSize: 11,
@@ -47,11 +50,11 @@ export const MainTabs = () => {
         }}
       />
       <Tab.Screen
-        name="AddTransaction"
-        component={AddTransactionScreen}
+        name="Transactions"
+        component={TransactionsScreen}
         options={{
-          tabBarLabel: 'Add',
-          tabBarIcon: ({ color }) => <Text style={{ color, fontSize: 20 }}>➕</Text>,
+          tabBarLabel: 'Transactions',
+          tabBarIcon: ({ color }) => <Text style={{ color, fontSize: 18 }}>📑</Text>,
         }}
       />
       <Tab.Screen
