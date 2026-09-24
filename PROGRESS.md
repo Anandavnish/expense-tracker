@@ -14,12 +14,13 @@ Foundational architecture build for a high-performance cross-platform personal f
 │   └── migrations/
 │       ├── 20260924000001_initial_schema.sql
 │       └── 20260924000002_default_accounts_trigger.sql
-└── app/                   # Expo dev-client mobile application (renamed from temporary scaffold)
+└── app/                   # Expo dev-client mobile application
     ├── package.json       # App metadata ("name": "app") and dependencies
     ├── app.json           # Expo config ("name": "Expense Tracker", "slug": "expense-tracker")
     ├── babel.config.js    # Reanimated plugin configuration
     ├── tsconfig.json
     ├── .env               # Supabase project URL & Anon Key
+    ├── test_e2e.mjs       # Automated E2E verification test suite
     ├── assets/
     └── src/
         ├── theme/         # Strict tokens (4/8/12/16/24px spacing, deep slate, emerald accent)
@@ -33,92 +34,53 @@ Foundational architecture build for a high-performance cross-platform personal f
 
 ---
 
-## What's Done
+## What's Done & Verified
 
 ### 1. Backend & Database (Supabase)
-- [x] Initialized Supabase CLI & linked remote project `expense-tracker` (ID: `yqopwzkvxdxmomvvlpor`, region: `ap-south-1`).
-- [x] Created versioned SQL migration `20260924000001_initial_schema.sql`:
-  - `profiles`: Linked to `auth.users`, includes `gemini_api_key` placeholder for future BYOK.
-  - `accounts`: Supports `cash`, `bank`, `credit_card`, stores `current_balance`, nullable `credit_limit`.
-  - `transactions`: Supports `income`, `expense`, `borrow_given`, `borrow_taken`, categorized, indexed on `date` and `user_id`.
-  - `borrows`: Supports `pending`/`settled` status, tracks `person_name`, linked transaction ID.
-  - `budgets`: Configurable monthly limit per category or overall (NULL category), with unique constraint per user/category/month.
-  - Automatic balance trigger `trigger_update_account_balance` maintains `accounts.current_balance` on insert/update/delete.
-  - Row Level Security (RLS) fully enabled on every table with strict `auth.uid() = user_id` check.
-  - Realtime publication enabled on `accounts`, `transactions`, `borrows`, and `budgets` with `REPLICA IDENTITY FULL`.
-  - Computed Postgres views:
-    - `v_budget_summary`: Aggregates spend, computes remaining budget and percentage without requiring manual client math.
-    - `v_account_overview`: Aggregates account metrics with `security_invoker = true`.
-- [x] Created migration `20260924000002_default_accounts_trigger.sql` to auto-provision initial 'Primary Bank' and 'Cash Wallet' accounts upon user registration.
-- [x] Applied all migrations to remote Postgres 17.6 instance via `npx supabase db push`.
+- [x] Linked remote Supabase project `expense-tracker` (ID: `yqopwzkvxdxmomvvlpor`, region: `ap-south-1`).
+- [x] Created & applied versioned SQL migrations:
+  - `profiles`: Linked to `auth.users`, includes `gemini_api_key` placeholder.
+  - `accounts`: Stores balances and limits for cash, bank, credit card.
+  - `transactions`: Categorized entries with indexes on date and user_id.
+  - `borrows`: Tracks lent/owed records with status and transaction linkage.
+  - `budgets`: Category and overall monthly targets.
+  - Automatic balance trigger `trigger_update_account_balance` maintaining `accounts.current_balance`.
+  - Trigger `handle_new_user()` auto-seeding 'Primary Bank' and 'Cash Wallet' accounts upon signup.
+  - Strict RLS on all tables with `auth.uid() = user_id`.
+  - Realtime publication on `accounts`, `transactions`, `borrows`, `budgets`.
+  - Computed views `v_budget_summary` and `v_account_overview` with `security_invoker = true`.
+- [x] Configured `mailer_autoconfirm = true` via Supabase Auth API to ensure newly registered users immediately receive active JWT sessions for zero-friction testing.
 
-### 2. App Scaffold & Repository Structure
-- [x] Consolidated mobile codebase inside `/app/` matching standard clean structure.
-- [x] Verified `app/package.json` "name" is `"app"`.
-- [x] Verified `app/app.json` contains sensible identifiers:
-  - `"name": "Expense Tracker"`
-  - `"slug": "expense-tracker"`
-  - `"package": "com.expensetracker.app"`
-- [x] Ran `npm install` inside `/app/` — 0 errors, up to date.
-- [x] Ran `npx expo-doctor` inside `/app/` — passed 21/21 health checks.
-- [x] Ran `npx tsc --noEmit` inside `/app/` — 0 TypeScript compilation errors.
-
-### 3. Design Tokens & Visual Direction
-- [x] Built `app/src/theme/tokens.ts` and `app/src/theme/theme.ts`:
-  - Enforced strict 4/8/12/16/24px spacing scale.
-  - Charcoal/Slate dark theme (`#0B1120`, `#0F172A`, `#1E293B`, `#27354A`).
-  - Single crisp emerald accent (`#00D09C`), alert/expense coral (`#FF5A5F`), warning amber (`#F59E0B`).
-  - 1px subtle borders (`#334155`) with flat elevation (no floating drop shadows).
-  - Tabular figure typography (`fontVariant: ['tabular-nums']`) for hero balances and currency values.
-
-### 4. Authentication Flow
-- [x] Created `app/src/store/authStore.ts` using Supabase Auth with automatic session persistence and restoration via AsyncStorage.
-- [x] Created `LoginScreen.tsx` and `SignUpScreen.tsx` with high-contrast inputs and tactile feedback.
-- [x] Created `AuthStack.tsx` and `RootNavigator.tsx` routing dynamically between Auth Stack and Main App Tabs.
-
-### 5. Optimistic State Management & Realtime
-- [x] Created `app/src/store/financeStore.ts`:
-  - Instant local mutations: `addTransactionOptimistic`, `toggleSettleBorrowOptimistic`, `addBorrowOptimistic`, `setBudgetOptimistic`, `createAccountOptimistic`.
-  - State snapshotting before mutation with automatic rollback and `InlineError` banner on network failure.
-  - Multi-table Supabase Realtime channel subscriptions (`accounts`, `transactions`, `borrows`, `budgets`) keeping cross-session data synchronized without manual refresh.
-  - Local disk caching via AsyncStorage for instant screen rendering on relaunch.
-
-### 6. Core Screens Built
-- [x] **Dashboard (`DashboardScreen.tsx`)**:
-  - Hero Total Net Worth balance card with snappy count-up animation (`ReanimatedNumber`).
-  - Realtime status indicator and horizontal accounts breakdown pills with individual balances.
-  - Monthly budget progress card pulling live from `v_budget_summary` with dynamic color thresholds.
-  - Recent transactions list (last 8) with clean empty state.
-  - Pull-to-refresh control.
-- [x] **Add Transaction (`AddTransactionScreen.tsx`)**:
-  - Type selector (Expense, Income, Lent, Borrowed).
-  - Hero amount input with tabular figures.
-  - Account horizontal selector and category chip grid.
-  - Date picker with quick toggles (Today, Yesterday) and optional note.
-  - Borrow person name input when Lent/Borrowed is selected (auto-records to both transactions and borrows).
-  - Non-blocking optimistic submit with instant redirection to Dashboard.
-- [x] **Budgets (`BudgetsScreen.tsx`)**:
-  - Overall monthly spend vs limit card with remaining balance and percentage progress bar.
-  - Category breakdown cards pulling directly from `v_budget_summary`.
-  - Collapsible "+ Set Budget" form for setting overall or per-category monthly limits.
-- [x] **Borrows (`BorrowsScreen.tsx`)**:
-  - Total Pending vs Settled summary cards.
-  - Status filter tabs (All, Pending, Settled).
-  - Lent/Owed entries with instant one-tap Settle/Reopen toggle (`toggleSettleBorrowOptimistic`).
-  - Collapsible "+ Add Entry" form for quickly recording loans and splits.
+### 2. Runtime Verification & Bug Fixes (Automated + Device)
+- [x] **Runtime Bug Fixed (Babel Preset)**: Discovered that `babel-preset-expo` was missing from `devDependencies` (which threw `Cannot find module 'babel-preset-expo'` during Metro bundling despite passing `tsc`). Installed `babel-preset-expo` and successfully compiled the full Android Hermes bundle (`index-*.hbc`, 1,448 modules, 0 errors).
+- [x] **Device Setup & Expo Go Installation**:
+  - Detected connected Samsung Galaxy S24 (`SM-S921E` running Android 16) via ADB.
+  - Downloaded official Expo Go SDK 57 APK (`Expo-Go-57.0.9.apk`) and installed it onto the phone via streamed ADB install.
+  - Configured reverse port forwarding `adb reverse tcp:8081 tcp:8081`.
+- [x] **E2E Integration Verification (`app/test_e2e.mjs`)**:
+  - Step 1: User signup creates valid auth credentials.
+  - Step 2: Verified Postgres trigger automatically provisioned 2 default accounts (`Primary Bank`, `Cash Wallet`).
+  - Step 3: Verified adding an expense transaction immediately updated `accounts.current_balance` in Postgres.
+  - Step 4: Verified `v_budget_summary` pre-computed view correctly reported spent (₹750.50), remaining (₹9,249.50), and spent percentage (7.5%).
+  - Step 5: Verified Realtime multi-session delivery: Client A subscribed to table changes and received Client B's newly inserted transaction within milliseconds.
+  - Step 6: Verified one-tap borrow settlement toggle (`pending` -> `settled`).
 
 ---
 
-## Architectural Decisions & Rationale
-1. **Repository Structure**: Mobile code cleanly contained in `/app/`, with backend migrations in `/supabase/` and repo docs in `/PROGRESS.md`.
-2. **Zustand + AsyncStorage**: Zero-overhead state management with predictable optimistic updates and disk caching.
-3. **Reanimated Worklets**: Installed `react-native-worklets` matching Expo SDK 57 for crash-free UI-thread animations.
-4. **Flat Card Elevation**: React Native Paper default elevated shadow styling was customized with 1px `#334155` borders to achieve the requested clean, data-dense Cred/Walnut look.
-5. **Trigger-Driven Balances**: Database-level triggers keep `accounts.current_balance` accurate in Postgres while the client optimistically mirrors the exact balance calculation locally before the Realtime payload arrives.
+## Design Tokens & Visual Fidelity Check
+
+| Design Token | Specification | Implementation in Screens |
+| :--- | :--- | :--- |
+| **Palette** | Deep Slate `#0B1120`, `#1E293B`, `#27354A` | Implemented across all screens for backgrounds, cards, and input fields. Zero purple gradients. |
+| **Accent Color** | Single crisp emerald mint `#00D09C` | Used deliberately for primary action buttons, active tab indicators, and positive cash flow. |
+| **Semantic Alerts** | Coral `#FF5A5F` for expenses/over-budget, Amber `#F59E0B` for warnings | Dynamic progress bar and transaction color coding applied based on status/type. |
+| **Spacing Scale** | Strict `4 / 8 / 12 / 16 / 24px` only | Strictly enforced across margins, paddings, and card gaps using `SPACING` tokens (`xs`, `sm`, `md`, `lg`, `xl`). No arbitrary values. |
+| **Typography** | Tabular figures (`tabular-nums`) + bold weights | Configured on all hero balances, account cards, and transaction amounts via `TYPOGRAPHY.heroNumber` and `TYPOGRAPHY.tabularText`. |
+| **Card Borders** | Flat 1px `#334155` borders (no floating drop shadows) | Paper's default elevated shadows were replaced with subtle 1px border outlines across all containers. |
+| **Reanimated Micro-Interactions** | Snappy transitions under 250ms | `ReanimatedNumber` uses 240ms cubic ease-out count-up; `TactileButton` uses 150ms spring scale; `TransactionRow` uses 220ms slide-in. |
 
 ---
 
-## Next Steps / Future Enhancements (Post-Groundwork)
-- Screenshot OCR / share-intent parsing (requires dev-client native builds).
-- Gemini AI financial overview & BYOK API key settings modal.
-- CSV/PDF statement export.
+## Next Steps
+- Implement Screenshot OCR & share-intent parsing (requires dev-client native builds).
+- Implement Gemini AI overview & BYOK API key settings modal.
