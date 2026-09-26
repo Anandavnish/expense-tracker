@@ -188,6 +188,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
 
   const onRefresh = async () => {
     if (!user) return;
+    setInlineError(null);
     setRefreshing(true);
     await fetchInitialData(user.id);
     setRefreshing(false);

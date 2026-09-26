@@ -87,10 +87,12 @@ Foundational architecture build for a high-performance cross-platform personal f
   - *Accent Palette Picker*: 6 swatches (Emerald `#00D09C`, Cyan `#06B6D4`, Amber `#F59E0B`, Rose `#F43F5E`, Blue `#3B82F6`, Violet `#8B5CF6`).
   - *Placeholders*: AI BYOK (Gemini API key), CSV Data Export, and Custom Category Manager.
   - *Account Info & Sign Out*: User email display and secure session termination.
-- [x] **AddTransactionScreen Updated**:
-  - Connected source deduction picker (choosing which Money Source account to deduct/credit).
-  - Seeded student categories picker.
-  - Dynamic accent coloring throughout.
+- [x] **AddTransactionScreen Updated (Wrapping Grid & Current-Month Calendar Picker)**:
+  - *Money Sources (Multi-Line Wrapping Grid)*: Eliminated the horizontal scroll row. Money sources now wrap naturally onto the next line in a responsive 2-column grid (`moneySourcesGrid`, `sourceCard`), displaying account icon badge, account name, balance/due, and active checkmark.
+  - *Default Calendar Date Picker*: Installed `@react-native-community/datetimepicker` (SDK 57 compatible). Clicking the date card opens the native Material calendar picker on Android (or modal picker on iOS).
+  - *Current Running Month Restriction*: Date bounds are strictly enforced to the current month (`minimumDate` = 1st of month, `maximumDate` = end of month). Past/future months are disabled and greyed out.
+  - *Auto-fill Today in Local Time*: Defaults to today using local timezone formatting (`YYYY-MM-DD`). "Yesterday" quick toggle is conditionally available only when yesterday falls within the current running month.
+  - *Form Validation*: Rejects any manually manipulated dates outside the active month.
 - [x] **Navigation Stack (`RootNavigator` & `MainTabs`)**:
   - Updated `AppStack` with `MainTabs` (`Dashboard`, `Transactions`, `Budgets`, `Borrows`), `Settings`, and `AddTransaction`.
   - Automatic `loadSettings()` invocation on app boot.

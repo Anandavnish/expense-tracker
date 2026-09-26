@@ -8,7 +8,6 @@ import { TransactionsScreen } from '../screens/main/TransactionsScreen';
 import { BudgetsScreen } from '../screens/main/BudgetsScreen';
 import { BorrowsScreen } from '../screens/main/BorrowsScreen';
 import { useSettingsStore } from '../store/settingsStore';
-import { COLORS, SPACING } from '../theme/tokens';
 
 export type MainTabsParamList = {
   Dashboard: undefined;
@@ -20,24 +19,24 @@ export type MainTabsParamList = {
 const Tab = createBottomTabNavigator<MainTabsParamList>();
 
 export const MainTabs = () => {
-  const { accent } = useSettingsStore();
+  const { accent, colors } = useSettingsStore();
   const insets = useSafeAreaInsets();
 
   return (
     <Tab.Navigator
       screenOptions={{
         headerShown: false,
-        sceneStyle: { backgroundColor: COLORS.background },
+        sceneStyle: { backgroundColor: colors.background },
         tabBarStyle: {
-          backgroundColor: COLORS.surface,
-          borderTopColor: COLORS.border,
+          backgroundColor: colors.surface,
+          borderTopColor: colors.border,
           borderTopWidth: 1,
           height: 56 + Math.max(insets.bottom, 8),
           paddingBottom: Math.max(insets.bottom, 8),
           paddingTop: 6,
         },
         tabBarActiveTintColor: accent.hex,
-        tabBarInactiveTintColor: COLORS.textMuted,
+        tabBarInactiveTintColor: colors.textMuted,
         tabBarLabelStyle: {
           fontSize: 11,
           fontWeight: '600',
@@ -49,7 +48,7 @@ export const MainTabs = () => {
         component={DashboardScreen}
         options={{
           tabBarLabel: 'Dashboard',
-          tabBarIcon: ({ color, size, focused }) => (
+          tabBarIcon: ({ color, focused }) => (
             <Ionicons
               name={focused ? 'grid' : 'grid-outline'}
               size={20}
@@ -63,7 +62,7 @@ export const MainTabs = () => {
         component={TransactionsScreen}
         options={{
           tabBarLabel: 'Transactions',
-          tabBarIcon: ({ color, size, focused }) => (
+          tabBarIcon: ({ color, focused }) => (
             <Ionicons
               name={focused ? 'receipt' : 'receipt-outline'}
               size={20}
@@ -77,7 +76,7 @@ export const MainTabs = () => {
         component={BudgetsScreen}
         options={{
           tabBarLabel: 'Budgets',
-          tabBarIcon: ({ color, size, focused }) => (
+          tabBarIcon: ({ color, focused }) => (
             <Ionicons
               name={focused ? 'pie-chart' : 'pie-chart-outline'}
               size={20}
@@ -91,7 +90,7 @@ export const MainTabs = () => {
         component={BorrowsScreen}
         options={{
           tabBarLabel: 'Borrows',
-          tabBarIcon: ({ color, size, focused }) => (
+          tabBarIcon: ({ color, focused }) => (
             <Ionicons
               name={focused ? 'swap-horizontal' : 'swap-horizontal-outline'}
               size={20}

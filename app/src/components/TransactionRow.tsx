@@ -4,8 +4,8 @@ import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { Transaction, TransactionType } from '../types/database';
-import { COLORS, SPACING, TYPOGRAPHY } from '../theme/tokens';
-import { useSettingsStore } from '../store/settingsStore';
+import { SPACING, TYPOGRAPHY } from '../theme/tokens';
+import { useAppTheme } from '../theme/useAppTheme';
 import { getCategoryIcon, getCategoryColor } from '../utils/categoryIcons';
 
 export interface TransactionRowProps {
@@ -33,24 +33,30 @@ export const TransactionRow: React.FC<TransactionRowProps> = ({
   showActions = true,
 }) => {
   const navigation = useNavigation<any>();
-  const { accent } = useSettingsStore();
+  const { colors, accent } = useAppTheme();
 
   const isIncome = transaction.type === 'income';
   const isExpense = transaction.type === 'expense';
   const isBorrowTaken = transaction.type === 'borrow_taken';
+  const isBorrowGiven = transaction.type === 'borrow_given';
 
   let amountPrefix = '';
-  let amountColor: string = COLORS.textPrimary;
+  // Refined palette: normal expenses are crisp neutral text (never shouting red)
+  let amountColor = colors.textPrimary;
 
-  if (isIncome || isBorrowTaken) {
+  if (isIncome) {
     amountPrefix = '+';
-    amountColor = accent.hex;
-  } else if (isExpense) {
+    amountColor = colors.success;
+  } else if (isBorrowTaken) {
+    amountPrefix = '+';
+    amountColor = colors.warning;
+  } else if (isBorrowGiven) {
     amountPrefix = '−';
-    amountColor = COLORS.alert;
+    amountColor = colors.warning;
   } else {
+    // Normal expense
     amountPrefix = '−';
-    amountColor = COLORS.warning;
+    amountColor = colors.textPrimary;
   }
 
   const categoryStyle = getCategoryColor(transaction.category, transaction.type, accent.hex);
@@ -100,7 +106,13 @@ export const TransactionRow: React.FC<TransactionRowProps> = ({
     <TouchableOpacity
       activeOpacity={0.78}
       onPress={handleCardPress}
-      style={styles.cardContainer}
+      style={[
+        styles.cardContainer,
+        {
+          backgroundColor: colors.surface,
+          borderColor: colors.border,
+        },
+      ]}
     >
       {/* Top Main Section */}
       <View style={styles.topRow}>
@@ -112,7 +124,10 @@ export const TransactionRow: React.FC<TransactionRowProps> = ({
         {/* Center Details */}
         <View style={styles.centerContent}>
           <View style={styles.titleRow}>
-            <Text style={styles.titleText} numberOfLines={1}>
+            <Text
+              style={[styles.titleText, { color: colors.textPrimary }]}
+              numberOfLines={1}
+            >
               {displayTitle}
             </Text>
           </View>
@@ -120,88 +135,120 @@ export const TransactionRow: React.FC<TransactionRowProps> = ({
           <View style={styles.metaRow}>
             {hasCustomNote && (
               <>
-                <Text style={[styles.metaCategoryTag, { color: categoryStyle.text }]} numberOfLines={1}>
+                <Text
+                  style={[styles.metaCategoryTag, { color: categoryStyle.text }]}
+                  numberOfLines={1}
+                >
                   {transaction.category.toUpperCase()}
                 </Text>
-                <Text style={styles.metaDot}>·</Text>
+                <Text style={[styles.metaDot, { color: colors.textMuted }]}>·</Text>
               </>
             )}
 
             {accountName ? (
               <>
-                <View style={styles.accountBadge}>
-                  <Ionicons name="wallet-outline" size={11} color={COLORS.textSecondary} style={{ marginRight: 3 }} />
-                  <Text style={styles.accountBadgeText} numberOfLines={1}>
+                <View
+                  style={[
+                    styles.accountBadge,
+                    { backgroundColor: colors.surfaceLight },
+                  ]}
+                >
+                  <Ionicons
+                    name="wallet-outline"
+                    size={11}
+                    color={colors.textSecondary}
+                    style={{ marginRight: 3 }}
+                  />
+                  <Text
+                    style={[styles.accountBadgeText, { color: colors.textSecondary }]}
+                    numberOfLines={1}
+                  >
                     {accountName}
                   </Text>
                 </View>
-                <Text style={styles.metaDot}>·</Text>
+                <Text style={[styles.metaDot, { color: colors.textMuted }]}>·</Text>
               </>
             ) : null}
 
-            <Text style={styles.dateText}>{transaction.date}</Text>
-          </View>
-        </View>
-
-        {/* Right Details: Amount & Type Tag */}
-        <View style={styles.rightContent}>
-          <Text style={[styles.amountText, TYPOGRAPHY.tabularText, { color: amountColor }]}>
-            {amountPrefix}₹{formattedAmount}
-          </Text>
-          <View
-            style={[
-              styles.typeBadge,
-              isIncome && { backgroundColor: `${accent.hex}18` },
-              isExpense && { backgroundColor: COLORS.alertMuted },
-              (transaction.type === 'borrow_given' || transaction.type === 'borrow_taken') && {
-                backgroundColor: COLORS.warningMuted,
-              },
-            ]}
-          >
-            <Text
-              style={[
-                styles.typeBadgeText,
-                isIncome && { color: accent.hex },
-                isExpense && { color: COLORS.alert },
-                (transaction.type === 'borrow_given' || transaction.type === 'borrow_taken') && {
-                  color: COLORS.warning,
-                },
-              ]}
-            >
-              {typeLabels[transaction.type]?.toUpperCase() || transaction.type.toUpperCase()}
+            <Text style={[styles.dateText, { color: colors.textMuted }]}>
+              {transaction.date}
             </Text>
           </View>
         </View>
+
+        {/* Right Details: Clean Amount & Non-Expense Badges */}
+        <View style={styles.rightContent}>
+          <Text
+            style={[
+              styles.amountText,
+              TYPOGRAPHY.tabularText,
+              { color: amountColor },
+            ]}
+          >
+            {amountPrefix}₹{formattedAmount}
+          </Text>
+
+          {/* Only non-expense types get a badge to avoid shouting red EXPENSE on every card */}
+          {!isExpense && (
+            <View
+              style={[
+                styles.typeBadge,
+                isIncome && { backgroundColor: `${colors.success}18` },
+                (isBorrowGiven || isBorrowTaken) && {
+                  backgroundColor: colors.warningMuted,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.typeBadgeText,
+                  isIncome && { color: colors.success },
+                  (isBorrowGiven || isBorrowTaken) && {
+                    color: colors.warning,
+                  },
+                ]}
+              >
+                {typeLabels[transaction.type]}
+              </Text>
+            </View>
+          )}
+        </View>
       </View>
 
-      {/* Bottom Action Footer with Edit and Delete Buttons */}
+      {/* Bottom Action Footer with Subtle, Refined Edit and Delete Buttons */}
       {showActions && (
-        <View style={styles.footerRow}>
+        <View style={[styles.footerRow, { borderTopColor: colors.border }]}>
           <View style={styles.footerActionsGroup}>
             <TouchableOpacity
               activeOpacity={0.7}
               onPress={handleEditPress}
-              style={styles.actionBtn}
+              style={[styles.actionBtn, { backgroundColor: colors.surfaceLight }]}
             >
-              <Ionicons name="create-outline" size={14} color={accent.hex} />
-              <Text style={[styles.actionBtnText, { color: accent.hex }]}>Edit</Text>
+              <Ionicons name="create-outline" size={13} color={colors.textSecondary} />
+              <Text style={[styles.actionBtnText, { color: colors.textSecondary }]}>
+                Edit
+              </Text>
             </TouchableOpacity>
 
-            <View style={styles.actionDivider} />
+            <View style={[styles.actionDivider, { backgroundColor: colors.border }]} />
 
             <TouchableOpacity
               activeOpacity={0.7}
               onPress={handleDeletePress}
-              style={styles.actionBtn}
+              style={[styles.actionBtn, { backgroundColor: colors.surfaceLight }]}
             >
-              <Ionicons name="trash-outline" size={14} color={COLORS.alert} />
-              <Text style={[styles.actionBtnText, { color: COLORS.alert }]}>Delete</Text>
+              <Ionicons name="trash-outline" size={13} color={colors.textMuted} />
+              <Text style={[styles.actionBtnText, { color: colors.textMuted }]}>
+                Delete
+              </Text>
             </TouchableOpacity>
           </View>
 
           <View style={styles.footerDetailLink}>
-            <Text style={styles.detailLinkText}>Details</Text>
-            <Ionicons name="chevron-forward" size={13} color={COLORS.textMuted} />
+            <Text style={[styles.detailLinkText, { color: colors.textMuted }]}>
+              Details
+            </Text>
+            <Ionicons name="chevron-forward" size={13} color={colors.textMuted} />
           </View>
         </View>
       )}
@@ -211,8 +258,6 @@ export const TransactionRow: React.FC<TransactionRowProps> = ({
 
 const styles = StyleSheet.create({
   cardContainer: {
-    backgroundColor: COLORS.surface,
-    borderColor: COLORS.border,
     borderWidth: 1,
     borderRadius: 14,
     paddingHorizontal: SPACING.md,
@@ -242,7 +287,6 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   titleText: {
-    color: COLORS.textPrimary,
     fontSize: 15,
     fontWeight: '700',
     letterSpacing: 0.1,
@@ -259,26 +303,22 @@ const styles = StyleSheet.create({
     maxWidth: 90,
   },
   metaDot: {
-    color: COLORS.textMuted,
     marginHorizontal: 4,
     fontSize: 10,
   },
   accountBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.surfaceLight,
     paddingHorizontal: 6,
     paddingVertical: 1,
     borderRadius: 4,
     maxWidth: 100,
   },
   accountBadgeText: {
-    color: COLORS.textSecondary,
     fontSize: 11,
     fontWeight: '500',
   },
   dateText: {
-    color: COLORS.textMuted,
     fontSize: 11,
   },
   rightContent: {
@@ -287,8 +327,8 @@ const styles = StyleSheet.create({
   },
   amountText: {
     fontSize: 16,
-    fontWeight: '800',
-    marginBottom: 4,
+    fontWeight: '700',
+    marginBottom: 2,
   },
   typeBadge: {
     paddingHorizontal: 6,
@@ -298,14 +338,13 @@ const styles = StyleSheet.create({
   typeBadgeText: {
     fontSize: 10,
     fontWeight: '700',
-    letterSpacing: 0.5,
+    letterSpacing: 0.3,
   },
   footerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     borderTopWidth: 1,
-    borderTopColor: COLORS.border,
     marginTop: SPACING.sm,
     paddingTop: 8,
   },
@@ -317,7 +356,6 @@ const styles = StyleSheet.create({
   actionBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.surfaceLight,
     paddingHorizontal: SPACING.sm,
     paddingVertical: 5,
     borderRadius: 6,
@@ -330,7 +368,6 @@ const styles = StyleSheet.create({
   actionDivider: {
     width: 1,
     height: 14,
-    backgroundColor: COLORS.border,
     marginHorizontal: 2,
   },
   footerDetailLink: {
@@ -340,7 +377,6 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   detailLinkText: {
-    color: COLORS.textMuted,
     fontSize: 11,
     fontWeight: '600',
   },

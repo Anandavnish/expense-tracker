@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -7,10 +7,12 @@ import {
   TouchableOpacity,
   KeyboardAvoidingView,
   Platform,
+  Modal,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { TextInput } from 'react-native-paper';
+import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useAuthStore } from '../../store/authStore';
 import { useFinanceStore } from '../../store/financeStore';
 import { useSettingsStore } from '../../store/settingsStore';
@@ -22,6 +24,23 @@ interface AddTransactionScreenProps {
   navigation: any;
   route?: any;
 }
+
+const formatLocalDate = (d: Date) => {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const getAccountIconProps = (acc: { type: string }) => {
+  if (acc.type === 'credit_card') {
+    return { name: 'card-outline' as const, color: '#8B5CF6' };
+  }
+  if (acc.type === 'cash') {
+    return { name: 'cash-outline' as const, color: '#10B981' };
+  }
+  return { name: 'business-outline' as const, color: '#3B82F6' };
+};
 
 const INCOME_CATEGORIES = [
   'Salary',
@@ -60,6 +79,16 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
     addBorrowOptimistic,
   } = useFinanceStore();
 
+  const today = useMemo(() => new Date(), []);
+  const minDate = useMemo(() => new Date(today.getFullYear(), today.getMonth(), 1), [today]);
+  const maxDate = useMemo(
+    () => new Date(today.getFullYear(), today.getMonth() + 1, 0, 23, 59, 59),
+    [today]
+  );
+  const currentMonthName = useMemo(() => {
+    return today.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  }, [today]);
+
   const [type, setType] = useState<TransactionType>('expense');
   const [amount, setAmount] = useState('');
   const [selectedAccountId, setSelectedAccountId] = useState(
@@ -68,12 +97,66 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
   const [category, setCategory] = useState(categories[0] || 'Food');
   const [note, setNote] = useState('');
   const [personName, setPersonName] = useState('');
-  const [date, setDate] = useState(new Date().toISOString().substring(0, 10)); // YYYY-MM-DD
+  const [date, setDate] = useState(() => formatLocalDate(new Date()));
+  const [showDatePicker, setShowDatePicker] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
   const effectiveAccountId = selectedAccountId || route?.params?.accountId || accounts[0]?.id || '';
   const selectedAccount = accounts.find((a) => a.id === effectiveAccountId);
   const isCreditCard = selectedAccount?.type === 'credit_card';
+
+  const handleDateChange = (event: DateTimePickerEvent, selectedDate?: Date) => {
+    if (Platform.OS === 'android') {
+      setShowDatePicker(false);
+    }
+    if (event.type === 'set' && selectedDate) {
+      if (selectedDate < minDate) {
+        setDate(formatLocalDate(minDate));
+      } else if (selectedDate > maxDate) {
+        setDate(formatLocalDate(maxDate));
+      } else {
+        setDate(formatLocalDate(selectedDate));
+      }
+      setFormError(null);
+    } else if (event.type === 'dismissed') {
+      setShowDatePicker(false);
+    }
+  };
+
+  const parsedDateObj = useMemo(() => {
+    try {
+      const [y, m, d] = date.split('-').map(Number);
+      if (y && m && d) {
+        return new Date(y, m - 1, d);
+      }
+      return today;
+    } catch {
+      return today;
+    }
+  }, [date, today]);
+
+  const formattedDateLabel = useMemo(() => {
+    try {
+      const [y, m, d] = date.split('-').map(Number);
+      const dObj = new Date(y, m - 1, d);
+      const isToday = date === formatLocalDate(today);
+      const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
+      const isYesterday = date === formatLocalDate(yesterday);
+
+      const baseStr = dObj.toLocaleDateString('en-IN', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+      });
+      if (isToday) return `${baseStr} • Today`;
+      if (isYesterday) return `${baseStr} • Yesterday`;
+      return baseStr;
+    } catch {
+      return date;
+    }
+  }, [date, today]);
+
+  const yesterdayInCurrentMonth = today.getDate() > 1;
 
   const handleTypeChange = (newType: TransactionType) => {
     setType(newType);
@@ -110,6 +193,17 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
     }
     if ((type === 'borrow_given' || type === 'borrow_taken') && !personName.trim()) {
       setFormError('Please enter person name for borrow entry');
+      return;
+    }
+
+    // Validate that transaction date falls within the current running month
+    const [yStr, mStr] = date.split('-');
+    const selYear = parseInt(yStr, 10);
+    const selMonth = parseInt(mStr, 10);
+    if (selYear !== today.getFullYear() || selMonth !== today.getMonth() + 1) {
+      setFormError(
+        `Transactions can only be logged for the current running month (${currentMonthName}).`
+      );
       return;
     }
 
@@ -233,12 +327,21 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
             />
           </View>
 
-          {/* 3. Account / Money Source Picker (Source to deduct from) */}
+          {/* 3. Account / Money Source Picker (Source to deduct from - Wrapping Grid) */}
           <View style={styles.section}>
             <Text style={styles.sectionLabel}>MONEY SOURCE (DEDUCT FROM)</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
+            <View style={styles.moneySourcesGrid}>
               {accounts.map((acc) => {
                 const active = effectiveAccountId === acc.id;
+                const iconProps = getAccountIconProps(acc);
+                const isCard = acc.type === 'credit_card';
+                const bal = Number(acc.current_balance || 0);
+                const balText = isCard
+                  ? bal < 0
+                    ? `₹${Math.abs(bal).toLocaleString('en-IN')} Due`
+                    : `₹0 Due`
+                  : `₹${bal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
+
                 return (
                   <TouchableOpacity
                     key={acc.id}
@@ -246,37 +349,62 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
                       setFormError(null);
                       setSelectedAccountId(acc.id);
                     }}
+                    activeOpacity={0.7}
                     style={[
-                      styles.chip,
+                      styles.sourceCard,
                       active && {
                         borderColor: accent.hex,
-                        backgroundColor: accent.muted,
+                        backgroundColor: accent.hex + '14',
                       },
                     ]}
                   >
-                    <Ionicons
-                      name={
-                        acc.type === 'cash'
-                          ? 'cash-outline'
-                          : acc.type === 'credit_card'
-                          ? 'card-outline'
-                          : 'business-outline'
-                      }
-                      size={15}
-                      color={active ? accent.hex : COLORS.textSecondary}
-                    />
-                    <Text
+                    <View
                       style={[
-                        styles.chipText,
-                        active && { color: accent.hex, fontWeight: '700' },
+                        styles.sourceIconBadge,
+                        { backgroundColor: iconProps.color + '18' },
                       ]}
                     >
-                      {acc.name}
-                    </Text>
+                      <Ionicons
+                        name={iconProps.name}
+                        size={16}
+                        color={active ? accent.hex : iconProps.color}
+                      />
+                    </View>
+
+                    <View style={styles.sourceTextCol}>
+                      <Text
+                        style={[
+                          styles.sourceName,
+                          active && { color: COLORS.textPrimary, fontWeight: '700' },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {acc.name}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.sourceBalance,
+                          TYPOGRAPHY.tabularText,
+                          active && { color: accent.hex, fontWeight: '600' },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {balText}
+                      </Text>
+                    </View>
+
+                    {active && (
+                      <Ionicons
+                        name="checkmark-circle"
+                        size={16}
+                        color={accent.hex}
+                        style={styles.sourceCheckIcon}
+                      />
+                    )}
                   </TouchableOpacity>
                 );
               })}
-            </ScrollView>
+            </View>
           </View>
 
           {/* If borrow, show Person Name input */}
@@ -331,39 +459,150 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
             </View>
           </View>
 
-          {/* 5. Date & Quick Toggles */}
+          {/* 5. Date & Calendar Picker (Restricted to Current Running Month) */}
           <View style={styles.section}>
             <View style={styles.dateHeader}>
-              <Text style={styles.sectionLabel}>DATE</Text>
+              <Text style={styles.sectionLabel}>DATE (CURRENT MONTH ONLY)</Text>
               <View style={styles.quickDateRow}>
                 <TouchableOpacity
-                  onPress={() => setDate(new Date().toISOString().substring(0, 10))}
-                  style={styles.quickDateBtn}
-                >
-                  <Text style={[styles.quickDateText, { color: accent.hex }]}>Today</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
                   onPress={() => {
-                    const yesterday = new Date();
-                    yesterday.setDate(yesterday.getDate() - 1);
-                    setDate(yesterday.toISOString().substring(0, 10));
+                    setDate(formatLocalDate(today));
+                    setFormError(null);
                   }}
-                  style={styles.quickDateBtn}
+                  style={[
+                    styles.quickDateBtn,
+                    date === formatLocalDate(today) && {
+                      backgroundColor: accent.hex + '22',
+                      borderColor: accent.hex,
+                      borderWidth: 1,
+                    },
+                  ]}
                 >
-                  <Text style={[styles.quickDateText, { color: accent.hex }]}>Yesterday</Text>
+                  <Text
+                    style={[
+                      styles.quickDateText,
+                      { color: date === formatLocalDate(today) ? accent.hex : COLORS.textSecondary },
+                    ]}
+                  >
+                    Today
+                  </Text>
                 </TouchableOpacity>
+
+                {yesterdayInCurrentMonth && (
+                  <TouchableOpacity
+                    onPress={() => {
+                      const yesterday = new Date(
+                        today.getFullYear(),
+                        today.getMonth(),
+                        today.getDate() - 1
+                      );
+                      setDate(formatLocalDate(yesterday));
+                      setFormError(null);
+                    }}
+                    style={[
+                      styles.quickDateBtn,
+                      date ===
+                        formatLocalDate(
+                          new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1)
+                        ) && {
+                        backgroundColor: accent.hex + '22',
+                        borderColor: accent.hex,
+                        borderWidth: 1,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.quickDateText,
+                        {
+                          color:
+                            date ===
+                            formatLocalDate(
+                              new Date(
+                                today.getFullYear(),
+                                today.getMonth(),
+                                today.getDate() - 1
+                              )
+                            )
+                              ? accent.hex
+                              : COLORS.textSecondary,
+                        },
+                      ]}
+                    >
+                      Yesterday
+                    </Text>
+                  </TouchableOpacity>
+                )}
               </View>
             </View>
-            <TextInput
-              value={date}
-              onChangeText={setDate}
-              placeholder="YYYY-MM-DD"
-              mode="outlined"
-              outlineColor={COLORS.border}
-              activeOutlineColor={accent.hex}
-              textColor={COLORS.textPrimary}
-              style={styles.textInput}
-            />
+
+            {/* Clickable Date Card that calls the native default calendar */}
+            <TouchableOpacity
+              onPress={() => setShowDatePicker(true)}
+              activeOpacity={0.7}
+              style={[
+                styles.dateSelectorCard,
+                showDatePicker && { borderColor: accent.hex, backgroundColor: accent.hex + '0A' },
+              ]}
+            >
+              <View style={[styles.dateIconBadge, { backgroundColor: accent.hex + '18' }]}>
+                <Ionicons name="calendar-outline" size={18} color={accent.hex} />
+              </View>
+              <View style={styles.dateTextCol}>
+                <Text style={styles.dateSelectedText}>{formattedDateLabel}</Text>
+                <Text style={styles.dateMonthRestrictionHint}>
+                  {currentMonthName} (1st – {maxDate.getDate()}th only)
+                </Text>
+              </View>
+              <View style={[styles.dateChangeBadge, { borderColor: accent.hex + '40' }]}>
+                <Text style={[styles.dateChangeBadgeText, { color: accent.hex }]}>Pick Date</Text>
+                <Ionicons name="calendar" size={13} color={accent.hex} />
+              </View>
+            </TouchableOpacity>
+
+            {/* Native Calendar Picker Dialog */}
+            {showDatePicker &&
+              (Platform.OS === 'ios' ? (
+                <Modal
+                  transparent
+                  animationType="fade"
+                  visible={showDatePicker}
+                  onRequestClose={() => setShowDatePicker(false)}
+                >
+                  <View style={styles.datePickerModalBackdrop}>
+                    <View style={styles.datePickerModalCard}>
+                      <View style={styles.datePickerModalHeader}>
+                        <Text style={styles.datePickerModalTitle}>
+                          Select Date • {currentMonthName}
+                        </Text>
+                        <TouchableOpacity onPress={() => setShowDatePicker(false)}>
+                          <Text style={[styles.datePickerModalDoneText, { color: accent.hex }]}>
+                            Done
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                      <DateTimePicker
+                        value={parsedDateObj}
+                        mode="date"
+                        display="inline"
+                        minimumDate={minDate}
+                        maximumDate={maxDate}
+                        themeVariant="dark"
+                        onChange={handleDateChange}
+                      />
+                    </View>
+                  </View>
+                </Modal>
+              ) : (
+                <DateTimePicker
+                  value={parsedDateObj}
+                  mode="date"
+                  display="default"
+                  minimumDate={minDate}
+                  maximumDate={maxDate}
+                  onChange={handleDateChange}
+                />
+              ))}
           </View>
 
           {/* 6. Note (Optional) */}
@@ -506,28 +745,47 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8,
     marginBottom: SPACING.sm,
   },
-  chipRow: {
+  moneySourcesGrid: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
   },
-  chip: {
+  sourceCard: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: COLORS.surface,
     borderColor: COLORS.border,
     borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    minWidth: '47%',
+    flex: 1,
+    gap: 8,
+  },
+  sourceIconBadge: {
+    width: 28,
+    height: 28,
     borderRadius: 6,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-    marginRight: SPACING.sm,
-    gap: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  chipIcon: {
-    fontSize: 14,
+  sourceTextCol: {
+    flex: 1,
+    justifyContent: 'center',
   },
-  chipText: {
+  sourceName: {
     color: COLORS.textSecondary,
     fontSize: 13,
-    fontWeight: '500',
+    fontWeight: '600',
+  },
+  sourceBalance: {
+    color: COLORS.textMuted,
+    fontSize: 11,
+    marginTop: 1,
+  },
+  sourceCheckIcon: {
+    marginLeft: 2,
   },
   categoriesGrid: {
     flexDirection: 'row',
@@ -558,13 +816,93 @@ const styles = StyleSheet.create({
   },
   quickDateBtn: {
     paddingHorizontal: SPACING.sm,
-    paddingVertical: 2,
+    paddingVertical: 4,
     backgroundColor: COLORS.surfaceLight,
-    borderRadius: 4,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'transparent',
   },
   quickDateText: {
     fontSize: 11,
     fontWeight: '600',
+  },
+  dateSelectorCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.surface,
+    borderColor: COLORS.border,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    gap: 12,
+  },
+  dateIconBadge: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dateTextCol: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  dateSelectedText: {
+    color: COLORS.textPrimary,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  dateMonthRestrictionHint: {
+    color: COLORS.textMuted,
+    fontSize: 11,
+    marginTop: 2,
+  },
+  dateChangeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+    borderWidth: 1,
+    backgroundColor: COLORS.surfaceLight,
+  },
+  dateChangeBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  datePickerModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: SPACING.lg,
+  },
+  datePickerModalCard: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: COLORS.surface,
+    borderColor: COLORS.border,
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: SPACING.md,
+  },
+  datePickerModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: SPACING.md,
+    paddingHorizontal: SPACING.xs,
+  },
+  datePickerModalTitle: {
+    color: COLORS.textPrimary,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  datePickerModalDoneText: {
+    fontSize: 14,
+    fontWeight: '700',
   },
   textInput: {
     backgroundColor: COLORS.surface,

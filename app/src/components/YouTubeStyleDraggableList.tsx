@@ -18,6 +18,7 @@ interface DraggableRowItemProps<T> {
   itemHeight: number;
   gap: number;
   accentColor: string;
+  holdDurationMs?: number;
   renderContent: (item: T, isDragging: boolean) => React.ReactNode;
   renderActions?: (item: T, isDragging: boolean) => React.ReactNode;
   onDragStart: (index: number) => void;
@@ -36,6 +37,7 @@ function DraggableRowItem<T>(props: DraggableRowItemProps<T>) {
     itemHeight,
     gap,
     accentColor,
+    holdDurationMs = 120,
     renderContent,
     renderActions,
   } = props;
@@ -61,26 +63,25 @@ function DraggableRowItem<T>(props: DraggableRowItemProps<T>) {
           clearTimeout(holdTimerRef.current);
         }
 
-        // Mini hold (~120ms) before elevation and haptic tick, exactly like YouTube queue
+        // Hold for 1 second (1000ms) before elevation and haptics to get ready to move
         holdTimerRef.current = setTimeout(() => {
           isActivatedRef.current = true;
           propsRef.current.onDragStart(propsRef.current.index);
-        }, 120);
+        }, propsRef.current.holdDurationMs || 1000);
       },
       onPanResponderMove: (_, gestureState) => {
-        // If finger moves before hold timer expires, start drag immediately
-        if (!isActivatedRef.current && (Math.abs(gestureState.dy) > 3 || Math.abs(gestureState.dx) > 3)) {
-          if (holdTimerRef.current) {
-            clearTimeout(holdTimerRef.current);
-            holdTimerRef.current = null;
+        // If finger moves more than touch slop before 1s hold expires, cancel the hold
+        if (!isActivatedRef.current) {
+          if (Math.abs(gestureState.dy) > 10 || Math.abs(gestureState.dx) > 10) {
+            if (holdTimerRef.current) {
+              clearTimeout(holdTimerRef.current);
+              holdTimerRef.current = null;
+            }
           }
-          isActivatedRef.current = true;
-          propsRef.current.onDragStart(propsRef.current.index);
+          return;
         }
 
-        if (isActivatedRef.current) {
-          propsRef.current.onDragMove(gestureState.dy);
-        }
+        propsRef.current.onDragMove(gestureState.dy);
       },
       onPanResponderRelease: () => {
         if (holdTimerRef.current) {
@@ -172,6 +173,7 @@ export interface YouTubeStyleDraggableListProps<T> {
   itemHeight?: number;
   gap?: number;
   accentColor?: string;
+  holdDurationMs?: number;
   contentContainerStyle?: any;
   onDragBegin?: () => void;
   onDragEnd?: () => void;
@@ -186,6 +188,7 @@ export function YouTubeStyleDraggableList<T>({
   itemHeight = 64,
   gap = 8,
   accentColor = COLORS.accent,
+  holdDurationMs = 1000,
   contentContainerStyle,
   onDragBegin,
   onDragEnd,
@@ -340,7 +343,7 @@ export function YouTubeStyleDraggableList<T>({
         const isDraggingThis = draggingIndex === idx;
 
         return (
-          <DraggableRowItem
+          <DraggableRowItem<T>
             key={key}
             item={item}
             index={idx}

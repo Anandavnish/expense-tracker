@@ -1,11 +1,13 @@
 // src/components/TactileButton.tsx
 import React from 'react';
-import { Pressable, StyleSheet, ViewStyle, StyleProp } from 'react-native';
+import { Pressable, ViewStyle, StyleProp } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withSpring,
 } from 'react-native-reanimated';
+
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 interface TactileButtonProps {
   onPress: () => void;
@@ -30,7 +32,7 @@ export const TactileButton: React.FC<TactileButtonProps> = ({
 
   const handlePressIn = () => {
     if (disabled) return;
-    scale.value = withSpring(0.96, {
+    scale.value = withSpring(0.97, {
       damping: 15,
       stiffness: 300,
       mass: 0.5,
@@ -47,14 +49,14 @@ export const TactileButton: React.FC<TactileButtonProps> = ({
   };
 
   return (
-    <Pressable
+    <AnimatedPressable
       onPress={onPress}
       onPressIn={handlePressIn}
       onPressOut={handlePressOut}
       disabled={disabled}
-      style={({ pressed }) => [style, { opacity: disabled ? 0.5 : 1 }]}
+      style={[style, animatedStyle, { opacity: disabled ? 0.5 : 1 }]}
     >
-      <Animated.View style={animatedStyle}>{children}</Animated.View>
-    </Pressable>
+      {children}
+    </AnimatedPressable>
   );
 };

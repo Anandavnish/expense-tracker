@@ -1,8 +1,8 @@
 // src/navigation/RootNavigator.tsx
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { View, StyleSheet } from 'react-native';
 import { ActivityIndicator } from 'react-native-paper';
-import { NavigationContainer, DarkTheme } from '@react-navigation/native';
+import { NavigationContainer, DarkTheme, DefaultTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useAuthStore } from '../store/authStore';
 import { useFinanceStore } from '../store/financeStore';
@@ -13,25 +13,12 @@ import { SettingsScreen } from '../screens/main/SettingsScreen';
 import { AddTransactionScreen } from '../screens/main/AddTransactionScreen';
 import { AccountDetailScreen } from '../screens/main/AccountDetailScreen';
 import { TransactionDetailScreen } from '../screens/main/TransactionDetailScreen';
-import { COLORS } from '../theme/tokens';
 
 const AppStack = createNativeStackNavigator();
 
-const appNavTheme = {
-  ...DarkTheme,
-  colors: {
-    ...DarkTheme.colors,
-    background: COLORS.background,
-    card: COLORS.surface,
-    text: COLORS.textPrimary,
-    border: COLORS.border,
-    primary: COLORS.accent,
-  },
-};
-
 export const RootNavigator = () => {
   const { session, user, isLoading, initializeAuth } = useAuthStore();
-  const { loadSettings, accent } = useSettingsStore();
+  const { loadSettings, accent, effectiveTheme, colors } = useSettingsStore();
   const {
     loadCachedData,
     fetchInitialData,
@@ -58,10 +45,25 @@ export const RootNavigator = () => {
     };
   }, [user]);
 
+  const appNavTheme = useMemo(() => {
+    const baseNavTheme = effectiveTheme === 'light' ? DefaultTheme : DarkTheme;
+    return {
+      ...baseNavTheme,
+      colors: {
+        ...baseNavTheme.colors,
+        background: colors.background,
+        card: colors.surface,
+        text: colors.textPrimary,
+        border: colors.border,
+        primary: accent.hex,
+      },
+    };
+  }, [effectiveTheme, colors, accent.hex]);
+
   if (isLoading) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={accent.hex || COLORS.accent} />
+      <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color={accent.hex} />
       </View>
     );
   }
@@ -72,7 +74,7 @@ export const RootNavigator = () => {
         <AppStack.Navigator
           screenOptions={{
             headerShown: false,
-            contentStyle: { backgroundColor: COLORS.background },
+            contentStyle: { backgroundColor: colors.background },
             animationDuration: 220,
           }}
         >
@@ -108,7 +110,6 @@ export const RootNavigator = () => {
 const styles = StyleSheet.create({
   loadingContainer: {
     flex: 1,
-    backgroundColor: COLORS.background,
     justifyContent: 'center',
     alignItems: 'center',
   },

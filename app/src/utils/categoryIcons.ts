@@ -67,5 +67,5 @@ export const getCategoryColor = (
   if (lower.includes('shop')) return { bg: '#F43F5E20', text: '#FB7185' };
   if (lower.includes('entertain')) return { bg: '#A855F720', text: '#C084FC' };
 
-  return { bg: `${COLORS.alert}20`, text: COLORS.alert };
+  return { bg: '#64748B20', text: '#94A3B8' };
 };
