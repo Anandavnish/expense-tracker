@@ -2,7 +2,7 @@
 import React, { useEffect } from 'react';
 import { View, StyleSheet } from 'react-native';
 import { ActivityIndicator } from 'react-native-paper';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, DarkTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useAuthStore } from '../store/authStore';
 import { useFinanceStore } from '../store/financeStore';
@@ -11,9 +11,23 @@ import { AuthStack } from './AuthStack';
 import { MainTabs } from './MainTabs';
 import { SettingsScreen } from '../screens/main/SettingsScreen';
 import { AddTransactionScreen } from '../screens/main/AddTransactionScreen';
+import { AccountDetailScreen } from '../screens/main/AccountDetailScreen';
+import { TransactionDetailScreen } from '../screens/main/TransactionDetailScreen';
 import { COLORS } from '../theme/tokens';
 
 const AppStack = createNativeStackNavigator();
+
+const appNavTheme = {
+  ...DarkTheme,
+  colors: {
+    ...DarkTheme.colors,
+    background: COLORS.background,
+    card: COLORS.surface,
+    text: COLORS.textPrimary,
+    border: COLORS.border,
+    primary: COLORS.accent,
+  },
+};
 
 export const RootNavigator = () => {
   const { session, user, isLoading, initializeAuth } = useAuthStore();
@@ -47,15 +61,21 @@ export const RootNavigator = () => {
   if (isLoading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={accent.value || COLORS.accent} />
+        <ActivityIndicator size="large" color={accent.hex || COLORS.accent} />
       </View>
     );
   }
 
   return (
-    <NavigationContainer>
+    <NavigationContainer theme={appNavTheme}>
       {session ? (
-        <AppStack.Navigator screenOptions={{ headerShown: false }}>
+        <AppStack.Navigator
+          screenOptions={{
+            headerShown: false,
+            contentStyle: { backgroundColor: COLORS.background },
+            animationDuration: 220,
+          }}
+        >
           <AppStack.Screen name="MainTabs" component={MainTabs} />
           <AppStack.Screen
             name="Settings"
@@ -66,6 +86,16 @@ export const RootNavigator = () => {
             name="AddTransaction"
             component={AddTransactionScreen}
             options={{ animation: 'slide_from_bottom' }}
+          />
+          <AppStack.Screen
+            name="AccountDetail"
+            component={AccountDetailScreen}
+            options={{ animation: 'slide_from_right' }}
+          />
+          <AppStack.Screen
+            name="TransactionDetail"
+            component={TransactionDetailScreen}
+            options={{ animation: 'slide_from_right' }}
           />
         </AppStack.Navigator>
       ) : (

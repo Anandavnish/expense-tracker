@@ -54,12 +54,17 @@ Foundational architecture build for a high-performance cross-platform personal f
 ### 2. Information Architecture (IA) & Screens Redesign
 - [x] **DashboardScreen Rebuilt (7-part hierarchy)**:
   1. *Top Bar*: Greeting, active month pill, Settings gear button (navigates to Settings).
-  2. *Month Selector*: `‹ Month Year ›` centered between chevrons for rapid month switching.
+  2. *Month Selector Capsule*: Search-bar inspired floating pill (`width: 280, maxWidth: '85%'`, `borderRadius: 26`) fixed above the content with full horizontal transparency on either side and a smooth `LinearGradient` fade on the scroll container so cards dissolve elegantly before reaching the capsule.
   3. *Formula Net Worth Card*: Formula-style card displaying `BIG NET WORTH` with visual breakdown: `+ Bank` `− Credit Card` `+ Cash` `= NET WORTH`.
   4. *This Month's Budget Card*: Clean 6px progress bar changing dynamically at 80% (amber warning) and 100% (coral alert), with daily burn rate and days left in month.
-  5. *Money Sources Card*: Displays all accounts with Indian bank presets (SBI, HDFC, ICICI, Axis, Kotak, Cash, Other), current balance, credit limits, inline Manage mode (add/edit/delete), and the **Balance Calibration Flow** (reconciles real-world balances by offering "Yes, log it" adjustment transaction vs "Just adjust").
-  6. *Spending by Category Card*: Visual category breakdown seeded with student defaults (*Food & Dining, Groceries, Rent & Utilities, Transport, Shopping, Entertainment, Subscriptions, Health, Education, Personal Care, Travel, Miscellaneous*), spent totals, percentage shares, and category management modal.
+  5. *Money Sources Card*: Displays all accounts with Indian bank presets (SBI, HDFC, ICICI, Axis, Kotak, Cash, Other), current balance, credit limits, inline Manage mode (add/edit/delete), deep-dive clickable navigation to [AccountDetailScreen](file:///c:/Users/anand/Coding%20stuff/Expense%20Tracker/app/src/screens/main/AccountDetailScreen.tsx) with fluid editing, and the **Balance Calibration Flow** (reconciles real-world balances by offering "Yes, log it" adjustment transaction vs "Just adjust").
+  6. *Spending by Category Card*: Visual category breakdown seeded with student defaults (*Food & Dining, Groceries, Rent & Utilities, Transport, Shopping, Entertainment, Subscriptions, Health, Education, Personal Care, Travel, Miscellaneous*). Displays category-specific budget limits (e.g. `₹3,200 / ₹5,000 limit`) with dynamic color indicators (accent &rarr; warning at 80% &rarr; alert if overspent).
   7. *Floating Action Button (FAB)*: Circular `+` button pinned to bottom-right with dynamic accent color for instant transaction logging.
+- [x] **Budget Management Engine Fixes (`financeStore.ts` & `BudgetsScreen.tsx`)**:
+  - Eliminated 30-40 second latency: Synchronously computes optimistic `BudgetSummary` (spent, remaining, percentage) in local state (0ms) and closes the modal immediately, backgrounding the single database query and eliminating redundant view queries.
+  - Redesigned category selection: Replaced the clunky horizontal scroll row with a responsive multi-column wrapping grid. Features an "Overall Monthly Budget" master banner at the top, category icons for all options, and visual checkmark selection states.
+  - Replaced upsert with ID-based check & update / insert flow to eliminate PostgreSQL `ON CONFLICT` specification error when saving overall (`category = null`) or category-specific budgets.
+  - Silenced Reanimated inline styles warning by migrating accent color tokens from `.value` to `.hex`.
 - [x] **TransactionsScreen Rebuilt (Strict 3-Line Format & Filters)**:
   - *Line 1*: Title / Merchant on left, formatted amount with tabular numerals on right (green for income, coral for expense, neutral for lent/borrowed).
   - *Line 2*: Category tag + Transaction Type tag (*Expense, Income, Lent, Borrowed*).
@@ -101,6 +106,171 @@ Foundational architecture build for a high-performance cross-platform personal f
 
 ---
 
+### 4. UI/UX Overhaul & Polish (Eliminating "AI Template" Tropes)
+- [x] **Safe Area Insets & Android System Bars Overlap**:
+  - Replaced standard React Native `SafeAreaView` (which does not provide insets on Android) across all 7 screens with `useSafeAreaInsets` from `react-native-safe-area-context`.
+  - Added dynamic top inset padding (`insets.top`) to prevent status bar/notch collision.
+  - Configured `MainTabs` with dynamic bottom inset (`56 + insets.bottom`) to prevent collision with Android gesture navigation bars.
+- [x] **Eliminated Platform Emojis Everywhere**:
+  - Installed `@expo/vector-icons` and replaced amateur emoji icons (`📊`, `📑`, `🎯`, `🤝`, `💵`, `🏦`, `💳`, `⚙`, `✕`, `‹`, `›`) with crisp, consistent `Ionicons` across tabs, headers, modal close buttons, and money source cards.
+- [x] **Hero Net Worth Card Redesign**:
+  - Removed horizontal raw formula dump (`₹9,800 +₹500 +₹25,000 = ₹35,300`).
+  - Redesigned into a flagship Fintech card featuring a prominent hero balance (`₹35,300`), "+ Add" quick action pill, and neat breakdown row for Cash & Bank, Lent, and Available Credit.
+- [x] **Floating Action Button (FAB) Overlap Fixed**:
+  - Moved FAB from awkwardly overlapping the center content to the standard bottom-right corner (`bottom: 24`, `right: 20`) with smooth elevation and shadow.
+  - Added `paddingBottom: 110` to `ScrollView` content to ensure cards are never obscured.
+- [x] **Refined Micro-Interactions**:
+  - Removed disruptive `SlideInRight` animations on `TransactionRow` so transaction feeds render instantly and cleanly without flying elements.
+
+### 5. Financial Logic Corrections & Refined Layout
+- [x] **Month Selector Capsule Pill**: Redesigned the full-width date bar into a sleek, centered capsule pill (`monthSelectorCapsule`) with subtle borders and smooth chevrons.
+- [x] **Removed Duplicate Top Add Button**: Removed the `+ Add` button from the Net Worth card header to streamline visual hierarchy.
+- [x] **Fixed Non-Functional Floating Add Button (FAB)**: Replaced wrapper with responsive `TouchableOpacity` and configured `zIndex: 999`, `elevation: 10`, and `hitSlop` to ensure instant responsiveness on Android.
+- [x] **Fixed Credit Card Limit Logic (Avail. Credit Calculation)**: Fixed the calculation where spending was erroneously adding to the limit (`limit - (-spent)` = ₹43,500). Credit limits are now strictly fixed, and available limit displays `Math.max(0, limit - spent)` (e.g., ₹6,500 left of ₹25,000).
+- [x] **Added Borrow Breakdown to Net Worth**: Added `Borrow` (`−₹...`) alongside `Cash & Bank`, `Lent`, and `Avail. Credit` in the 4-column summary row.
+- [x] **Adaptive Font Color for Credit Card in Money Sources**: Fixed font color mismatch on credit cards (which previously inherited unstyled dark text) to adaptively display `COLORS.textPrimary` or `COLORS.alert` if overspent.
+- [x] **Functional Credit Card Progress Bar**: Fixed progress bar to accurately visualize remaining limit vs spent, with adaptive color coding (accent when healthy, warning at < 20% remaining, alert on overspend).
+
+### 6. Financial Logic & Credit Card Architecture Redesign
+- [x] **Net Worth Hero Formula Correction & Visual Transparency**:
+  - Net Worth is now strictly computed and visually transparent as:
+    $$\text{Net Worth} = (\text{Cash \& Bank}) + (\text{Lent}) - (\text{Borrow}) - (\text{Credit Card Dues})$$
+  - Clarified and resolved the calculation behind the user screenshot (`−₹11,420`): Liquid Total ₹6,480 + Lent ₹600 − Borrow ₹80 − Card Dues ₹18,500 = −₹11,420.
+  - Fixed the 4-column summary row on Card 1: Replaced misleading "Avail. Credit ₹6,500" column with "Card Dues" (`−₹...`), so all 4 visible columns mathematically sum directly to the hero Net Worth.
+  - Added an "Avail. Limit" indicator pill directly below the hero balance for fast visibility into total available credit without distorting the balance calculation.
+- [x] **Lent vs. Borrow Logic Disentanglement**:
+  - Identified and fixed bug where borrowed transactions were erroneously counted into `pendingLent`.
+  - Added `BorrowType = 'lent' | 'borrowed'` and `parseBorrowDetails()` helper in `database.ts` and `financeStore.ts`.
+  - In `BorrowsScreen`, added an `ENTRY TYPE` segmented toggle (`I Lent (They owe me)` vs `I Borrowed (I owe them)`), visual badges (`LENT` / `BORROWED`), and 3 distinct metric cards (`TO RECEIVE`, `TO PAY`, `NET POSITION`).
+  - Implemented schema-safe backwards compatibility: encoded direction `[BORROWED]` / `[LENT]` in `person_name` with transaction link fallbacks to avoid schema migration failures on restricted database instances.
+- [x] **Credit Card Revolving Credit Architecture**:
+  - Re-architected Credit Cards in "Money Sources" to be treated as revolving credit liabilities rather than positive asset accounts:
+    - Grouped Money Sources into **Bank & Cash** (Liquid Assets) and **Credit Cards** (Liabilities & Limits).
+    - Credit cards display **Current Outstanding Due** (`liability`), **Available Limit**, and **Total Limit** with health-coded progress bars.
+    - Removed confusing "Lent & Borrow (Net)" pseudo-account row from Money Sources.
+  - Implemented **Pay Credit Card Bill** flow:
+    - Dedicated `Pay Card Bill` action pills on Dashboard and `AccountDetailScreen`.
+    - Double-entry atomic update: deducts payment from selected Bank/Cash source, credits Credit Card balance (reducing outstanding dues and restoring available limit).
+  - Specialized Credit Card Categories & Guardrails:
+    - Filtered category list when a credit card is selected to show valid credit events (`Credit Card Payment`, `Cashback`, `Refund`, `Reward Redemption`).
+    - Added validation guardrail preventing Lent/Borrow entries from being routed through credit card accounts.
+
+### 7. Fluid 3-Type Money Sources, Sequence Reordering & Safety Flows
+- [x] **Fluid 3-Type Money Sources Architecture**:
+  - Clarified and streamlined account types into 3 explicit categories:
+    1. **Bank Account**: Curated presets for major Indian banks (`SBI`, `India Post`, `HDFC`, `Canara`, `PNB`, `BOB`) with official brand color/icon mapping, plus `+ Custom Bank` allowing arbitrary names, custom color chips, and icons.
+    2. **Cash Wallet**: Lightweight physical cash tracking (e.g., "Physical Cash", "Pocket Money") with custom naming and current balance.
+    3. **Credit Card**: Curated issuers (`HDFC`, `SBI Card`, `ICICI`, `Axis`, `Kotak`, `Slice`, `OneCard`) + `+ Custom Card`, capturing total credit limit and current outstanding due.
+  - Users can create unlimited accounts under each type with arbitrary custom names (e.g., last 4 digits or purpose like "Salary A/c").
+- [x] **Dashboard Card Representation (`Preset • Source Name`)**:
+  - Implemented `getAccountDisplay()` to prioritize preset branding before the custom account name (e.g., `SBI • Salary A/c` or just `SBI` if no custom nickname is provided).
+  - Added `getAccountIconProps()` to display vector bank/card issuer icons and colors on account cards.
+- [x] **Sequence Rearranging (`☰` Reorder & Display Order Persistence)**:
+  - Added `display_order` support to `Account` model and database types.
+  - Implemented `reorderAccounts()` in `financeStore.ts` with local `AsyncStorage` (`@finance_account_order_v1`) persistence for instant optimistic renders, backed by Supabase `display_order` syncing.
+  - Added fluid Up (`↑`) / Down (`↓`) swap controls and `☰` drag handles in the Full-Screen Manage Money Sources modal.
+- [x] **Non-Zero Balance Calibration & Deletion Safety Flow**:
+  - Guarded against accidental deletion of accounts holding active balances or liabilities.
+  - If balance $\neq 0$, the app displays a safety modal with two options:
+    1. **Calibrate to ₹0 First (Recommended)**: Automatically posts an Adjustment transaction (`income` or `expense`) to reconcile the ledger before deleting the account record, preserving audit trail integrity.
+    2. **Delete Anyway**: Instantly purges the account while leaving historical transactions intact.
+  - Integrated on both `DashboardScreen` (Manage modal) and `AccountDetailScreen`.
+- [x] **Full-Screen Modal Architecture**:
+  - Replaced cramped nested popup dialogs with full-screen modals featuring sticky navigation headers and fixed bottom action bars to prevent keyboard clipping on Android.
+- [x] **Performance & Bug Fixes**:
+  - **Reanimated AST Babel Warning**: Renamed `AccentColor.value` to `AccentColor.hex` across the entire codebase (`tokens.ts`, `settingsStore.ts`, all screens/navigators), completely eliminating Reanimated's Babel plugin false positive warning regarding shared values.
+  - **Optimistic Account Key Collision**: Fixed duplicate key errors (`temp_acc_*` vs server UUID) in `financeStore.ts` by deduplicating Realtime `INSERT` events against pending optimistic accounts.
+  - **Android Screen Transition White Flash**: Applied `DarkTheme` to `<NavigationContainer theme={appNavTheme}>` and `contentStyle: { backgroundColor: COLORS.background }` on `AppStack.Navigator`, enforcing deep slate (`#0B1120`) window backgrounds during route push/pop animations.
+  - **Floating Action Button (FAB) Responsiveness**: Added `hitSlop`, `activeOpacity={0.7}`, and elevation/zIndex tuning to guarantee instantaneous touch response.
+  - **Account Detail Spacing**: Stacked transaction title/count badge and filter pills (`All`, `Expense`, `Income`) with `SPACING.sm` gap to eliminate tight layout on narrow devices.
+
+### 8. Authentic Real-World Theme Redesign, White Flash Elimination & Reorder Modernization
+- [x] **Theme Redesign (Eliminated "AI Generated" Template Feel)**:
+  - **Matte Carbon & Obsidian Palette**: Replaced generic sci-fi dark blue (`#0B1120`, `#1E293B`, `#334155`) with a bespoke, human-designed luxury matte carbon canvas:
+    - Canvas Background: `#0C0D11`
+    - Elevated Cards & Surfaces: `#17181F`
+    - Interactive Surface/Inputs: `#20222B`
+    - Hairline Borders: `#282A36`
+  - **Refined Organic Accents**: Replaced radioactive neon cyan (`#00D09C`) with authentic Emerald Sage (`#10B981`), Champagne Gold (`#E5B869`), and Clean Crimson (`#EF4444`).
+  - **Authentic Bank & Card Brand Identities**: Curated authentic real-world brand colors for SBI (`#0084CA`), IPPB (`#ED1C24`), HDFC (`#004B87`), Canara (`#0091DA`), PNB (`#9E1B32`), BOB (`#F26522`), ICICI (`#A8242A`), Axis (`#861F41`), Slice (`#7025FB`), and OneCard (`#D4AF37`).
+  - **Human Title Casing & Typography**: Converted robotic uppercase labels (`TOTAL NET WORTH`, `THIS MONTH'S BUDGET`, `MONEY SOURCES`, `SPENDING BY CATEGORY`, `ACCOUNT TRANSACTIONS`) to refined Title and Sentence Case (`Total Net Worth`, `Monthly Budget`, `Money Sources`, `Spending by Category`, `Account Transactions`).
+- [x] **Complete White Flash Blink Elimination**:
+  - **Native OS-Level Window Background**: Installed and configured `expo-system-ui` to invoke `SystemUI.setBackgroundColorAsync(COLORS.background)` at native startup.
+  - **Native `app.json` Configuration**: Added `backgroundColor: "#0C0D11"` and `android.backgroundColor: "#0C0D11"`, guaranteeing that the Android `DecorView` and `windowBackground` are permanently dark before React Native even boots.
+  - **Modal Android Translucency Scrims**: Added `statusBarTranslucent={true}` to every modal dialog across `DashboardScreen.tsx` and `AccountDetailScreen.tsx` to stop Android from resetting system window insets with a white flash.
+  - **Navigator Scene Backgrounds**: Injected `sceneStyle: { backgroundColor: COLORS.background }` into `MainTabs.tsx` and `contentStyle` into `AuthStack.tsx`.
+- [x] **Manage Money Sources Button Polish**:
+  - **Removed Duplicate Add Button**: Removed the redundant top `Add` button in the Manage modal header, leaving one single, clear action path.
+  - **Stacked Action Button Redesign**: Redesigned the bottom action button with a prominent `+` icon on the first line and `Add New Money Source` on the next line (`flexDirection: 'column'`).
+- [x] **Modernized Sequence Rearranging (`☰` Handle & No Pointed Brackets)**:
+  - **Removed Pointed Brackets**: Completely removed the clumsy chevron-up / chevron-down (`< >` / `∧ ∨`) arrow buttons.
+  - **Fully Functional `☰` Handle**: Colored the `☰` handle in dynamic accent (`accent.hex`) and made it interactive.
+  - **Quick Move Modal**: Tapping `☰` opens a dedicated position sheet allowing one-tap actions:
+    - *Move Up One Position*
+    - *Move Down One Position*
+    - *Move to Very Top (#1)*
+    - *Move to Very Bottom*
+  - Sequence order persists instantly locally via `AsyncStorage` and syncs with Supabase `display_order`.
+
+### 8. Redesigned Transaction Card & Deep-Dive Transaction Detail Screen
+- [x] **Redesigned Modern Fintech Transaction Card (`TransactionRow.tsx`)**:
+  - Replaced legacy text layout with modern obsidian/carbon card architecture (`COLORS.surface`, `14px` border radius, subtle obsidian borders).
+  - Dynamic Category Avatar (`42x42px`, `12px` rounded capsule) with contextual category icons (`fast-food`, `airplane`, `home`, `cash`, etc.) and tinted frosted background colors.
+  - High-contrast visual hierarchy:
+    - Primary title displays transaction Note (or Category if note is empty).
+    - Meta row includes Category tag, source account pill with mini wallet icon, and formatted transaction date.
+    - Large tabular numeric display with bold weights and semantic color coding (Emerald `+` for Inflow/Borrow, Crimson `−` for Expense, Amber for Lent).
+    - Compact status/type capsule badge (`INCOME`, `EXPENSE`, `LENT`, `BORROWED`).
+  - Action Footer & Buttons:
+    - Dedicated interactive **Edit** button (`create-outline` icon + text) with tactile feedback.
+    - Dedicated interactive **Delete** button (`trash-outline` icon + text) with alert styling.
+    - Chevron detail indicator to signal deep navigation.
+    - Tapping the card or any action button seamlessly opens the new deep-dive screen.
+- [x] **New Screen: `TransactionDetailScreen.tsx`**:
+  - Registered in `RootNavigator.tsx` with smooth slide transition.
+  - Comprehensive Transaction Overview:
+    - Glowing hero category avatar & large hero amount (`TYPOGRAPHY.tabularText`, font size `32px`).
+    - Type pill badge & user description.
+    - Detailed Information Breakdown: Money source account with account type badge and balance, category, formatted date and timestamp, flow direction, input source (Manual vs OCR), and complete notes.
+    - Linked borrow card representation if associated with a borrow record.
+  - In-Place Interactive Edit Mode:
+    - Editable fields for amount, transaction type, source account, category, date, and note.
+    - Optimistic update via `updateTransactionOptimistic()` in `financeStore.ts`, keeping account balances and budget summaries synchronized and rolling back cleanly on errors.
+  - Safe Deletion Flow:
+    - Modal confirmation dialog detailing exact account balance reversals and budget recalculations.
+    - Optimistic deletion via `deleteTransactionOptimistic()` in `financeStore.ts` with Postgres trigger alignment.
+- [x] **Verification**:
+  - Full TypeScript compilation passes with 0 errors (`npx tsc --noEmit`).
+  - Expo lint passes with 0 errors (`npx expo lint`).
+  - Automated E2E verification test suite (`node test_e2e.mjs`) passes 100%.
+
+---
+
+### 6. Unified Manager Redesign: Money Sources & Spending Categories
+- [x] **Eliminated Non-Working Horizontal Drag Handle (`=`)**:
+  - Replaced the confusing non-functional drag handle (`reorder-two-outline`) with direct, tactile **Move Up (`↑` / `chevron-up`)** and **Move Down (`↓` / `chevron-down`)** buttons on every account row.
+  - Tapping `↑` or `↓` instantly swaps account positions with immediate state updates in `financeStore` (`reorderAccounts`) and persists sequence order to `AsyncStorage`.
+  - Intelligently disables/dims the Up button on the top item (`idx === 0`) and Down button on the bottom item (`idx === accounts.length - 1`).
+- [x] **Replaced Clunky Stacked Bottom Button**:
+  - Replaced the oversized 80px vertical stacked button with an ergonomic, modern **horizontal pill button** (`height: 48px`, rounded 12px corners, side-by-side icon and label `+ Add New Money Source`).
+  - Applied safe bottom area inset padding (`paddingBottom: Math.max(insets.bottom, 14)`) to avoid collision with Android navigation gesture pills.
+- [x] **Unified Layout Between Money Sources & Spending Categories**:
+  - Replaced the compact category modal with a full-screen manager matching Money Sources exactly:
+    - Same header with close button, title, and quick `+ Add` header button.
+    - Same card layout with 38x38px colored icon badges, title, and tabular metadata.
+    - Same 4-action button cluster (`[ ↑ ] [ ↓ ] [ ✏️ ] [ 🗑️ ]`).
+    - Same sleek 48px horizontal bottom button (`+ Add New Category`).
+    - Added category editing/renaming (`updateCategory` in `financeStore`) and safe delete confirmation dialog.
+- [x] **Dashboard Category Mini Icon Badges**:
+  - Added matching mini icon badges (`categoryMiniIconBadge`) with distinct category colors to each row in the Dashboard's Spending by Category card, mirroring the rhythm of the Money Sources card.
+
+---
+
 ## Next Steps
 - Implement Screenshot OCR & share-intent parsing (requires dev-client native builds).
 - Implement Gemini AI overview & BYOK API key settings modal.
+
+
+
+
+

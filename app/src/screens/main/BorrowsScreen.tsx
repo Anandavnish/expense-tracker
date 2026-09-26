@@ -1,16 +1,16 @@
-// src/screens/main/BorrowsScreen.tsx
 import React, { useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  SafeAreaView,
   ScrollView,
   TouchableOpacity,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { TextInput } from 'react-native-paper';
 import { useAuthStore } from '../../store/authStore';
-import { useFinanceStore } from '../../store/financeStore';
+import { useFinanceStore, parseBorrowDetails } from '../../store/financeStore';
 import { useSettingsStore } from '../../store/settingsStore';
 import { COLORS, SPACING, TYPOGRAPHY } from '../../theme/tokens';
 import { TactileButton } from '../../components/TactileButton';
@@ -18,10 +18,12 @@ import { InlineError } from '../../components/InlineError';
 import { Borrow } from '../../types/database';
 
 export const BorrowsScreen = () => {
+  const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
   const { accent } = useSettingsStore();
   const {
     borrows,
+    transactions,
     toggleSettleBorrowOptimistic,
     addBorrowOptimistic,
     inlineError,
@@ -30,6 +32,7 @@ export const BorrowsScreen = () => {
 
   const [filter, setFilter] = useState<'all' | 'pending' | 'settled'>('all');
   const [showAddForm, setShowAddForm] = useState(false);
+  const [borrowType, setBorrowType] = useState<'lent' | 'borrowed'>('lent');
   const [personName, setPersonName] = useState('');
   const [amount, setAmount] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
@@ -41,14 +44,25 @@ export const BorrowsScreen = () => {
     return true;
   });
 
-  // Calculate totals
-  const totalPending = borrows
-    .filter((b) => b.status === 'pending')
-    .reduce((sum, b) => sum + Number(b.amount || 0), 0);
+  // Calculate totals separated cleanly between lent and borrowed
+  let totalPendingLent = 0;
+  let totalPendingBorrowed = 0;
+  let totalSettled = 0;
 
-  const totalSettled = borrows
-    .filter((b) => b.status === 'settled')
-    .reduce((sum, b) => sum + Number(b.amount || 0), 0);
+  borrows.forEach((b) => {
+    const { type } = parseBorrowDetails(b, transactions);
+    if (b.status === 'pending') {
+      if (type === 'borrowed') {
+        totalPendingBorrowed += Number(b.amount || 0);
+      } else {
+        totalPendingLent += Number(b.amount || 0);
+      }
+    } else {
+      totalSettled += Number(b.amount || 0);
+    }
+  });
+
+  const netPending = totalPendingLent - totalPendingBorrowed;
 
   const handleAddBorrow = async () => {
     if (!user) return;
@@ -68,6 +82,7 @@ export const BorrowsScreen = () => {
       person_name: personName.trim(),
       amount: numAmount,
       status: 'pending',
+      type: borrowType,
       linked_transaction_id: null,
       date: new Date().toISOString().substring(0, 10),
     });
@@ -82,7 +97,7 @@ export const BorrowsScreen = () => {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <View style={[styles.safeArea, { paddingTop: insets.top }]}>
       <View style={styles.topHeader}>
         <View>
           <Text style={styles.appTitle}>BORROWS & LENDING</Text>
@@ -101,30 +116,42 @@ export const BorrowsScreen = () => {
       <InlineError message={inlineError} onDismiss={() => setInlineError(null)} />
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        {/* Quick Summary Cards */}
+        {/* Quick Summary Cards (3-part: Lent, Borrowed, Net) */}
         <View style={styles.summaryRow}>
           <View style={styles.summaryCard}>
-            <Text style={styles.summaryLabel}>TOTAL PENDING</Text>
+            <Text style={styles.summaryLabel}>TO RECEIVE (LENT)</Text>
             <Text
               style={[
                 styles.summaryNumber,
                 TYPOGRAPHY.tabularText,
-                { color: COLORS.warning },
+                { color: accent.hex },
               ]}
             >
-              ₹{totalPending.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+              +₹{totalPendingLent.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
             </Text>
           </View>
           <View style={styles.summaryCard}>
-            <Text style={styles.summaryLabel}>TOTAL SETTLED</Text>
+            <Text style={styles.summaryLabel}>TO PAY (BORROWED)</Text>
             <Text
               style={[
                 styles.summaryNumber,
                 TYPOGRAPHY.tabularText,
-                { color: COLORS.accent },
+                { color: COLORS.alert },
               ]}
             >
-              ₹{totalSettled.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+              −₹{totalPendingBorrowed.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+            </Text>
+          </View>
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryLabel}>NET POSITION</Text>
+            <Text
+              style={[
+                styles.summaryNumber,
+                TYPOGRAPHY.tabularText,
+                { color: netPending >= 0 ? accent.hex : COLORS.alert },
+              ]}
+            >
+              {netPending < 0 ? '−' : '+'}₹{Math.abs(netPending).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
             </Text>
           </View>
         </View>
@@ -139,6 +166,59 @@ export const BorrowsScreen = () => {
               </View>
             ) : null}
 
+            <Text style={styles.fieldLabel}>ENTRY TYPE</Text>
+            <View style={styles.directionToggleRow}>
+              <TouchableOpacity
+                onPress={() => setBorrowType('lent')}
+                style={[
+                  styles.directionBtn,
+                  borrowType === 'lent' && {
+                    borderColor: accent.hex,
+                    backgroundColor: COLORS.surfaceLight,
+                  },
+                ]}
+              >
+                <Ionicons
+                  name="arrow-up-circle-outline"
+                  size={16}
+                  color={borrowType === 'lent' ? accent.hex : COLORS.textMuted}
+                />
+                <Text
+                  style={[
+                    styles.directionBtnText,
+                    borrowType === 'lent' && { color: accent.hex, fontWeight: '700' },
+                  ]}
+                >
+                  I Lent (They owe me)
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => setBorrowType('borrowed')}
+                style={[
+                  styles.directionBtn,
+                  borrowType === 'borrowed' && {
+                    borderColor: COLORS.alert,
+                    backgroundColor: COLORS.surfaceLight,
+                  },
+                ]}
+              >
+                <Ionicons
+                  name="arrow-down-circle-outline"
+                  size={16}
+                  color={borrowType === 'borrowed' ? COLORS.alert : COLORS.textMuted}
+                />
+                <Text
+                  style={[
+                    styles.directionBtnText,
+                    borrowType === 'borrowed' && { color: COLORS.alert, fontWeight: '700' },
+                  ]}
+                >
+                  I Borrowed (I owe them)
+                </Text>
+              </TouchableOpacity>
+            </View>
+
             <Text style={styles.fieldLabel}>PERSON NAME</Text>
             <TextInput
               value={personName}
@@ -147,7 +227,7 @@ export const BorrowsScreen = () => {
               placeholderTextColor={COLORS.textMuted}
               mode="outlined"
               outlineColor={COLORS.border}
-              activeOutlineColor={COLORS.accent}
+              activeOutlineColor={accent.hex}
               textColor={COLORS.textPrimary}
               style={styles.input}
             />
@@ -161,12 +241,15 @@ export const BorrowsScreen = () => {
               keyboardType="decimal-pad"
               mode="outlined"
               outlineColor={COLORS.border}
-              activeOutlineColor={COLORS.accent}
+              activeOutlineColor={accent.hex}
               textColor={COLORS.textPrimary}
               style={styles.input}
             />
 
-            <TactileButton onPress={handleAddBorrow} style={styles.saveBtn}>
+            <TactileButton
+              onPress={handleAddBorrow}
+              style={[styles.saveBtn, { backgroundColor: accent.hex }]}
+            >
               <Text style={styles.saveBtnText}>Save Entry</Text>
             </TactileButton>
           </View>
@@ -198,14 +281,31 @@ export const BorrowsScreen = () => {
         {/* Borrows List */}
         {filteredBorrows.length > 0 ? (
           filteredBorrows.map((borrow) => {
+            const { type, displayName } = parseBorrowDetails(borrow, transactions);
             const isSettled = borrow.status === 'settled';
+            const isLent = type === 'lent';
 
             return (
               <View key={borrow.id} style={styles.borrowItem}>
                 <View style={styles.borrowLeft}>
-                  <Text style={styles.personName}>{borrow.person_name}</Text>
+                  <Text style={styles.personName}>{displayName}</Text>
                   <View style={styles.borrowMeta}>
                     <Text style={styles.dateText}>{borrow.date}</Text>
+                    <View
+                      style={[
+                        styles.directionTag,
+                        { borderColor: isLent ? accent.hex : COLORS.alert },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.directionTagText,
+                          { color: isLent ? accent.hex : COLORS.alert },
+                        ]}
+                      >
+                        {isLent ? 'LENT' : 'BORROWED'}
+                      </Text>
+                    </View>
                     <View
                       style={[
                         styles.statusTag,
@@ -225,8 +325,14 @@ export const BorrowsScreen = () => {
                 </View>
 
                 <View style={styles.borrowRight}>
-                  <Text style={[styles.amountText, TYPOGRAPHY.tabularText]}>
-                    ₹
+                  <Text
+                    style={[
+                      styles.amountText,
+                      TYPOGRAPHY.tabularText,
+                      { color: isLent ? accent.hex : COLORS.alert },
+                    ]}
+                  >
+                    {isLent ? '+' : '−'}₹
                     {Number(borrow.amount).toLocaleString('en-IN', {
                       minimumFractionDigits: 2,
                     })}
@@ -259,7 +365,7 @@ export const BorrowsScreen = () => {
           </View>
         )}
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 };
 
@@ -440,6 +546,39 @@ const styles = StyleSheet.create({
     paddingVertical: 1,
     borderRadius: 4,
     borderWidth: 1,
+  },
+  directionToggleRow: {
+    flexDirection: 'row',
+    gap: SPACING.sm,
+    marginBottom: SPACING.md,
+  },
+  directionBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: SPACING.sm,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.surface,
+  },
+  directionBtnText: {
+    color: COLORS.textMuted,
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  directionTag: {
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 1,
+    borderRadius: 4,
+    borderWidth: 1,
+  },
+  directionTagText: {
+    fontSize: 9,
+    fontWeight: '700',
   },
   statusPending: {
     backgroundColor: COLORS.warningMuted,

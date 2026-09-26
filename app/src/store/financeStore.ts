@@ -8,13 +8,12 @@ import {
   Borrow,
   Budget,
   BudgetSummary,
-  AccountOverview,
-  BankPreset,
 } from '../types/database';
 import { RealtimeChannel } from '@supabase/supabase-js';
 
 const STORAGE_KEY = '@finance_store_cache_v2';
 const CATEGORIES_STORAGE_KEY = '@finance_categories_v1';
+const ACCOUNT_ORDER_STORAGE_KEY = '@finance_account_order_v1';
 
 export const DEFAULT_STUDENT_CATEGORIES = [
   'Food',
@@ -27,6 +26,69 @@ export const DEFAULT_STUDENT_CATEGORIES = [
   'Entertainment',
   'Other',
 ];
+
+export const parseBorrowDetails = (
+  borrow: Borrow,
+  transactions?: Transaction[]
+): {
+  type: 'lent' | 'borrowed';
+  displayName: string;
+} => {
+  if (borrow.type) {
+    return {
+      type: borrow.type,
+      displayName: borrow.person_name.replace(/^\[(BORROWED|LENT)\]\s*/i, '').trim(),
+    };
+  }
+  if (borrow.person_name?.startsWith('[BORROWED]')) {
+    return {
+      type: 'borrowed',
+      displayName: borrow.person_name.replace(/^\[BORROWED\]\s*/i, '').trim(),
+    };
+  }
+  if (borrow.person_name?.startsWith('[LENT]')) {
+    return {
+      type: 'lent',
+      displayName: borrow.person_name.replace(/^\[LENT\]\s*/i, '').trim(),
+    };
+  }
+  if (borrow.linked_transaction_id && transactions) {
+    const linkedTx = transactions.find((t) => t.id === borrow.linked_transaction_id);
+    if (linkedTx) {
+      return {
+        type: linkedTx.type === 'borrow_taken' ? 'borrowed' : 'lent',
+        displayName: borrow.person_name,
+      };
+    }
+  }
+  return {
+    type: 'lent',
+    displayName: borrow.person_name || 'Borrow',
+  };
+};
+
+const sortAccountsByOrder = (accounts: Account[], orderIds: string[] | null): Account[] => {
+  if (!orderIds || orderIds.length === 0) return accounts;
+  const orderMap = new Map<string, number>();
+  orderIds.forEach((id, idx) => orderMap.set(id, idx));
+  return [...accounts].sort((a, b) => {
+    const orderA = orderMap.has(a.id) ? (orderMap.get(a.id) as number) : 9999;
+    const orderB = orderMap.has(b.id) ? (orderMap.get(b.id) as number) : 9999;
+    return orderA - orderB;
+  });
+};
+
+const deduplicateAccounts = (accounts: Account[]): Account[] => {
+  const seen = new Set<string>();
+  const res: Account[] = [];
+  for (const acc of accounts) {
+    if (!seen.has(acc.id)) {
+      seen.add(acc.id);
+      res.push(acc);
+    }
+  }
+  return res;
+};
 
 interface FinanceState {
   accounts: Account[];
@@ -50,12 +112,22 @@ interface FinanceState {
 
   // Category management
   addCategory: (category: string) => void;
+  updateCategory: (oldCategory: string, newCategory: string) => void;
   reorderCategories: (categories: string[]) => void;
   removeCategory: (category: string) => void;
 
   // Optimistic mutations
   addTransactionOptimistic: (
     txData: Omit<Transaction, 'id' | 'created_at'>
+  ) => Promise<{ success: boolean; error?: string }>;
+
+  updateTransactionOptimistic: (
+    transactionId: string,
+    updates: Partial<Omit<Transaction, 'id' | 'created_at' | 'user_id'>>
+  ) => Promise<{ success: boolean; error?: string }>;
+
+  deleteTransactionOptimistic: (
+    transactionId: string
   ) => Promise<{ success: boolean; error?: string }>;
 
   toggleSettleBorrowOptimistic: (
@@ -72,16 +144,26 @@ interface FinanceState {
 
   createAccountOptimistic: (
     accData: Omit<Account, 'id' | 'created_at' | 'updated_at'>
-  ) => Promise<{ success: boolean; error?: string }>;
+  ) => Promise<{ success: boolean; error?: string; account?: Account }>;
 
   updateAccountOptimistic: (
     accountId: string,
-    updates: Partial<Pick<Account, 'name' | 'type' | 'credit_limit' | 'bank_preset'>>
+    updates: Partial<Omit<Account, 'id' | 'user_id' | 'created_at' | 'updated_at'>>
   ) => Promise<{ success: boolean; error?: string }>;
 
   deleteAccountOptimistic: (
     accountId: string
   ) => Promise<{ success: boolean; error?: string }>;
+
+  deleteAccountWithCalibration: (
+    accountId: string,
+    userId: string,
+    calibrateFirst: boolean
+  ) => Promise<{ success: boolean; error?: string }>;
+
+  reorderAccounts: (
+    newAccounts: Account[]
+  ) => Promise<void>;
 
   // Calibration flow
   calibrateAccountBalance: (
@@ -89,6 +171,16 @@ interface FinanceState {
     newBalance: number,
     logAsTransaction: boolean,
     userId: string
+  ) => Promise<{ success: boolean; error?: string }>;
+
+  // Credit Card Bill Payment
+  payCreditCardBill: (
+    creditCardId: string,
+    fromAccountId: string,
+    amount: number,
+    userId: string,
+    date?: string,
+    note?: string
   ) => Promise<{ success: boolean; error?: string }>;
 }
 
@@ -135,9 +227,10 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
 
   loadCachedData: async () => {
     try {
-      const [cached, cachedCats] = await Promise.all([
+      const [cached, cachedCats, cachedOrder] = await Promise.all([
         AsyncStorage.getItem(STORAGE_KEY),
         AsyncStorage.getItem(CATEGORIES_STORAGE_KEY),
+        AsyncStorage.getItem(ACCOUNT_ORDER_STORAGE_KEY),
       ]);
 
       let categories = DEFAULT_STUDENT_CATEGORIES;
@@ -150,10 +243,20 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
         } catch {}
       }
 
+      let orderIds: string[] | null = null;
+      if (cachedOrder) {
+        try {
+          orderIds = JSON.parse(cachedOrder);
+        } catch {}
+      }
+
       if (cached) {
         const parsed = JSON.parse(cached);
+        const rawAccounts = (parsed.accounts || []) as Account[];
+        const accounts = sortAccountsByOrder(deduplicateAccounts(rawAccounts), orderIds);
+
         set({
-          accounts: parsed.accounts || [],
+          accounts,
           transactions: parsed.transactions || [],
           borrows: parsed.borrows || [],
           budgets: parsed.budgets || [],
@@ -179,6 +282,15 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
     AsyncStorage.setItem(CATEGORIES_STORAGE_KEY, JSON.stringify(updated)).catch(() => {});
   },
 
+  updateCategory: (oldCategory: string, newCategory: string) => {
+    const trimmed = newCategory.trim();
+    if (!trimmed || trimmed === oldCategory) return;
+    const current = get().categories;
+    const updated = current.map((c) => (c === oldCategory ? trimmed : c));
+    set({ categories: updated });
+    AsyncStorage.setItem(CATEGORIES_STORAGE_KEY, JSON.stringify(updated)).catch(() => {});
+  },
+
   reorderCategories: (categories: string[]) => {
     set({ categories });
     AsyncStorage.setItem(CATEGORIES_STORAGE_KEY, JSON.stringify(categories)).catch(() => {});
@@ -194,7 +306,7 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
     try {
       const month = get().selectedMonth;
 
-      const [accountsRes, txRes, borrowsRes, budgetsRes, summaryRes] = await Promise.all([
+      const [accountsRes, txRes, borrowsRes, budgetsRes, summaryRes, cachedOrder] = await Promise.all([
         supabase
           .from('accounts')
           .select('*')
@@ -222,9 +334,18 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
           .select('*')
           .eq('user_id', userId)
           .eq('month', month),
+        AsyncStorage.getItem(ACCOUNT_ORDER_STORAGE_KEY),
       ]);
 
-      const accounts = (accountsRes.data as Account[]) || [];
+      let orderIds: string[] | null = null;
+      if (cachedOrder) {
+        try {
+          orderIds = JSON.parse(cachedOrder);
+        } catch {}
+      }
+
+      const rawAccounts = (accountsRes.data as Account[]) || [];
+      const accounts = sortAccountsByOrder(deduplicateAccounts(rawAccounts), orderIds);
       const transactions = (txRes.data as Transaction[]) || [];
       const borrows = (borrowsRes.data as Borrow[]) || [];
       const budgets = (budgetsRes.data as Budget[]) || [];
@@ -266,13 +387,27 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
           const current = get().accounts;
           if (payload.eventType === 'INSERT') {
             const newAcc = payload.new as Account;
-            if (!current.some((a) => a.id === newAcc.id)) {
-              set({ accounts: [...current, newAcc] });
+            if (current.some((a) => a.id === newAcc.id)) return;
+
+            // Check if there is an optimistic temp account matching name and type
+            const tempMatch = current.find(
+              (a) => a.id.startsWith('temp_acc_') && a.name === newAcc.name && a.type === newAcc.type
+            );
+            if (tempMatch) {
+              set({
+                accounts: deduplicateAccounts(
+                  current.map((a) => (a.id === tempMatch.id ? newAcc : a))
+                ),
+              });
+            } else {
+              set({ accounts: deduplicateAccounts([...current, newAcc]) });
             }
           } else if (payload.eventType === 'UPDATE') {
             const updatedAcc = payload.new as Account;
             set({
-              accounts: current.map((a) => (a.id === updatedAcc.id ? updatedAcc : a)),
+              accounts: deduplicateAccounts(
+                current.map((a) => (a.id === updatedAcc.id ? updatedAcc : a))
+              ),
             });
           } else if (payload.eventType === 'DELETE') {
             const oldId = payload.old.id;
@@ -460,6 +595,180 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
     }
   },
 
+  updateTransactionOptimistic: async (transactionId, updates) => {
+    const prevTransactions = [...get().transactions];
+    const oldTx = prevTransactions.find((t) => t.id === transactionId);
+    if (!oldTx) return { success: false, error: 'Transaction not found' };
+
+    const newTx: Transaction = {
+      ...oldTx,
+      ...updates,
+    };
+
+    const prevAccounts = [...get().accounts];
+    const prevSummaries = [...get().budgetSummaries];
+
+    // Recompute account balances
+    const updatedAccounts = prevAccounts.map((acc) => {
+      let balance = Number(acc.current_balance);
+
+      if (acc.id === oldTx.account_id) {
+        if (oldTx.type === 'income' || oldTx.type === 'borrow_taken') {
+          balance -= Number(oldTx.amount);
+        } else if (oldTx.type === 'expense' || oldTx.type === 'borrow_given') {
+          balance += Number(oldTx.amount);
+        }
+      }
+
+      if (acc.id === newTx.account_id) {
+        if (newTx.type === 'income' || newTx.type === 'borrow_taken') {
+          balance += Number(newTx.amount);
+        } else if (newTx.type === 'expense' || newTx.type === 'borrow_given') {
+          balance -= Number(newTx.amount);
+        }
+      }
+
+      return {
+        ...acc,
+        current_balance: balance,
+      };
+    });
+
+    // Recompute budget summaries
+    const updatedSummaries = prevSummaries.map((bs) => {
+      let spent = Number(bs.spent);
+
+      if (oldTx.type === 'expense' && (bs.category === oldTx.category || bs.category === null)) {
+        spent -= Number(oldTx.amount);
+      }
+      if (newTx.type === 'expense' && (bs.category === newTx.category || bs.category === null)) {
+        spent += Number(newTx.amount);
+      }
+
+      spent = Math.max(0, spent);
+      const newRemaining = Number(bs.monthly_limit) - spent;
+      const newPct =
+        bs.monthly_limit > 0 ? Math.round((spent / Number(bs.monthly_limit)) * 100) : 0;
+
+      return {
+        ...bs,
+        spent,
+        remaining: newRemaining,
+        spent_percentage: newPct,
+      };
+    });
+
+    set({
+      transactions: prevTransactions.map((t) => (t.id === transactionId ? newTx : t)),
+      accounts: updatedAccounts,
+      budgetSummaries: updatedSummaries,
+      inlineError: null,
+    });
+
+    try {
+      const { data, error } = await supabase
+        .from('transactions')
+        .update(updates)
+        .eq('id', transactionId)
+        .select()
+        .single();
+
+      if (error) throw error;
+      if (data) {
+        set((state) => ({
+          transactions: state.transactions.map((t) => (t.id === transactionId ? (data as Transaction) : t)),
+        }));
+      }
+      return { success: true };
+    } catch (err: any) {
+      set({
+        transactions: prevTransactions,
+        accounts: prevAccounts,
+        budgetSummaries: prevSummaries,
+        inlineError: `Could not update transaction: ${err.message || 'Network error'}. Changes rolled back.`,
+      });
+      return { success: false, error: err.message };
+    }
+  },
+
+  deleteTransactionOptimistic: async (transactionId) => {
+    const prevTransactions = [...get().transactions];
+    const targetTx = prevTransactions.find((t) => t.id === transactionId);
+    if (!targetTx) return { success: false, error: 'Transaction not found' };
+
+    const prevAccounts = [...get().accounts];
+    const prevSummaries = [...get().budgetSummaries];
+    const prevBorrows = [...get().borrows];
+
+    // Revert account balance effect
+    const updatedAccounts = prevAccounts.map((acc) => {
+      if (acc.id === targetTx.account_id) {
+        let delta = 0;
+        if (targetTx.type === 'income' || targetTx.type === 'borrow_taken') {
+          delta = -Number(targetTx.amount);
+        } else if (targetTx.type === 'expense' || targetTx.type === 'borrow_given') {
+          delta = Number(targetTx.amount);
+        }
+        return {
+          ...acc,
+          current_balance: Number(acc.current_balance) + delta,
+        };
+      }
+      return acc;
+    });
+
+    // Revert budget spent effect if expense
+    const updatedSummaries = prevSummaries.map((bs) => {
+      if (targetTx.type === 'expense') {
+        const matchesCategory = bs.category === targetTx.category || bs.category === null;
+        if (matchesCategory) {
+          const newSpent = Math.max(0, Number(bs.spent) - Number(targetTx.amount));
+          const newRemaining = Number(bs.monthly_limit) - newSpent;
+          const newPct =
+            bs.monthly_limit > 0 ? Math.round((newSpent / Number(bs.monthly_limit)) * 100) : 0;
+          return {
+            ...bs,
+            spent: newSpent,
+            remaining: newRemaining,
+            spent_percentage: newPct,
+          };
+        }
+      }
+      return bs;
+    });
+
+    const updatedBorrows = prevBorrows.map((b) =>
+      b.linked_transaction_id === transactionId ? { ...b, linked_transaction_id: null } : b
+    );
+
+    set({
+      transactions: prevTransactions.filter((t) => t.id !== transactionId),
+      accounts: updatedAccounts,
+      budgetSummaries: updatedSummaries,
+      borrows: updatedBorrows,
+      inlineError: null,
+    });
+
+    try {
+      const { error } = await supabase
+        .from('transactions')
+        .delete()
+        .eq('id', transactionId);
+
+      if (error) throw error;
+      return { success: true };
+    } catch (err: any) {
+      set({
+        transactions: prevTransactions,
+        accounts: prevAccounts,
+        budgetSummaries: prevSummaries,
+        borrows: prevBorrows,
+        inlineError: `Could not delete transaction: ${err.message || 'Network error'}. Changes rolled back.`,
+      });
+      return { success: false, error: err.message };
+    }
+  },
+
   toggleSettleBorrowOptimistic: async (borrowId: string) => {
     const prevBorrows = [...get().borrows];
     const targetBorrow = prevBorrows.find((b) => b.id === borrowId);
@@ -491,8 +800,16 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
 
   addBorrowOptimistic: async (borrowData) => {
     const tempId = `temp_borrow_${Date.now()}`;
+    const cleanName = borrowData.person_name.replace(/^\[(BORROWED|LENT)\]\s*/i, '').trim();
+    const isBorrowed =
+      borrowData.type === 'borrowed' ||
+      borrowData.person_name.startsWith('[BORROWED]');
+    const encodedPersonName = isBorrowed ? `[BORROWED] ${cleanName}` : `[LENT] ${cleanName}`;
+
     const optimisticBorrow: Borrow = {
       ...borrowData,
+      person_name: encodedPersonName,
+      type: isBorrowed ? 'borrowed' : 'lent',
       id: tempId,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -509,7 +826,7 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
         .from('borrows')
         .insert({
           user_id: borrowData.user_id,
-          person_name: borrowData.person_name,
+          person_name: encodedPersonName,
           amount: borrowData.amount,
           status: borrowData.status,
           linked_transaction_id: borrowData.linked_transaction_id,
@@ -520,8 +837,13 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
 
       if (error) throw error;
 
+      const savedBorrow = {
+        ...(data as Borrow),
+        type: isBorrowed ? ('borrowed' as const) : ('lent' as const),
+      };
+
       set((state) => ({
-        borrows: state.borrows.map((b) => (b.id === tempId ? (data as Borrow) : b)),
+        borrows: state.borrows.map((b) => (b.id === tempId ? savedBorrow : b)),
       }));
 
       return { success: true };
@@ -537,55 +859,115 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
   setBudgetOptimistic: async (budgetData) => {
     const prevBudgets = [...get().budgets];
     const prevSummaries = [...get().budgetSummaries];
+    const allTx = get().transactions;
 
-    const existingIndex = prevBudgets.findIndex(
+    // 1. Calculate optimistic spent for this category and month directly from local transactions (0ms)
+    const txForMonth = allTx.filter(
+      (t) => t.type === 'expense' && t.date.startsWith(budgetData.month)
+    );
+    const spent = txForMonth
+      .filter((t) => (budgetData.category === null ? true : t.category === budgetData.category))
+      .reduce((sum, t) => sum + Number(t.amount || 0), 0);
+
+    const remaining = budgetData.monthly_limit - spent;
+    const spent_percentage = budgetData.monthly_limit > 0
+      ? Math.round((spent / budgetData.monthly_limit) * 1000) / 10
+      : 0;
+
+    // 2. Optimistically update budgets list
+    const existingBudgetIndex = prevBudgets.findIndex(
       (b) => b.category === budgetData.category && b.month === budgetData.month
     );
+    const tempId = prevBudgets[existingBudgetIndex]?.id || `temp_budget_${Date.now()}`;
+    const optimisticBudget: Budget = {
+      ...budgetData,
+      id: tempId,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
 
-    let updatedBudgets: Budget[];
-    const tempId = `temp_budget_${Date.now()}`;
-    if (existingIndex >= 0) {
-      updatedBudgets = prevBudgets.map((b, idx) =>
-        idx === existingIndex ? { ...b, monthly_limit: budgetData.monthly_limit } : b
-      );
-    } else {
-      const newBudget: Budget = {
-        ...budgetData,
-        id: tempId,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-      updatedBudgets = [...prevBudgets, newBudget];
-    }
+    const updatedBudgets = existingBudgetIndex >= 0
+      ? prevBudgets.map((b, idx) => (idx === existingBudgetIndex ? optimisticBudget : b))
+      : [...prevBudgets, optimisticBudget];
 
-    set({ budgets: updatedBudgets, inlineError: null });
+    // 3. Optimistically update budgetSummaries list (SYNCHRONOUS UI UPDATE - 0ms)
+    const existingSummaryIndex = prevSummaries.findIndex(
+      (s) => s.category === budgetData.category && s.month === budgetData.month
+    );
+    const optimisticSummary: BudgetSummary = {
+      budget_id: tempId,
+      user_id: budgetData.user_id,
+      category: budgetData.category ?? null,
+      monthly_limit: budgetData.monthly_limit,
+      month: budgetData.month,
+      spent,
+      remaining,
+      spent_percentage,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    const updatedSummaries = existingSummaryIndex >= 0
+      ? prevSummaries.map((s, idx) => (idx === existingSummaryIndex ? optimisticSummary : s))
+      : [...prevSummaries, optimisticSummary];
+
+    // Apply state immediately so UI updates without ANY lag
+    set({
+      budgets: updatedBudgets,
+      budgetSummaries: updatedSummaries,
+      inlineError: null,
+    });
 
     try {
-      const { error } = await supabase
+      // Find existing budget record for this user, category, and month
+      let query = supabase
         .from('budgets')
-        .upsert(
-          {
-            user_id: budgetData.user_id,
-            category: budgetData.category,
-            monthly_limit: budgetData.monthly_limit,
-            month: budgetData.month,
-          },
-          { onConflict: 'user_id,category,month' }
-        )
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      const { data: summaryData } = await supabase
-        .from('v_budget_summary')
-        .select('*')
+        .select('id')
         .eq('user_id', budgetData.user_id)
         .eq('month', budgetData.month);
 
-      if (summaryData) {
-        set({ budgetSummaries: summaryData as BudgetSummary[] });
+      if (budgetData.category === null || budgetData.category === undefined) {
+        query = query.is('category', null);
+      } else {
+        query = query.eq('category', budgetData.category);
       }
+
+      const { data: existingRows, error: findError } = await query;
+      if (findError) throw findError;
+
+      let savedId = tempId;
+      if (existingRows && existingRows.length > 0) {
+        savedId = existingRows[0].id;
+        const { error: updateError } = await supabase
+          .from('budgets')
+          .update({
+            monthly_limit: budgetData.monthly_limit,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', savedId);
+
+        if (updateError) throw updateError;
+      } else {
+        const { data: inserted, error: insertError } = await supabase
+          .from('budgets')
+          .insert({
+            user_id: budgetData.user_id,
+            category: budgetData.category ?? null,
+            monthly_limit: budgetData.monthly_limit,
+            month: budgetData.month,
+          })
+          .select()
+          .single();
+
+        if (insertError) throw insertError;
+        if (inserted) savedId = inserted.id;
+      }
+
+      // Sync real ID from DB
+      set({
+        budgets: get().budgets.map((b) => (b.id === tempId ? { ...b, id: savedId } : b)),
+        budgetSummaries: get().budgetSummaries.map((s) => (s.budget_id === tempId ? { ...s, budget_id: savedId } : s)),
+      });
 
       return { success: true };
     } catch (err: any) {
@@ -609,7 +991,7 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
 
     const prevAccounts = [...get().accounts];
     set({
-      accounts: [...prevAccounts, optimisticAcc],
+      accounts: deduplicateAccounts([...prevAccounts, optimisticAcc]),
       inlineError: null,
     });
 
@@ -622,17 +1004,26 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
           type: accData.type,
           current_balance: accData.current_balance,
           credit_limit: accData.credit_limit,
+          bank_preset: accData.bank_preset || null,
         })
         .select()
         .single();
 
       if (error) throw error;
 
-      set((state) => ({
-        accounts: state.accounts.map((a) => (a.id === tempId ? (data as Account) : a)),
-      }));
+      const realAcc = data as Account;
+      set((state) => {
+        const alreadyHasReal = state.accounts.some((a) => a.id === realAcc.id);
+        let updated: Account[];
+        if (alreadyHasReal) {
+          updated = state.accounts.filter((a) => a.id !== tempId);
+        } else {
+          updated = state.accounts.map((a) => (a.id === tempId ? realAcc : a));
+        }
+        return { accounts: deduplicateAccounts(updated) };
+      });
 
-      return { success: true };
+      return { success: true, account: realAcc };
     } catch (err: any) {
       set({
         accounts: prevAccounts,
@@ -645,7 +1036,9 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
   updateAccountOptimistic: async (accountId, updates) => {
     const prevAccounts = [...get().accounts];
     set({
-      accounts: prevAccounts.map((a) => (a.id === accountId ? { ...a, ...updates } : a)),
+      accounts: deduplicateAccounts(
+        prevAccounts.map((a) => (a.id === accountId ? { ...a, ...updates } : a))
+      ),
       inlineError: null,
     });
 
@@ -684,6 +1077,29 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
       });
       return { success: false, error: err.message };
     }
+  },
+
+  deleteAccountWithCalibration: async (accountId: string, userId: string, calibrateFirst: boolean) => {
+    const target = get().accounts.find((a) => a.id === accountId);
+    if (!target) return { success: false, error: 'Account not found' };
+
+    const balance = Number(target.current_balance || 0);
+
+    if (calibrateFirst && Math.abs(balance) > 0.01) {
+      const calRes = await get().calibrateAccountBalance(accountId, 0, true, userId);
+      if (!calRes.success) {
+        return calRes;
+      }
+    }
+
+    return await get().deleteAccountOptimistic(accountId);
+  },
+
+  reorderAccounts: async (newAccounts: Account[]) => {
+    const deduplicated = deduplicateAccounts(newAccounts);
+    set({ accounts: deduplicated });
+    const orderIds = deduplicated.map((a) => a.id);
+    await AsyncStorage.setItem(ACCOUNT_ORDER_STORAGE_KEY, JSON.stringify(orderIds)).catch(() => {});
   },
 
   // Calibration Flow
@@ -740,6 +1156,124 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
         });
         return { success: false, error: err.message };
       }
+    }
+  },
+
+  // Credit Card Bill Payment
+  payCreditCardBill: async (creditCardId, fromAccountId, amount, userId, date, note) => {
+    const txDate = date || new Date().toISOString().substring(0, 10);
+    const prevAccounts = [...get().accounts];
+    const prevTransactions = [...get().transactions];
+
+    const card = prevAccounts.find((a) => a.id === creditCardId);
+    const sourceAcc = prevAccounts.find((a) => a.id === fromAccountId);
+
+    if (!card || !sourceAcc) {
+      return { success: false, error: 'Credit Card or Payment Source account not found' };
+    }
+
+    const paymentAmount = Number(amount);
+    if (isNaN(paymentAmount) || paymentAmount <= 0) {
+      return { success: false, error: 'Please enter a valid payment amount' };
+    }
+
+    // 1. Optimistic updates
+    const tempBankTxId = `temp_pay_bank_${Date.now()}`;
+    const tempCardTxId = `temp_pay_card_${Date.now()}`;
+
+    const bankTx: Transaction = {
+      id: tempBankTxId,
+      user_id: userId,
+      account_id: fromAccountId,
+      type: 'expense',
+      amount: paymentAmount,
+      category: 'Credit Card Payment',
+      note: note || `Bill payment to ${card.name}`,
+      date: txDate,
+      source: 'manual',
+      created_at: new Date().toISOString(),
+    };
+
+    const cardTx: Transaction = {
+      id: tempCardTxId,
+      user_id: userId,
+      account_id: creditCardId,
+      type: 'income',
+      amount: paymentAmount,
+      category: 'Credit Card Payment',
+      note: note || `Bill payment from ${sourceAcc.name}`,
+      date: txDate,
+      source: 'manual',
+      created_at: new Date().toISOString(),
+    };
+
+    const updatedAccounts = prevAccounts.map((a) => {
+      if (a.id === fromAccountId) {
+        return { ...a, current_balance: Number(a.current_balance) - paymentAmount };
+      }
+      if (a.id === creditCardId) {
+        return { ...a, current_balance: Number(a.current_balance) + paymentAmount };
+      }
+      return a;
+    });
+
+    set({
+      accounts: updatedAccounts,
+      transactions: [bankTx, cardTx, ...prevTransactions],
+      inlineError: null,
+    });
+
+    try {
+      const { data: insertedBankTx, error: bankErr } = await supabase
+        .from('transactions')
+        .insert({
+          user_id: userId,
+          account_id: fromAccountId,
+          type: 'expense',
+          amount: paymentAmount,
+          category: 'Credit Card Payment',
+          note: note || `Bill payment to ${card.name}`,
+          date: txDate,
+          source: 'manual',
+        })
+        .select()
+        .single();
+
+      if (bankErr) throw bankErr;
+
+      const { data: insertedCardTx, error: cardErr } = await supabase
+        .from('transactions')
+        .insert({
+          user_id: userId,
+          account_id: creditCardId,
+          type: 'income',
+          amount: paymentAmount,
+          category: 'Credit Card Payment',
+          note: note || `Bill payment from ${sourceAcc.name}`,
+          date: txDate,
+          source: 'manual',
+        })
+        .select()
+        .single();
+
+      if (cardErr) throw cardErr;
+
+      set((state) => ({
+        transactions: state.transactions.map((t) => {
+          if (t.id === tempBankTxId) return insertedBankTx as Transaction;
+          if (t.id === tempCardTxId) return insertedCardTx as Transaction;
+          return t;
+        }),
+      }));
+
+      return { success: true };
+    } catch (err: any) {
+      set({
+        accounts: prevAccounts,
+        transactions: prevTransactions,
+        inlineError: `Could not process bill payment: ${err.message || 'Network error'}. Rolled back.`,
+      });
+      return { success: false, error: err.message };
     }
   },
 }));

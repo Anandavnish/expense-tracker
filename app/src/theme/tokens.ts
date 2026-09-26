@@ -10,25 +10,25 @@ export const SPACING = {
   xl: 24,
 } as const;
 
-export const DEFAULT_ACCENT = '#00D09C';
-export const DEFAULT_ACCENT_MUTED = '#00D09C1A';
+export const DEFAULT_ACCENT = '#10B981';
+export const DEFAULT_ACCENT_MUTED = '#10B9811A';
 
 export const COLORS = {
-  // Pure deep slate tones - no purple gradients
-  background: '#0B1120',
-  backgroundSecondary: '#0F172A',
-  surface: '#1E293B',
-  surfaceLight: '#27354A',
-  border: '#334155',
-  borderFocus: '#00D09C',
+  // Real-world matte obsidian & carbon luxury palette
+  background: '#0C0D11',
+  backgroundSecondary: '#13141A',
+  surface: '#17181F',
+  surfaceLight: '#20222B',
+  border: '#282A36',
+  borderFocus: '#10B981',
   
-  // Single crisp accent color (default emerald)
+  // Refined organic fintech accent (authentic emerald sage)
   accent: DEFAULT_ACCENT,
   accentMuted: DEFAULT_ACCENT_MUTED,
   
   // Semantic status colors
-  alert: '#FF5A5F',         // Red/Coral for expense/over-budget
-  alertMuted: '#FF5A5F1A',
+  alert: '#EF4444',         // Refined crimson for expense/over-budget
+  alertMuted: '#EF44441A',
   warning: '#F59E0B',
   warningMuted: '#F59E0B1A',
   
@@ -36,7 +36,7 @@ export const COLORS = {
   textPrimary: '#F8FAFC',
   textSecondary: '#94A3B8',
   textMuted: '#64748B',
-  textInverse: '#0B1120',
+  textInverse: '#0C0D11',
 } as const;
 
 export const TYPOGRAPHY: {

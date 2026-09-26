@@ -1,24 +1,48 @@
-// src/screens/main/BudgetsScreen.tsx
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  SafeAreaView,
   ScrollView,
   TouchableOpacity,
-  KeyboardAvoidingView,
-  Platform,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { ProgressBar, TextInput } from 'react-native-paper';
 import { useAuthStore } from '../../store/authStore';
 import { useFinanceStore } from '../../store/financeStore';
 import { useSettingsStore } from '../../store/settingsStore';
 import { COLORS, SPACING, TYPOGRAPHY } from '../../theme/tokens';
-import { TactileButton } from '../../components/TactileButton';
 import { InlineError } from '../../components/InlineError';
 
-export const BudgetsScreen = () => {
+const getCategoryIcon = (cat: string): keyof typeof Ionicons.glyphMap => {
+  const lower = cat.toLowerCase();
+  if (lower.includes('overall')) return 'pie-chart-outline';
+  if (lower.includes('food') || lower.includes('dining')) return 'fast-food-outline';
+  if (lower.includes('grocer')) return 'cart-outline';
+  if (lower.includes('rent') || lower.includes('util')) return 'home-outline';
+  if (lower.includes('transp')) return 'car-outline';
+  if (lower.includes('shop')) return 'bag-handle-outline';
+  if (lower.includes('entertain')) return 'film-outline';
+  if (lower.includes('subscript')) return 'calendar-outline';
+  if (lower.includes('health')) return 'medkit-outline';
+  if (lower.includes('educat')) return 'school-outline';
+  if (lower.includes('care')) return 'sparkles-outline';
+  if (lower.includes('travel')) return 'airplane-outline';
+  return 'pricetag-outline';
+};
+
+interface BudgetsScreenProps {
+  route?: {
+    params?: {
+      editCategory?: string;
+      currentLimit?: string;
+    };
+  };
+}
+
+export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
+  const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
   const { accent } = useSettingsStore();
   const {
@@ -30,8 +54,9 @@ export const BudgetsScreen = () => {
     setInlineError,
   } = useFinanceStore();
 
-  const availableCategories = ['Overall Budget', ...categories];
-  const [selectedCategory, setSelectedCategory] = useState('Overall Budget');
+  const initialCategory = route?.params?.editCategory !== undefined ? route.params.editCategory : 'Overall Budget';
+  const [selectedCategory, setSelectedCategory] = useState(initialCategory);
+  const [prevParamCategory, setPrevParamCategory] = useState(route?.params?.editCategory);
   const [limitAmount, setLimitAmount] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -39,7 +64,46 @@ export const BudgetsScreen = () => {
   const overallSummary = budgetSummaries.find((b) => b.category === null);
   const categorySummaries = budgetSummaries.filter((b) => b.category !== null);
 
-  const handleSaveBudget = async () => {
+  // Auto-handle edit params from route (e.g. from Dashboard "Edit" button)
+  if (route?.params?.editCategory !== prevParamCategory) {
+    setPrevParamCategory(route?.params?.editCategory);
+    if (route?.params?.editCategory !== undefined) {
+      const cat = route.params.editCategory;
+      setSelectedCategory(cat);
+      if (route.params.currentLimit) {
+        setLimitAmount(String(route.params.currentLimit));
+      } else {
+        const target = cat === 'Overall Budget' ? null : cat;
+        const existing = budgetSummaries.find((b) => b.category === target);
+        if (existing && Number(existing.monthly_limit) > 0) {
+          setLimitAmount(String(existing.monthly_limit));
+        } else {
+          setLimitAmount('');
+        }
+      }
+      setShowForm(true);
+    }
+  }
+
+  // When changing category in form, prefill limit if one already exists
+  const handleSelectCategory = (cat: string) => {
+    setSelectedCategory(cat);
+    const target = cat === 'Overall Budget' ? null : cat;
+    const existing = budgetSummaries.find((b) => b.category === target);
+    if (existing && Number(existing.monthly_limit) > 0) {
+      setLimitAmount(String(existing.monthly_limit));
+    } else {
+      setLimitAmount('');
+    }
+  };
+
+  const isEditingExisting = useMemo(() => {
+    const target = selectedCategory === 'Overall Budget' ? null : selectedCategory;
+    const existing = budgetSummaries.find((b) => b.category === target);
+    return !!existing && Number(existing.monthly_limit) > 0;
+  }, [selectedCategory, budgetSummaries]);
+
+  const handleSaveBudget = () => {
     if (!user) return;
     const numLimit = parseFloat(limitAmount);
     if (isNaN(numLimit) || numLimit <= 0) {
@@ -51,35 +115,36 @@ export const BudgetsScreen = () => {
     const categoryToSave =
       selectedCategory === 'Overall Budget' ? null : selectedCategory;
 
-    await setBudgetOptimistic({
+    // Instant UI close - 0ms lag
+    setShowForm(false);
+    setLimitAmount('');
+
+    setBudgetOptimistic({
       user_id: user.id,
       category: categoryToSave,
       monthly_limit: numLimit,
       month: selectedMonth,
     });
-
-    setLimitAmount('');
-    setShowForm(false);
   };
 
   const getStatusColor = (pct: number) => {
     if (pct >= 100) return COLORS.alert;
     if (pct >= 80) return COLORS.warning;
-    return accent.value;
+    return accent.hex;
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <View style={[styles.safeArea, { paddingTop: insets.top }]}>
       <View style={styles.topHeader}>
         <View>
-          <Text style={[styles.appTitle, { color: accent.value }]}>BUDGETS</Text>
+          <Text style={[styles.appTitle, { color: accent.hex }]}>BUDGETS</Text>
           <Text style={styles.monthText}>Current Period: {selectedMonth}</Text>
         </View>
         <TouchableOpacity
           onPress={() => setShowForm(!showForm)}
           style={styles.addBudgetBtn}
         >
-          <Text style={[styles.addBudgetText, { color: accent.value }]}>
+          <Text style={[styles.addBudgetText, { color: accent.hex }]}>
             {showForm ? 'Cancel' : '+ Set Budget'}
           </Text>
         </TouchableOpacity>
@@ -90,46 +155,92 @@ export const BudgetsScreen = () => {
       <ScrollView contentContainerStyle={styles.scrollContent}>
         {/* Set Budget Form (Collapsible) */}
         {showForm ? (
-          <View style={[styles.formCard, { borderColor: accent.value }]}>
-            <Text style={styles.formTitle}>CONFIGURE MONTHLY LIMIT</Text>
+          <View style={[styles.formCard, { borderColor: accent.hex }]}>
+            <Text style={styles.formTitle}>
+              {isEditingExisting ? 'EDIT MONTHLY LIMIT' : 'CONFIGURE MONTHLY LIMIT'}
+            </Text>
             {formError ? (
               <View style={styles.errorBox}>
                 <Text style={styles.errorText}>{formError}</Text>
               </View>
             ) : null}
 
-            <Text style={styles.fieldLabel}>CATEGORY</Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={styles.catChipsScroll}
+            <Text style={styles.fieldLabel}>SELECT BUDGET TARGET</Text>
+            
+            {/* Primary Overall Option */}
+            <TouchableOpacity
+              onPress={() => handleSelectCategory('Overall Budget')}
+              style={[
+                styles.overallCategoryPill,
+                selectedCategory === 'Overall Budget' && {
+                  borderColor: accent.hex,
+                  backgroundColor: accent.muted,
+                },
+              ]}
+              activeOpacity={0.7}
             >
-              {availableCategories.map((cat) => {
+              <View style={styles.catPillLeft}>
+                <Ionicons
+                  name="pie-chart-outline"
+                  size={16}
+                  color={selectedCategory === 'Overall Budget' ? accent.hex : COLORS.textSecondary}
+                />
+                <Text
+                  style={[
+                    styles.overallCategoryText,
+                    selectedCategory === 'Overall Budget' && {
+                      color: accent.hex,
+                      fontWeight: '700',
+                    },
+                  ]}
+                >
+                  Overall Monthly Budget
+                </Text>
+              </View>
+              {selectedCategory === 'Overall Budget' && (
+                <Ionicons name="checkmark-circle" size={16} color={accent.hex} />
+              )}
+            </TouchableOpacity>
+
+            {/* Redesigned Multi-column Wrapping Grid of Categories */}
+            <View style={styles.categoriesGrid}>
+              {categories.map((cat) => {
                 const active = selectedCategory === cat;
+                const iconName = getCategoryIcon(cat);
                 return (
                   <TouchableOpacity
                     key={cat}
-                    onPress={() => setSelectedCategory(cat)}
+                    onPress={() => handleSelectCategory(cat)}
                     style={[
-                      styles.catChip,
+                      styles.categoryGridPill,
                       active && {
-                        borderColor: accent.value,
+                        borderColor: accent.hex,
                         backgroundColor: accent.muted,
                       },
                     ]}
+                    activeOpacity={0.7}
                   >
+                    <Ionicons
+                      name={iconName}
+                      size={14}
+                      color={active ? accent.hex : COLORS.textSecondary}
+                    />
                     <Text
                       style={[
-                        styles.catChipText,
-                        active && styles.catChipTextActive,
+                        styles.categoryGridPillText,
+                        active && { color: accent.hex, fontWeight: '700' },
                       ]}
+                      numberOfLines={1}
                     >
                       {cat}
                     </Text>
+                    {active && (
+                      <Ionicons name="checkmark-circle" size={13} color={accent.hex} />
+                    )}
                   </TouchableOpacity>
                 );
               })}
-            </ScrollView>
+            </View>
 
             <Text style={styles.fieldLabel}>MONTHLY LIMIT (₹)</Text>
             <TextInput
@@ -145,9 +256,15 @@ export const BudgetsScreen = () => {
               style={styles.limitInput}
             />
 
-            <TactileButton onPress={handleSaveBudget} style={styles.saveBudgetBtn}>
-              <Text style={styles.saveBudgetBtnText}>Save Budget</Text>
-            </TactileButton>
+            <TouchableOpacity
+              onPress={handleSaveBudget}
+              style={[styles.saveBudgetBtn, { backgroundColor: accent.hex }]}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.saveBudgetBtnText}>
+                {isEditingExisting ? 'Update Budget' : 'Save Budget'}
+              </Text>
+            </TouchableOpacity>
           </View>
         ) : null}
 
@@ -159,15 +276,31 @@ export const BudgetsScreen = () => {
         {overallSummary ? (
           <View style={styles.budgetCard}>
             <View style={styles.cardHeader}>
-              <Text style={styles.budgetCardName}>Overall Budget</Text>
-              <Text
-                style={[
-                  styles.pctBadgeText,
-                  { color: getStatusColor(Number(overallSummary.spent_percentage)) },
-                ]}
-              >
-                {Math.round(Number(overallSummary.spent_percentage))}% spent
-              </Text>
+              <View style={styles.cardHeaderTitleRow}>
+                <Ionicons name="pie-chart-outline" size={17} color={accent.hex} />
+                <Text style={styles.budgetCardName}>Overall Budget</Text>
+              </View>
+              <View style={styles.cardHeaderRight}>
+                <Text
+                  style={[
+                    styles.pctBadgeText,
+                    { color: getStatusColor(Number(overallSummary.spent_percentage)) },
+                  ]}
+                >
+                  {Math.round(Number(overallSummary.spent_percentage))}% spent
+                </Text>
+                <TouchableOpacity
+                  onPress={() => {
+                    handleSelectCategory('Overall Budget');
+                    setShowForm(true);
+                  }}
+                  style={[styles.cardEditPill, { borderColor: accent.hex }]}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Ionicons name="pencil-outline" size={13} color={accent.hex} />
+                  <Text style={[styles.cardEditPillText, { color: accent.hex }]}>Edit</Text>
+                </TouchableOpacity>
+              </View>
             </View>
 
             <View style={styles.numbersRow}>
@@ -232,16 +365,36 @@ export const BudgetsScreen = () => {
             return (
               <View key={catSummary.budget_id} style={styles.catBudgetCard}>
                 <View style={styles.cardHeader}>
-                  <Text style={styles.categoryName}>{catSummary.category}</Text>
-                  <Text
-                    style={[
-                      styles.categoryPct,
-                      TYPOGRAPHY.tabularText,
-                      { color },
-                    ]}
-                  >
-                    {Math.round(Number(catSummary.spent_percentage))}%
-                  </Text>
+                  <View style={styles.catTitleLeft}>
+                    <Ionicons
+                      name={getCategoryIcon(catSummary.category || '')}
+                      size={15}
+                      color={accent.hex}
+                    />
+                    <Text style={styles.categoryName}>{catSummary.category}</Text>
+                  </View>
+                  <View style={styles.cardHeaderRight}>
+                    <Text
+                      style={[
+                        styles.categoryPct,
+                        TYPOGRAPHY.tabularText,
+                        { color },
+                      ]}
+                    >
+                      {Math.round(Number(catSummary.spent_percentage))}%
+                    </Text>
+                    <TouchableOpacity
+                      onPress={() => {
+                        handleSelectCategory(catSummary.category || 'Overall Budget');
+                        setShowForm(true);
+                      }}
+                      style={[styles.cardEditPill, { borderColor: accent.hex }]}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      <Ionicons name="pencil-outline" size={13} color={accent.hex} />
+                      <Text style={[styles.cardEditPillText, { color: accent.hex }]}>Edit</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
 
                 <ProgressBar progress={pct} color={color} style={styles.catProgressBar} />
@@ -279,7 +432,7 @@ export const BudgetsScreen = () => {
           </View>
         )}
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 };
 
@@ -359,30 +512,48 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginBottom: SPACING.xs,
   },
-  catChipsScroll: {
+  overallCategoryPill: {
     flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: COLORS.surfaceLight,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 8,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: 10,
+    marginBottom: SPACING.sm,
+  },
+  catPillLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+  },
+  overallCategoryText: {
+    color: COLORS.textPrimary,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  categoriesGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: SPACING.xs,
     marginBottom: SPACING.md,
   },
-  catChip: {
+  categoryGridPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     backgroundColor: COLORS.surfaceLight,
     borderColor: COLORS.border,
     borderWidth: 1,
     borderRadius: 6,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-    marginRight: SPACING.xs,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
   },
-  catChipActive: {
-    borderColor: COLORS.accent,
-    backgroundColor: COLORS.accentMuted,
-  },
-  catChipText: {
+  categoryGridPillText: {
     color: COLORS.textSecondary,
     fontSize: 12,
-  },
-  catChipTextActive: {
-    color: COLORS.accent,
-    fontWeight: '700',
   },
   limitInput: {
     backgroundColor: COLORS.surfaceLight,
@@ -428,6 +599,35 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: SPACING.md,
+  },
+  cardHeaderTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  cardHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+  },
+  catTitleLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  cardEditPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 4,
+    borderWidth: 1,
+    backgroundColor: COLORS.surfaceLight,
+  },
+  cardEditPillText: {
+    fontSize: 11,
+    fontWeight: '700',
   },
   budgetCardName: {
     color: COLORS.textPrimary,

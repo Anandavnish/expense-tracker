@@ -7,10 +7,12 @@
     "icon": "./assets/icon.png",
     "scheme": "expensetracker",
     "userInterfaceStyle": "dark",
+    "backgroundColor": "#0C0D11",
     "android": {
       "package": "com.expensetracker.app",
+      "backgroundColor": "#0C0D11",
       "adaptiveIcon": {
-        "backgroundColor": "#0B1120"
+        "backgroundColor": "#0C0D11"
       },
       "predictiveBackGestureEnabled": false
     },

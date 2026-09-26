@@ -52,9 +52,9 @@ export const TactileButton: React.FC<TactileButtonProps> = ({
       onPressIn={handlePressIn}
       onPressOut={handlePressOut}
       disabled={disabled}
-      style={({ pressed }) => [{ opacity: disabled ? 0.5 : 1 }]}
+      style={({ pressed }) => [style, { opacity: disabled ? 0.5 : 1 }]}
     >
-      <Animated.View style={[style, animatedStyle]}>{children}</Animated.View>
+      <Animated.View style={animatedStyle}>{children}</Animated.View>
     </Pressable>
   );
 };

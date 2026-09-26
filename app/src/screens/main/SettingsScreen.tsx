@@ -1,13 +1,13 @@
-// src/screens/main/SettingsScreen.tsx
 import React from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  SafeAreaView,
   ScrollView,
   TouchableOpacity,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../store/authStore';
 import {
   useSettingsStore,
@@ -23,6 +23,7 @@ interface SettingsScreenProps {
 }
 
 export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) => {
+  const insets = useSafeAreaInsets();
   const { user, signOut } = useAuthStore();
   const { themeMode, accent, setThemeMode, setAccent } = useSettingsStore();
 
@@ -35,14 +36,16 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) =>
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <View style={[styles.safeArea, { paddingTop: insets.top }]}>
       {/* Top Header */}
       <View style={styles.header}>
         <TouchableOpacity
           onPress={() => navigation.goBack()}
           style={styles.backBtn}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
-          <Text style={[styles.backText, { color: accent.value }]}>‹ Back</Text>
+          <Ionicons name="chevron-back" size={20} color={accent.hex} />
+          <Text style={[styles.backText, { color: accent.hex }]}>Back</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>SETTINGS</Text>
         <View style={styles.headerRightSpacer} />
@@ -53,8 +56,8 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) =>
         <View style={styles.card}>
           <Text style={styles.sectionLabel}>ACCOUNT</Text>
           <View style={styles.accountRow}>
-            <View style={[styles.avatar, { borderColor: accent.value }]}>
-              <Text style={[styles.avatarText, { color: accent.value }]}>
+            <View style={[styles.avatar, { borderColor: accent.hex }]}>
+              <Text style={[styles.avatarText, { color: accent.hex }]}>
                 {user?.email?.charAt(0).toUpperCase() || 'U'}
               </Text>
             </View>
@@ -78,7 +81,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) =>
                   style={[
                     styles.segmentBtn,
                     active && {
-                      borderColor: accent.value,
+                      borderColor: accent.hex,
                       backgroundColor: COLORS.surfaceLight,
                     },
                   ]}
@@ -86,7 +89,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) =>
                   <Text
                     style={[
                       styles.segmentBtnText,
-                      active && { color: accent.value, fontWeight: '700' },
+                      active && { color: accent.hex, fontWeight: '700' },
                     ]}
                   >
                     {mode.toUpperCase()}
@@ -106,25 +109,25 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) =>
 
           <View style={styles.paletteGrid}>
             {ACCENT_PALETTE.map((color) => {
-              const active = accent.value === color.value;
+              const active = accent.hex === color.hex;
               return (
                 <TouchableOpacity
                   key={color.name}
                   onPress={() => handleSelectAccent(color)}
                   style={[
                     styles.swatchItem,
-                    active && { borderColor: color.value, borderWidth: 2 },
+                    active && { borderColor: color.hex, borderWidth: 2 },
                   ]}
                 >
                   <View
-                    style={[styles.colorCircle, { backgroundColor: color.value }]}
+                    style={[styles.colorCircle, { backgroundColor: color.hex }]}
                   >
                     {active && <Text style={styles.checkMark}>✓</Text>}
                   </View>
                   <Text
                     style={[
                       styles.swatchName,
-                      active && { color: color.value, fontWeight: '700' },
+                      active && { color: color.hex, fontWeight: '700' },
                     ]}
                   >
                     {color.name}
@@ -175,7 +178,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) =>
               </Text>
             </View>
             <View style={[styles.soonBadge, { backgroundColor: accent.muted }]}>
-              <Text style={[styles.soonBadgeText, { color: accent.value }]}>
+              <Text style={[styles.soonBadgeText, { color: accent.hex }]}>
                 AVAILABLE
               </Text>
             </View>
@@ -191,7 +194,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) =>
           Finance Tracker v1.0.0 • Offline First Architecture
         </Text>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 };
 

@@ -1,15 +1,15 @@
-// src/screens/main/AddTransactionScreen.tsx
 import React, { useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  SafeAreaView,
   ScrollView,
   TouchableOpacity,
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { TextInput } from 'react-native-paper';
 import { useAuthStore } from '../../store/authStore';
 import { useFinanceStore } from '../../store/financeStore';
@@ -20,6 +20,7 @@ import { TransactionType } from '../../types/database';
 
 interface AddTransactionScreenProps {
   navigation: any;
+  route?: any;
 }
 
 const INCOME_CATEGORIES = [
@@ -40,7 +41,16 @@ const BORROW_CATEGORIES = [
   'Other',
 ];
 
-export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navigation }) => {
+const CREDIT_CARD_INCOME_CATEGORIES = [
+  'Credit Card Payment',
+  'Cashback',
+  'Refund',
+  'Reward Redemption',
+  'Other',
+];
+
+export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navigation, route }) => {
+  const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
   const { accent } = useSettingsStore();
   const {
@@ -52,27 +62,32 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
 
   const [type, setType] = useState<TransactionType>('expense');
   const [amount, setAmount] = useState('');
-  const [selectedAccountId, setSelectedAccountId] = useState(accounts[0]?.id || '');
+  const [selectedAccountId, setSelectedAccountId] = useState(
+    route?.params?.accountId || accounts[0]?.id || ''
+  );
   const [category, setCategory] = useState(categories[0] || 'Food');
   const [note, setNote] = useState('');
   const [personName, setPersonName] = useState('');
   const [date, setDate] = useState(new Date().toISOString().substring(0, 10)); // YYYY-MM-DD
   const [formError, setFormError] = useState<string | null>(null);
 
-  React.useEffect(() => {
-    if (!selectedAccountId && accounts.length > 0) {
-      setSelectedAccountId(accounts[0].id);
-    }
-  }, [accounts, selectedAccountId]);
+  const effectiveAccountId = selectedAccountId || route?.params?.accountId || accounts[0]?.id || '';
+  const selectedAccount = accounts.find((a) => a.id === effectiveAccountId);
+  const isCreditCard = selectedAccount?.type === 'credit_card';
 
   const handleTypeChange = (newType: TransactionType) => {
     setType(newType);
-    if (newType === 'expense') setCategory(categories[0] || 'Food');
-    else if (newType === 'income') setCategory(INCOME_CATEGORIES[0]);
-    else setCategory(BORROW_CATEGORIES[0]);
+    if (newType === 'expense') {
+      setCategory(categories[0] || 'Food');
+    } else if (newType === 'income') {
+      setCategory(isCreditCard ? CREDIT_CARD_INCOME_CATEGORIES[0] : INCOME_CATEGORIES[0]);
+    } else {
+      setCategory(BORROW_CATEGORIES[0]);
+    }
   };
 
   const getAvailableCategories = () => {
+    if (isCreditCard && type === 'income') return CREDIT_CARD_INCOME_CATEGORIES;
     if (type === 'expense') return categories;
     if (type === 'income') return INCOME_CATEGORIES;
     return BORROW_CATEGORIES;
@@ -89,6 +104,10 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
       setFormError('Please select a source account to deduct from');
       return;
     }
+    if (isCreditCard && (type === 'borrow_given' || type === 'borrow_taken')) {
+      setFormError('Credit cards cannot be used for Lent/Borrowed entries. Please select a Bank or Cash account.');
+      return;
+    }
     if ((type === 'borrow_given' || type === 'borrow_taken') && !personName.trim()) {
       setFormError('Please enter person name for borrow entry');
       return;
@@ -99,7 +118,7 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
     // 1. Optimistic write to transaction store (fires background sync)
     addTransactionOptimistic({
       user_id: user.id,
-      account_id: selectedAccountId,
+      account_id: effectiveAccountId,
       type,
       amount: numAmount,
       category,
@@ -108,13 +127,14 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
       source: 'manual',
     });
 
-    // 2. If borrow, also add to borrows optimistic store
+    // 2. If borrow, also add to borrows optimistic store with clean direction
     if (type === 'borrow_given' || type === 'borrow_taken') {
       addBorrowOptimistic({
         user_id: user.id,
         person_name: personName.trim(),
         amount: numAmount,
         status: 'pending',
+        type: type === 'borrow_taken' ? 'borrowed' : 'lent',
         linked_transaction_id: null,
         date,
       });
@@ -132,14 +152,16 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <View style={[styles.safeArea, { paddingTop: insets.top }]}>
       <View style={styles.header}>
         {navigation.canGoBack() && (
           <TouchableOpacity
             onPress={() => navigation.goBack()}
             style={styles.backBtn}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
-            <Text style={[styles.backText, { color: accent.value }]}>‹ Cancel</Text>
+            <Ionicons name="close" size={20} color={accent.hex} />
+            <Text style={[styles.backText, { color: accent.hex }]}>Cancel</Text>
           </TouchableOpacity>
         )}
         <Text style={styles.headerTitle}>LOG TRANSACTION</Text>
@@ -182,7 +204,7 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
                       styles.typeTabText,
                       active && styles.typeTabTextActive,
                       active && item.key === 'expense' && { color: COLORS.alert },
-                      active && item.key === 'income' && { color: accent.value },
+                      active && item.key === 'income' && { color: accent.hex },
                     ]}
                   >
                     {item.label}
@@ -194,7 +216,7 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
 
           {/* 2. Hero Amount Input */}
           <View style={styles.amountContainer}>
-            <Text style={[styles.currencyPrefix, { color: accent.value }]}>₹</Text>
+            <Text style={[styles.currencyPrefix, { color: accent.hex }]}>₹</Text>
             <TextInput
               value={amount}
               onChangeText={(text) => {
@@ -216,7 +238,7 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
             <Text style={styles.sectionLabel}>MONEY SOURCE (DEDUCT FROM)</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
               {accounts.map((acc) => {
-                const active = selectedAccountId === acc.id;
+                const active = effectiveAccountId === acc.id;
                 return (
                   <TouchableOpacity
                     key={acc.id}
@@ -227,18 +249,26 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
                     style={[
                       styles.chip,
                       active && {
-                        borderColor: accent.value,
+                        borderColor: accent.hex,
                         backgroundColor: accent.muted,
                       },
                     ]}
                   >
-                    <Text style={styles.chipIcon}>
-                      {acc.type === 'cash' ? '💵' : acc.type === 'credit_card' ? '💳' : '🏦'}
-                    </Text>
+                    <Ionicons
+                      name={
+                        acc.type === 'cash'
+                          ? 'cash-outline'
+                          : acc.type === 'credit_card'
+                          ? 'card-outline'
+                          : 'business-outline'
+                      }
+                      size={15}
+                      color={active ? accent.hex : COLORS.textSecondary}
+                    />
                     <Text
                       style={[
                         styles.chipText,
-                        active && { color: accent.value, fontWeight: '700' },
+                        active && { color: accent.hex, fontWeight: '700' },
                       ]}
                     >
                       {acc.name}
@@ -262,7 +292,7 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
                 placeholderTextColor={COLORS.textMuted}
                 mode="outlined"
                 outlineColor={COLORS.border}
-                activeOutlineColor={accent.value}
+                activeOutlineColor={accent.hex}
                 textColor={COLORS.textPrimary}
                 style={styles.textInput}
               />
@@ -282,7 +312,7 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
                     style={[
                       styles.categoryPill,
                       active && {
-                        borderColor: accent.value,
+                        borderColor: accent.hex,
                         backgroundColor: accent.muted,
                       },
                     ]}
@@ -290,7 +320,7 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
                     <Text
                       style={[
                         styles.categoryPillText,
-                        active && { color: accent.value, fontWeight: '700' },
+                        active && { color: accent.hex, fontWeight: '700' },
                       ]}
                     >
                       {cat}
@@ -310,7 +340,7 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
                   onPress={() => setDate(new Date().toISOString().substring(0, 10))}
                   style={styles.quickDateBtn}
                 >
-                  <Text style={[styles.quickDateText, { color: accent.value }]}>Today</Text>
+                  <Text style={[styles.quickDateText, { color: accent.hex }]}>Today</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   onPress={() => {
@@ -320,7 +350,7 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
                   }}
                   style={styles.quickDateBtn}
                 >
-                  <Text style={[styles.quickDateText, { color: accent.value }]}>Yesterday</Text>
+                  <Text style={[styles.quickDateText, { color: accent.hex }]}>Yesterday</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -330,7 +360,7 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
               placeholder="YYYY-MM-DD"
               mode="outlined"
               outlineColor={COLORS.border}
-              activeOutlineColor={accent.value}
+              activeOutlineColor={accent.hex}
               textColor={COLORS.textPrimary}
               style={styles.textInput}
             />
@@ -346,7 +376,7 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
               placeholderTextColor={COLORS.textMuted}
               mode="outlined"
               outlineColor={COLORS.border}
-              activeOutlineColor={accent.value}
+              activeOutlineColor={accent.hex}
               textColor={COLORS.textPrimary}
               style={styles.textInput}
             />
@@ -355,13 +385,13 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
           {/* Submit Button */}
           <TactileButton
             onPress={handleSubmit}
-            style={[styles.submitBtn, { backgroundColor: accent.value }]}
+            style={[styles.submitBtn, { backgroundColor: accent.hex }]}
           >
             <Text style={styles.submitBtnText}>Save Transaction</Text>
           </TactileButton>
         </ScrollView>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </View>
   );
 };
 

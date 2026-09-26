@@ -1,7 +1,9 @@
 // src/types/database.ts
 
 export type AccountType = 'cash' | 'bank' | 'credit_card';
-export type BankPreset = 'HDFC' | 'SBI' | 'ICICI' | 'Axis' | 'Kotak' | 'Other';
+export type BankPresetCode = 'SBI' | 'India Post' | 'HDFC' | 'Canara' | 'PNB' | 'BOB' | 'Custom';
+export type BankPreset = BankPresetCode;
+export type CreditCardIssuerCode = 'HDFC' | 'SBI Card' | 'ICICI' | 'Axis' | 'Kotak' | 'Slice' | 'OneCard' | 'Custom';
 
 export interface Account {
   id: string;
@@ -10,7 +12,11 @@ export interface Account {
   type: AccountType;
   current_balance: number;
   credit_limit: number | null;
-  bank_preset?: BankPreset | string | null;
+  bank_preset?: string | null;
+  card_issuer?: string | null;
+  custom_icon?: string | null;
+  custom_color?: string | null;
+  display_order?: number;
   created_at: string;
   updated_at: string;
 }
@@ -32,6 +38,7 @@ export interface Transaction {
 }
 
 export type BorrowStatus = 'pending' | 'settled';
+export type BorrowType = 'lent' | 'borrowed';
 
 export interface Borrow {
   id: string;
@@ -39,6 +46,7 @@ export interface Borrow {
   person_name: string;
   amount: number;
   status: BorrowStatus;
+  type?: BorrowType;
   linked_transaction_id: string | null;
   date: string;
   created_at: string;

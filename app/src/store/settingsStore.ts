@@ -6,17 +6,17 @@ export type ThemeMode = 'dark' | 'light' | 'system';
 
 export interface AccentColor {
   name: string;
-  value: string;
+  hex: string;
   muted: string;
 }
 
 export const ACCENT_PALETTE: AccentColor[] = [
-  { name: 'Emerald', value: '#00D09C', muted: '#00D09C1A' },
-  { name: 'Cyan', value: '#06B6D4', muted: '#06B6D41A' },
-  { name: 'Amber', value: '#F59E0B', muted: '#F59E0B1A' },
-  { name: 'Rose', value: '#F43F5E', muted: '#F43F5E1A' },
-  { name: 'Blue', value: '#3B82F6', muted: '#3B82F61A' },
-  { name: 'Violet', value: '#8B5CF6', muted: '#8B5CF61A' },
+  { name: 'Emerald', hex: '#10B981', muted: '#10B9811A' },
+  { name: 'Gold', hex: '#E5B869', muted: '#E5B8691A' },
+  { name: 'Cobalt', hex: '#3B82F6', muted: '#3B82F61A' },
+  { name: 'Rose', hex: '#F43F5E', muted: '#F43F5E1A' },
+  { name: 'Amber', hex: '#F59E0B', muted: '#F59E0B1A' },
+  { name: 'Violet', hex: '#8B5CF6', muted: '#8B5CF61A' },
 ];
 
 const THEME_STORAGE_KEY = '@finance_tracker_theme_mode';
@@ -46,7 +46,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
       }
 
       if (savedAccent) {
-        const found = ACCENT_PALETTE.find((a) => a.value === savedAccent);
+        const found = ACCENT_PALETTE.find((a) => a.hex === savedAccent);
         if (found) {
           set({ accent: found });
         }
@@ -63,6 +63,6 @@ export const useSettingsStore = create<SettingsState>((set) => ({
 
   setAccent: async (accent: AccentColor) => {
     set({ accent });
-    await AsyncStorage.setItem(ACCENT_STORAGE_KEY, accent.value).catch(() => {});
+    await AsyncStorage.setItem(ACCENT_STORAGE_KEY, accent.hex).catch(() => {});
   },
 }));

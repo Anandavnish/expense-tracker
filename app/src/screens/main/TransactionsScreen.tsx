@@ -1,23 +1,24 @@
-// src/screens/main/TransactionsScreen.tsx
 import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  SafeAreaView,
   ScrollView,
   TouchableOpacity,
   FlatList,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TextInput } from 'react-native-paper';
 import { useFinanceStore } from '../../store/financeStore';
 import { useSettingsStore } from '../../store/settingsStore';
-import { COLORS, SPACING, TYPOGRAPHY } from '../../theme/tokens';
+import { COLORS, SPACING } from '../../theme/tokens';
 import { Transaction, TransactionType } from '../../types/database';
+import { TransactionRow } from '../../components/TransactionRow';
 
 type DateFilterOption = 'this_month' | 'last_30_days' | 'all' | 'custom';
 
 export const TransactionsScreen = () => {
+  const insets = useSafeAreaInsets();
   const { accent } = useSettingsStore();
   const { transactions, accounts, categories, selectedMonth } = useFinanceStore();
 
@@ -105,83 +106,19 @@ export const TransactionsScreen = () => {
     selectedCategories,
   ]);
 
-  // Type labels for Line 2
-  const typeDisplayLabels: Record<TransactionType, string> = {
-    expense: 'Expense',
-    income: 'Income',
-    borrow_given: 'Lent',
-    borrow_taken: 'Borrowed',
-  };
-
-  // Render 3-Line Transaction Item
+  // Render Transaction Item using redesigned TransactionRow
   const renderItem = ({ item }: { item: Transaction }) => {
-    const isIncome = item.type === 'income';
-    const isExpense = item.type === 'expense';
-    const isLentOrBorrowed =
-      item.type === 'borrow_given' || item.type === 'borrow_taken';
-
-    // Amount styling based on spec:
-    // Green for income, red for expense, plain/neutral for lent/borrowed
-    let amountColor: string = COLORS.textPrimary;
-    let amountPrefix = '';
-
-    if (isIncome) {
-      amountColor = accent.value;
-      amountPrefix = '+';
-    } else if (isExpense) {
-      amountColor = COLORS.alert;
-      amountPrefix = '−';
-    }
-
-    const title = item.note || item.category || 'Transaction';
-    const sourceAccountName = accountMap[item.account_id] || 'Source Account';
-    const formattedAmount = Number(item.amount).toLocaleString('en-IN', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
-
+    const sourceAccountName = accountMap[item.account_id];
     return (
-      <View style={styles.transactionCard}>
-        {/* LINE 1: Title (merchant/person/note) on left, Amount on right */}
-        <View style={styles.rowLine1}>
-          <Text style={styles.titleText} numberOfLines={1}>
-            {title}
-          </Text>
-          <Text
-            style={[
-              styles.amountText,
-              TYPOGRAPHY.tabularText,
-              { color: amountColor },
-            ]}
-          >
-            {amountPrefix}₹{formattedAmount}
-          </Text>
-        </View>
-
-        {/* LINE 2: "tag1 · tag2" where tag1 = category (accent), tag2 = type (warning) */}
-        <View style={styles.rowLine2}>
-          <Text style={[styles.tagCategory, { color: accent.value }]}>
-            {item.category.toUpperCase()}
-          </Text>
-          <Text style={styles.tagDivider}>·</Text>
-          <Text style={styles.tagType}>
-            {typeDisplayLabels[item.type]?.toUpperCase() || item.type.toUpperCase()}
-          </Text>
-        </View>
-
-        {/* LINE 3: date/time on left, source account name on right */}
-        <View style={styles.rowLine3}>
-          <Text style={styles.metaLeftText}>{item.date}</Text>
-          <Text style={styles.metaRightText} numberOfLines={1}>
-            {sourceAccountName}
-          </Text>
-        </View>
-      </View>
+      <TransactionRow
+        transaction={item}
+        accountName={sourceAccountName}
+      />
     );
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <View style={[styles.safeArea, { paddingTop: insets.top }]}>
       {/* Top Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>TRANSACTIONS</Text>
@@ -204,7 +141,7 @@ export const TransactionsScreen = () => {
             style={[
               styles.filterPill,
               dateFilter === 'this_month' && {
-                borderColor: accent.value,
+                borderColor: accent.hex,
                 backgroundColor: accent.muted,
               },
             ]}
@@ -212,7 +149,7 @@ export const TransactionsScreen = () => {
             <Text
               style={[
                 styles.filterPillText,
-                dateFilter === 'this_month' && { color: accent.value, fontWeight: '700' },
+                dateFilter === 'this_month' && { color: accent.hex, fontWeight: '700' },
               ]}
             >
               This Month
@@ -227,7 +164,7 @@ export const TransactionsScreen = () => {
             style={[
               styles.filterPill,
               dateFilter === 'last_30_days' && {
-                borderColor: accent.value,
+                borderColor: accent.hex,
                 backgroundColor: accent.muted,
               },
             ]}
@@ -235,7 +172,7 @@ export const TransactionsScreen = () => {
             <Text
               style={[
                 styles.filterPillText,
-                dateFilter === 'last_30_days' && { color: accent.value, fontWeight: '700' },
+                dateFilter === 'last_30_days' && { color: accent.hex, fontWeight: '700' },
               ]}
             >
               Last 30 Days
@@ -250,7 +187,7 @@ export const TransactionsScreen = () => {
             style={[
               styles.filterPill,
               dateFilter === 'all' && {
-                borderColor: accent.value,
+                borderColor: accent.hex,
                 backgroundColor: accent.muted,
               },
             ]}
@@ -258,7 +195,7 @@ export const TransactionsScreen = () => {
             <Text
               style={[
                 styles.filterPillText,
-                dateFilter === 'all' && { color: accent.value, fontWeight: '700' },
+                dateFilter === 'all' && { color: accent.hex, fontWeight: '700' },
               ]}
             >
               All Time
@@ -273,7 +210,7 @@ export const TransactionsScreen = () => {
             style={[
               styles.filterPill,
               dateFilter === 'custom' && {
-                borderColor: accent.value,
+                borderColor: accent.hex,
                 backgroundColor: accent.muted,
               },
             ]}
@@ -281,7 +218,7 @@ export const TransactionsScreen = () => {
             <Text
               style={[
                 styles.filterPillText,
-                dateFilter === 'custom' && { color: accent.value, fontWeight: '700' },
+                dateFilter === 'custom' && { color: accent.hex, fontWeight: '700' },
               ]}
             >
               Custom Range
@@ -298,7 +235,7 @@ export const TransactionsScreen = () => {
               placeholder="From YYYY-MM-DD"
               mode="outlined"
               outlineColor={COLORS.border}
-              activeOutlineColor={accent.value}
+              activeOutlineColor={accent.hex}
               textColor={COLORS.textPrimary}
               style={styles.customDateInput}
             />
@@ -308,7 +245,7 @@ export const TransactionsScreen = () => {
               placeholder="To YYYY-MM-DD"
               mode="outlined"
               outlineColor={COLORS.border}
-              activeOutlineColor={accent.value}
+              activeOutlineColor={accent.hex}
               textColor={COLORS.textPrimary}
               style={styles.customDateInput}
             />
@@ -370,7 +307,7 @@ export const TransactionsScreen = () => {
                 style={[
                   styles.filterCategoryChip,
                   active && {
-                    borderColor: accent.value,
+                    borderColor: accent.hex,
                     backgroundColor: accent.muted,
                   },
                 ]}
@@ -378,7 +315,7 @@ export const TransactionsScreen = () => {
                 <Text
                   style={[
                     styles.filterCategoryText,
-                    active && { color: accent.value, fontWeight: '700' },
+                    active && { color: accent.hex, fontWeight: '700' },
                   ]}
                 >
                   {cat}
@@ -402,14 +339,14 @@ export const TransactionsScreen = () => {
               Try adjusting your date range, type, or category filters.
             </Text>
             <TouchableOpacity onPress={resetFilters} style={styles.resetBtn}>
-              <Text style={[styles.resetBtnText, { color: accent.value }]}>
+              <Text style={[styles.resetBtnText, { color: accent.hex }]}>
                 Reset Filters
               </Text>
             </TouchableOpacity>
           </View>
         }
       />
-    </SafeAreaView>
+    </View>
   );
 };
 
