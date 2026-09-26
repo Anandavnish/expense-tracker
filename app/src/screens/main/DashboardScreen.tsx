@@ -1313,18 +1313,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
               </Text>
             </View>
 
-            {!editingAccount && !isAddingNewSource ? (
-              <TouchableOpacity
-                onPress={() => handleOpenEditSource()}
-                style={[styles.managerHeaderActionBtn, { borderColor: accent.hex + '40' }]}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              >
-                <Ionicons name="add" size={16} color={accent.hex} />
-                <Text style={[styles.managerHeaderActionText, { color: accent.hex }]}>Add</Text>
-              </TouchableOpacity>
-            ) : (
-              <View style={{ width: 40 }} />
-            )}
+            <View style={{ width: 36 }} />
           </View>
 
           {editingAccount || isAddingNewSource ? (
@@ -1936,22 +1925,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
               </Text>
             </View>
 
-            {!showAddCategoryInput ? (
-              <TouchableOpacity
-                onPress={() => {
-                  setEditingCategory(null);
-                  setCategoryInputValue('');
-                  setShowAddCategoryInput(true);
-                }}
-                style={[styles.managerHeaderActionBtn, { borderColor: accent.hex + '40' }]}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              >
-                <Ionicons name="add" size={16} color={accent.hex} />
-                <Text style={[styles.managerHeaderActionText, { color: accent.hex }]}>Add</Text>
-              </TouchableOpacity>
-            ) : (
-              <View style={{ width: 40 }} />
-            )}
+            <View style={{ width: 36 }} />
           </View>
 
           <View style={{ flex: 1 }}>
