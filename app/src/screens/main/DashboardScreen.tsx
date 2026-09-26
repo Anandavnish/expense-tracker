@@ -20,6 +20,7 @@ import { useSettingsStore } from '../../store/settingsStore';
 import { COLORS, SPACING, TYPOGRAPHY } from '../../theme/tokens';
 import { TactileButton } from '../../components/TactileButton';
 import { InlineError } from '../../components/InlineError';
+import { YouTubeStyleDraggableList } from '../../components/YouTubeStyleDraggableList';
 import { Account, AccountType, BankPresetCode, CreditCardIssuerCode } from '../../types/database';
 
 interface DashboardScreenProps {
@@ -181,6 +182,10 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
   const [showAddCategoryInput, setShowAddCategoryInput] = useState(false);
   const [categoryDeleteTarget, setCategoryDeleteTarget] = useState<string | null>(null);
 
+  // Reorder Drag State (locks scroll while dragging)
+  const [isSourcesDragging, setIsSourcesDragging] = useState(false);
+  const [isCategoriesDragging, setIsCategoriesDragging] = useState(false);
+
   const onRefresh = async () => {
     if (!user) return;
     setRefreshing(true);
@@ -313,14 +318,52 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
     return Math.max(1, ...vals);
   }, [categorySpendingMap]);
 
+  // Helper to parse preset & custom name from an account
+  const parseAccountDetails = (acc: Account) => {
+    const raw = acc.name?.trim() || '';
+    if (acc.type === 'bank') {
+      if (raw.includes('•')) {
+        const parts = raw.split('•').map((s) => s.trim());
+        const match = BANK_PRESETS.find((p) => p.code.toLowerCase() === parts[0].toLowerCase());
+        return {
+          preset: match ? match.code : parts[0],
+          customName: parts.slice(1).join(' • '),
+        };
+      }
+      const directMatch = BANK_PRESETS.find((p) => p.code.toLowerCase() === raw.toLowerCase());
+      if (directMatch) {
+        return { preset: directMatch.code, customName: '' };
+      }
+      return { preset: acc.bank_preset || null, customName: raw };
+    }
+    if (acc.type === 'credit_card') {
+      if (raw.includes('•')) {
+        const parts = raw.split('•').map((s) => s.trim());
+        const match = CARD_ISSUERS.find((i) => i.code.toLowerCase() === parts[0].toLowerCase());
+        return {
+          issuer: match ? match.code : parts[0],
+          customName: parts.slice(1).join(' • '),
+        };
+      }
+      const directMatch = CARD_ISSUERS.find((i) => i.code.toLowerCase() === raw.toLowerCase());
+      if (directMatch) {
+        return { issuer: directMatch.code, customName: '' };
+      }
+      return { issuer: acc.card_issuer || null, customName: raw };
+    }
+    return { preset: null, issuer: null, customName: raw };
+  };
+
   // Account display formatting: Preset shortcut first, then source name (e.g. SBI • Salary A/c or just SBI)
   const getAccountDisplay = (acc: Account) => {
     const rawName = acc.name?.trim();
 
     if (acc.type === 'bank') {
-      const preset = acc.bank_preset && acc.bank_preset !== 'Custom' ? acc.bank_preset : null;
-      if (preset && rawName && rawName.toLowerCase() !== preset.toLowerCase()) {
-        return { title: `${preset} • ${rawName}`, subtitle: 'Bank Account' };
+      const parsed = parseAccountDetails(acc);
+      const preset = acc.bank_preset && acc.bank_preset !== 'Custom' ? acc.bank_preset : parsed.preset;
+      const subName = parsed.customName;
+      if (preset && subName) {
+        return { title: `${preset} • ${subName}`, subtitle: 'Bank Account' };
       } else if (preset) {
         return { title: preset, subtitle: 'Bank Account' };
       }
@@ -328,9 +371,11 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
     }
 
     if (acc.type === 'credit_card') {
-      const issuer = acc.card_issuer && acc.card_issuer !== 'Custom' ? acc.card_issuer : null;
-      if (issuer && rawName && rawName.toLowerCase() !== issuer.toLowerCase()) {
-        return { title: `${issuer} • ${rawName}`, subtitle: 'Credit Card' };
+      const parsed = parseAccountDetails(acc);
+      const issuer = acc.card_issuer && acc.card_issuer !== 'Custom' ? acc.card_issuer : parsed.issuer;
+      const subName = parsed.customName;
+      if (issuer && subName) {
+        return { title: `${issuer} • ${subName}`, subtitle: 'Credit Card' };
       } else if (issuer) {
         return { title: issuer, subtitle: 'Credit Card' };
       }
@@ -343,7 +388,9 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
 
   const getAccountIconProps = (acc: Account): { name: keyof typeof Ionicons.glyphMap; color: string } => {
     if (acc.type === 'bank') {
-      const preset = BANK_PRESETS.find((p) => p.code === acc.bank_preset);
+      const parsed = parseAccountDetails(acc);
+      const presetCode = acc.bank_preset || parsed.preset;
+      const preset = BANK_PRESETS.find((p) => p.code === presetCode);
       if (preset && preset.code !== 'Custom') {
         return { name: preset.icon, color: preset.color };
       }
@@ -354,7 +401,9 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
     }
 
     if (acc.type === 'credit_card') {
-      const issuer = CARD_ISSUERS.find((i) => i.code === acc.card_issuer);
+      const parsed = parseAccountDetails(acc);
+      const issuerCode = acc.card_issuer || parsed.issuer;
+      const issuer = CARD_ISSUERS.find((i) => i.code === issuerCode);
       if (issuer && issuer.code !== 'Custom') {
         return { name: issuer.icon, color: issuer.color };
       }
@@ -374,10 +423,11 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
   const handleOpenEditSource = (account?: Account) => {
     if (account) {
       setEditingAccount(account);
-      setEditName(account.name || '');
+      const parsed = parseAccountDetails(account);
+      setEditName(parsed.customName || account.name || '');
       setEditType(account.type);
-      setEditBankPreset((account.bank_preset as BankPresetCode) || 'SBI');
-      setEditCardIssuer((account.card_issuer as CreditCardIssuerCode) || 'HDFC');
+      setEditBankPreset(((account.bank_preset || parsed.preset || 'SBI') as BankPresetCode));
+      setEditCardIssuer(((account.card_issuer || parsed.issuer || 'HDFC') as CreditCardIssuerCode));
       setEditCustomColor(account.custom_color || '#3B82F6');
       setEditCustomIcon(
         (account.custom_icon as any) ||
@@ -516,16 +566,27 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
   const handleSaveSource = async () => {
     if (!user) return;
 
-    let defaultName = '';
+    let finalName = editName.trim();
     if (editType === 'bank') {
-      defaultName = editBankPreset !== 'Custom' ? editBankPreset : 'Bank Account';
+      if (editBankPreset !== 'Custom') {
+        finalName = editName.trim() && editName.trim().toLowerCase() !== editBankPreset.toLowerCase()
+          ? `${editBankPreset} • ${editName.trim()}`
+          : editBankPreset;
+      } else {
+        finalName = editName.trim() || 'Bank Account';
+      }
     } else if (editType === 'credit_card') {
-      defaultName = editCardIssuer !== 'Custom' ? editCardIssuer : 'Credit Card';
+      if (editCardIssuer !== 'Custom') {
+        finalName = editName.trim() && editName.trim().toLowerCase() !== editCardIssuer.toLowerCase()
+          ? `${editCardIssuer} • ${editName.trim()}`
+          : editCardIssuer;
+      } else {
+        finalName = editName.trim() || 'Credit Card';
+      }
     } else {
-      defaultName = 'Cash Wallet';
+      finalName = editName.trim() || 'Cash Wallet';
     }
 
-    const finalName = editName.trim() || defaultName;
     const rawVal = parseFloat(editBalance) || 0;
     const parsedBalance = editType === 'credit_card' ? -Math.abs(rawVal) : rawVal;
     const parsedLimit = editCreditLimit ? parseFloat(editCreditLimit) || null : null;
@@ -1309,7 +1370,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
               <Text style={styles.managerSubtitle}>
                 {editingAccount || isAddingNewSource
                   ? 'Configure details and starting balance'
-                  : `${accounts.length} accounts • Tap ↑ ↓ to reorder`}
+                  : `${accounts.length} accounts • Hold = to drag & rearrange`}
               </Text>
             </View>
 
@@ -1672,6 +1733,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                 style={styles.managerScroll}
                 contentContainerStyle={styles.managerScrollContent}
                 showsVerticalScrollIndicator={false}
+                scrollEnabled={!isSourcesDragging}
               >
                 {accounts.length === 0 ? (
                   <View style={styles.emptySourcesContainer}>
@@ -1679,118 +1741,97 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                     <Text style={styles.emptySourcesText}>No money sources found.</Text>
                   </View>
                 ) : (
-                  accounts.map((acc, idx) => {
-                    const { title } = getAccountDisplay(acc);
-                    const iconProps = getAccountIconProps(acc);
-                    const isFirst = idx === 0;
-                    const isLast = idx === accounts.length - 1;
+                  <YouTubeStyleDraggableList
+                    data={accounts}
+                    keyExtractor={(acc) => acc.id}
+                    onReorder={reorderAccounts}
+                    accentColor={accent.hex}
+                    itemHeight={64}
+                    gap={8}
+                    onDragBegin={() => setIsSourcesDragging(true)}
+                    onDragEnd={() => setIsSourcesDragging(false)}
+                    renderContent={(acc) => {
+                      const { title } = getAccountDisplay(acc);
+                      const iconProps = getAccountIconProps(acc);
 
-                    return (
-                      <View key={acc.id} style={styles.managerItemCard}>
-                        {/* 1. Account Icon Badge */}
-                        <View style={[styles.managerItemIconBadge, { backgroundColor: iconProps.color + '18' }]}>
-                          <Ionicons name={iconProps.name} size={18} color={iconProps.color} />
-                        </View>
-
-                        {/* 2. Account Name & Details */}
+                      return (
                         <TouchableOpacity
-                          style={styles.managerItemContent}
+                          style={styles.draggableContentRow}
                           onPress={() => handleOpenEditSource(acc)}
                           activeOpacity={0.7}
                         >
-                          <Text style={styles.managerItemName} numberOfLines={1}>
-                            {title}
-                          </Text>
-                          <View style={styles.managerItemMetaRow}>
-                            <Text style={styles.managerItemType}>
-                              {acc.type === 'credit_card'
-                                ? 'Credit Card'
-                                : acc.type === 'cash'
-                                ? 'Cash'
-                                : 'Bank'}
+                          <View style={[styles.managerItemIconBadge, { backgroundColor: iconProps.color + '18' }]}>
+                            <Ionicons name={iconProps.name} size={18} color={iconProps.color} />
+                          </View>
+
+                          <View style={styles.managerItemTextCol}>
+                            <Text style={styles.managerItemName} numberOfLines={1}>
+                              {title}
                             </Text>
-                            <Text style={styles.managerItemBullet}>•</Text>
-                            <Text
-                              style={[
-                                styles.managerItemBalance,
-                                TYPOGRAPHY.tabularText,
-                                {
-                                  color:
-                                    acc.type === 'credit_card'
-                                      ? COLORS.alert
-                                      : Number(acc.current_balance) >= 0
-                                      ? COLORS.textPrimary
-                                      : COLORS.alert,
-                                },
-                              ]}
-                            >
-                              {acc.type === 'credit_card'
-                                ? `₹${Math.abs(Math.min(0, Number(acc.current_balance || 0))).toLocaleString('en-IN')} Due`
-                                : `₹${Number(acc.current_balance).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`}
-                            </Text>
+                            <View style={styles.managerItemMetaRow}>
+                              <Text style={styles.managerItemType}>
+                                {acc.type === 'credit_card'
+                                  ? 'Credit Card'
+                                  : acc.type === 'cash'
+                                  ? 'Cash'
+                                  : 'Bank'}
+                              </Text>
+                              <Text style={styles.managerItemBullet}>•</Text>
+                              <Text
+                                style={[
+                                  styles.managerItemBalance,
+                                  TYPOGRAPHY.tabularText,
+                                  {
+                                    color:
+                                      acc.type === 'credit_card'
+                                        ? COLORS.alert
+                                        : Number(acc.current_balance) >= 0
+                                        ? COLORS.textPrimary
+                                        : COLORS.alert,
+                                  },
+                                ]}
+                              >
+                                {acc.type === 'credit_card'
+                                  ? `₹${Math.abs(Math.min(0, Number(acc.current_balance || 0))).toLocaleString('en-IN')} Due`
+                                  : `₹${Number(acc.current_balance).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`}
+                              </Text>
+                            </View>
                           </View>
                         </TouchableOpacity>
+                      );
+                    }}
+                    renderActions={(acc) => (
+                      <View style={styles.managerItemActions}>
+                        <TouchableOpacity
+                          onPress={() => handleOpenEditSource(acc)}
+                          style={styles.managerCircleBtn}
+                          hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+                        >
+                          <Ionicons name="pencil-outline" size={14} color={COLORS.textSecondary} />
+                        </TouchableOpacity>
 
-                        {/* 3. Action Buttons Group: Move Up, Move Down, Edit, Delete */}
-                        <View style={styles.managerItemActions}>
-                          <TouchableOpacity
-                            disabled={isFirst}
-                            onPress={() => handleSwapAccountOrder(idx, 'up')}
-                            style={[styles.managerCircleBtn, isFirst && styles.managerBtnDisabled]}
-                            hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
-                          >
-                            <Ionicons
-                              name="chevron-up"
-                              size={16}
-                              color={isFirst ? COLORS.textMuted + '40' : COLORS.textPrimary}
-                            />
-                          </TouchableOpacity>
-
-                          <TouchableOpacity
-                            disabled={isLast}
-                            onPress={() => handleSwapAccountOrder(idx, 'down')}
-                            style={[styles.managerCircleBtn, isLast && styles.managerBtnDisabled]}
-                            hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
-                          >
-                            <Ionicons
-                              name="chevron-down"
-                              size={16}
-                              color={isLast ? COLORS.textMuted + '40' : COLORS.textPrimary}
-                            />
-                          </TouchableOpacity>
-
-                          <TouchableOpacity
-                            onPress={() => handleOpenEditSource(acc)}
-                            style={styles.managerCircleBtn}
-                            hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
-                          >
-                            <Ionicons name="pencil-outline" size={14} color={COLORS.textSecondary} />
-                          </TouchableOpacity>
-
-                          <TouchableOpacity
-                            onPress={() => handleOpenDeleteAccount(acc)}
-                            style={[styles.managerCircleBtn, styles.managerDeleteCircleBtn]}
-                            hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
-                          >
-                            <Ionicons name="trash-outline" size={14} color={COLORS.alert} />
-                          </TouchableOpacity>
-                        </View>
+                        <TouchableOpacity
+                          onPress={() => handleOpenDeleteAccount(acc)}
+                          style={[styles.managerCircleBtn, styles.managerDeleteCircleBtn]}
+                          hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+                        >
+                          <Ionicons name="trash-outline" size={14} color={COLORS.alert} />
+                        </TouchableOpacity>
                       </View>
-                    );
-                  })
+                    )}
+                  />
                 )}
               </ScrollView>
 
               {/* Fixed Bottom Action Bar */}
-              <View style={[styles.managerBottomBar, { paddingBottom: Math.max(insets.bottom, 14) }]}>
-                <TouchableOpacity
+              <View style={[styles.managerBottomBar, { paddingBottom: Math.max(insets.bottom, 20) }]}>
+                <TactileButton
                   onPress={() => handleOpenEditSource()}
                   style={[styles.managerPrimaryAddBtn, { backgroundColor: accent.hex }]}
-                  activeOpacity={0.85}
                 >
                   <Ionicons name="add" size={20} color={COLORS.textInverse} />
                   <Text style={styles.managerPrimaryAddBtnText}>Add New Money Source</Text>
-                </TouchableOpacity>
+                </TactileButton>
               </View>
             </View>
           )}
@@ -1921,7 +1962,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
             <View style={styles.managerHeaderCenter}>
               <Text style={styles.managerTitle}>Manage Categories</Text>
               <Text style={styles.managerSubtitle}>
-                {categories.length} categories • Tap ↑ ↓ to reorder
+                {categories.length} categories • Hold = to drag & rearrange
               </Text>
             </View>
 
@@ -1933,6 +1974,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
               style={styles.managerScroll}
               contentContainerStyle={styles.managerScrollContent}
               showsVerticalScrollIndicator={false}
+              scrollEnabled={!isCategoriesDragging}
             >
               {/* Inline Add / Edit Category Input Form */}
               {showAddCategoryInput && (
@@ -1974,71 +2016,58 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                 </View>
               )}
 
-              {categories.map((cat, idx) => {
-                const spent = categorySpendingMap[cat] || 0;
-                const catIcon = getCategoryIconProps(cat);
-                const isFirst = idx === 0;
-                const isLast = idx === categories.length - 1;
+              {categories.length === 0 ? (
+                <View style={styles.emptySourcesContainer}>
+                  <Ionicons name="pricetags-outline" size={48} color={COLORS.textMuted} />
+                  <Text style={styles.emptySourcesText}>No categories found.</Text>
+                </View>
+              ) : (
+                <YouTubeStyleDraggableList
+                  data={categories}
+                  keyExtractor={(cat) => cat}
+                  onReorder={reorderCategories}
+                  accentColor={accent.hex}
+                  itemHeight={64}
+                  gap={8}
+                  onDragBegin={() => setIsCategoriesDragging(true)}
+                  onDragEnd={() => setIsCategoriesDragging(false)}
+                  renderContent={(cat) => {
+                    const spent = categorySpendingMap[cat] || 0;
+                    const catIcon = getCategoryIconProps(cat);
 
-                return (
-                  <View key={cat} style={styles.managerItemCard}>
-                    {/* 1. Category Icon Badge */}
-                    <View style={[styles.managerItemIconBadge, { backgroundColor: catIcon.color + '18' }]}>
-                      <Ionicons name={catIcon.name} size={18} color={catIcon.color} />
-                    </View>
+                    return (
+                      <TouchableOpacity
+                        style={styles.draggableContentRow}
+                        onPress={() => handleStartEditCategory(cat)}
+                        activeOpacity={0.7}
+                      >
+                        <View style={[styles.managerItemIconBadge, { backgroundColor: catIcon.color + '18' }]}>
+                          <Ionicons name={catIcon.name} size={18} color={catIcon.color} />
+                        </View>
 
-                    {/* 2. Category Name & Spending Info */}
-                    <TouchableOpacity
-                      style={styles.managerItemContent}
-                      onPress={() => handleStartEditCategory(cat)}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={styles.managerItemName} numberOfLines={1}>
-                        {cat}
-                      </Text>
-                      <View style={styles.managerItemMetaRow}>
-                        <Text style={styles.managerItemType}>Spent this month</Text>
-                        <Text style={styles.managerItemBullet}>•</Text>
-                        <Text
-                          style={[
-                            styles.managerItemBalance,
-                            TYPOGRAPHY.tabularText,
-                            { color: spent > 0 ? accent.hex : COLORS.textMuted },
-                          ]}
-                        >
-                          ₹{spent.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
-
-                    {/* 3. Action Buttons Group: Move Up, Move Down, Edit, Delete */}
+                        <View style={styles.managerItemTextCol}>
+                          <Text style={styles.managerItemName} numberOfLines={1}>
+                            {cat}
+                          </Text>
+                          <View style={styles.managerItemMetaRow}>
+                            <Text style={styles.managerItemType}>Spent this month</Text>
+                            <Text style={styles.managerItemBullet}>•</Text>
+                            <Text
+                              style={[
+                                styles.managerItemBalance,
+                                TYPOGRAPHY.tabularText,
+                                { color: spent > 0 ? accent.hex : COLORS.textMuted },
+                              ]}
+                            >
+                              ₹{spent.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                            </Text>
+                          </View>
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  }}
+                  renderActions={(cat) => (
                     <View style={styles.managerItemActions}>
-                      <TouchableOpacity
-                        disabled={isFirst}
-                        onPress={() => handleSwapCategoryOrder(idx, 'up')}
-                        style={[styles.managerCircleBtn, isFirst && styles.managerBtnDisabled]}
-                        hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
-                      >
-                        <Ionicons
-                          name="chevron-up"
-                          size={16}
-                          color={isFirst ? COLORS.textMuted + '40' : COLORS.textPrimary}
-                        />
-                      </TouchableOpacity>
-
-                      <TouchableOpacity
-                        disabled={isLast}
-                        onPress={() => handleSwapCategoryOrder(idx, 'down')}
-                        style={[styles.managerCircleBtn, isLast && styles.managerBtnDisabled]}
-                        hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
-                      >
-                        <Ionicons
-                          name="chevron-down"
-                          size={16}
-                          color={isLast ? COLORS.textMuted + '40' : COLORS.textPrimary}
-                        />
-                      </TouchableOpacity>
-
                       <TouchableOpacity
                         onPress={() => handleStartEditCategory(cat)}
                         style={styles.managerCircleBtn}
@@ -2055,26 +2084,25 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                         <Ionicons name="trash-outline" size={14} color={COLORS.alert} />
                       </TouchableOpacity>
                     </View>
-                  </View>
-                );
-              })}
+                  )}
+                />
+              )}
             </ScrollView>
 
             {/* Fixed Bottom Action Bar */}
             {!showAddCategoryInput && (
-              <View style={[styles.managerBottomBar, { paddingBottom: Math.max(insets.bottom, 14) }]}>
-                <TouchableOpacity
+              <View style={[styles.managerBottomBar, { paddingBottom: Math.max(insets.bottom, 20) }]}>
+                <TactileButton
                   onPress={() => {
                     setEditingCategory(null);
                     setCategoryInputValue('');
                     setShowAddCategoryInput(true);
                   }}
                   style={[styles.managerPrimaryAddBtn, { backgroundColor: accent.hex }]}
-                  activeOpacity={0.85}
                 >
                   <Ionicons name="add" size={20} color={COLORS.textInverse} />
                   <Text style={styles.managerPrimaryAddBtnText}>Add New Category</Text>
-                </TouchableOpacity>
+                </TactileButton>
               </View>
             )}
           </View>
@@ -3121,7 +3149,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  draggableContentRow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
   managerItemContent: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  managerItemTextCol: {
     flex: 1,
     justifyContent: 'center',
   },

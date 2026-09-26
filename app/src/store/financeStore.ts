@@ -996,22 +996,23 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
     });
 
     try {
+      const dbPayload = {
+        user_id: accData.user_id,
+        name: accData.name,
+        type: accData.type,
+        current_balance: accData.current_balance,
+        credit_limit: accData.credit_limit,
+      };
+
       const { data, error } = await supabase
         .from('accounts')
-        .insert({
-          user_id: accData.user_id,
-          name: accData.name,
-          type: accData.type,
-          current_balance: accData.current_balance,
-          credit_limit: accData.credit_limit,
-          bank_preset: accData.bank_preset || null,
-        })
+        .insert(dbPayload)
         .select()
         .single();
 
       if (error) throw error;
 
-      const realAcc = data as Account;
+      const realAcc = { ...optimisticAcc, ...(data as Account) };
       set((state) => {
         const alreadyHasReal = state.accounts.some((a) => a.id === realAcc.id);
         let updated: Account[];
@@ -1043,9 +1044,17 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
     });
 
     try {
+      const validDbFields = ['name', 'type', 'current_balance', 'credit_limit'];
+      const dbUpdates: Record<string, any> = { updated_at: new Date().toISOString() };
+      for (const field of validDbFields) {
+        if (field in updates) {
+          dbUpdates[field] = (updates as any)[field];
+        }
+      }
+
       const { error } = await supabase
         .from('accounts')
-        .update({ ...updates, updated_at: new Date().toISOString() })
+        .update(dbUpdates)
         .eq('id', accountId);
 
       if (error) throw error;

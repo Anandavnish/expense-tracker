@@ -60,11 +60,23 @@ Foundational architecture build for a high-performance cross-platform personal f
   5. *Money Sources Card*: Displays all accounts with Indian bank presets (SBI, HDFC, ICICI, Axis, Kotak, Cash, Other), current balance, credit limits, inline Manage mode (add/edit/delete), deep-dive clickable navigation to [AccountDetailScreen](file:///c:/Users/anand/Coding%20stuff/Expense%20Tracker/app/src/screens/main/AccountDetailScreen.tsx) with fluid editing, and the **Balance Calibration Flow** (reconciles real-world balances by offering "Yes, log it" adjustment transaction vs "Just adjust").
   6. *Spending by Category Card*: Visual category breakdown seeded with student defaults (*Food & Dining, Groceries, Rent & Utilities, Transport, Shopping, Entertainment, Subscriptions, Health, Education, Personal Care, Travel, Miscellaneous*). Displays category-specific budget limits (e.g. `₹3,200 / ₹5,000 limit`) with dynamic color indicators (accent &rarr; warning at 80% &rarr; alert if overspent).
   7. *Floating Action Button (FAB)*: Circular `+` button pinned to bottom-right with dynamic accent color for instant transaction logging.
+- [x] **YouTube-Style Drag-and-Drop Reorder Engine (`YouTubeStyleDraggableList.tsx`)**:
+  - Implemented YouTube queue-style drag-and-drop reordering for both **Manage Money Sources** and **Manage Categories** modals.
+  - Eliminated pointed chevron arrows (`^`, `v`) and replaced with dual horizontal bar handle (`=`) on the left of each row.
+  - Dual bar handle initiates drag on ~120ms hold with `expo-haptics` Medium impact vibration.
+  - Dynamic card lift (`scale: 1.03`, `elevation: 24`, accent border glow) with real-time vertical tracking via `Animated.Value`.
+  - Floating slot physics: As an item is dragged over other rows, surrounding items smoothly float and spring-shift (`Animated.spring` with native driver) to reassign space with a tactile selection tick (`Haptics.selectionAsync()`).
+  - Snaps into target slot on release with `Haptics.impactAsync(Light)` and persists new sequence to Zustand and Supabase.
+  - Architecture: Uses stable per-row PanResponders in `DraggableRowItem` with `onPanResponderTerminationRequest: () => false` and temporary `ScrollView` scroll lock (`scrollEnabled={!isDragging}`) to prevent Android scroll gesture interference.
+  - Header & Bottom Bar Polish: Removed redundant top `+ Add` button from modal headers; upgraded bottom add button to `TactileButton` with dynamic safe area insets `Math.max(insets.bottom, 20)`. Layout is 100% unified across Money Sources and Categories.
 - [x] **Budget Management Engine Fixes (`financeStore.ts` & `BudgetsScreen.tsx`)**:
   - Eliminated 30-40 second latency: Synchronously computes optimistic `BudgetSummary` (spent, remaining, percentage) in local state (0ms) and closes the modal immediately, backgrounding the single database query and eliminating redundant view queries.
   - Redesigned category selection: Replaced the clunky horizontal scroll row with a responsive multi-column wrapping grid. Features an "Overall Monthly Budget" master banner at the top, category icons for all options, and visual checkmark selection states.
   - Replaced upsert with ID-based check & update / insert flow to eliminate PostgreSQL `ON CONFLICT` specification error when saving overall (`category = null`) or category-specific budgets.
   - Silenced Reanimated inline styles warning by migrating accent color tokens from `.value` to `.hex`.
+- [x] **Account Creation & Presets Schema Fix (`financeStore.ts` & `DashboardScreen.tsx`)**:
+  - Resolved `Could not find the 'bank_preset' column of 'accounts' in the schema cache` error by sanitizing database payloads in `createAccountOptimistic` and `updateAccountOptimistic` to send strictly valid PostgreSQL table columns (`user_id`, `name`, `type`, `current_balance`, `credit_limit`).
+  - Seamlessly embedded bank presets and card issuers into `name` (`SBI • Salary`, `HDFC`, etc.) with intelligent two-way parsing in `parseAccountDetails` so icons and names work across all devices without requiring database schema alterations.
 - [x] **TransactionsScreen Rebuilt (Strict 3-Line Format & Filters)**:
   - *Line 1*: Title / Merchant on left, formatted amount with tabular numerals on right (green for income, coral for expense, neutral for lent/borrowed).
   - *Line 2*: Category tag + Transaction Type tag (*Expense, Income, Lent, Borrowed*).
