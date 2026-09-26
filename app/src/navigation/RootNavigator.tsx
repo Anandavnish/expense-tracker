@@ -43,7 +43,7 @@ export const RootNavigator = () => {
     return () => {
       unsubscribeRealtime();
     };
-  }, [user]);
+  }, [user, loadCachedData, fetchInitialData, subscribeRealtime, unsubscribeRealtime]);
 
   const appNavTheme = useMemo(() => {
     const baseNavTheme = effectiveTheme === 'light' ? DefaultTheme : DarkTheme;

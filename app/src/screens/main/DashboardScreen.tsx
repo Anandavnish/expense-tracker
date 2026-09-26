@@ -118,7 +118,7 @@ export const getCategoryIconProps = (category: string): { name: keyof typeof Ion
 export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
   const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
-  const { accent } = useSettingsStore();
+  const { accent, colors } = useSettingsStore();
   const {
     accounts,
     transactions,
@@ -490,27 +490,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
     }
   };
 
-  const handleSwapAccountOrder = async (index: number, direction: 'up' | 'down') => {
-    const targetIndex = direction === 'up' ? index - 1 : index + 1;
-    if (targetIndex < 0 || targetIndex >= accounts.length) return;
-
-    const reordered = [...accounts];
-    const [moved] = reordered.splice(index, 1);
-    reordered.splice(targetIndex, 0, moved);
-
-    await reorderAccounts(reordered);
-  };
-
-  const handleSwapCategoryOrder = (index: number, direction: 'up' | 'down') => {
-    const targetIndex = direction === 'up' ? index - 1 : index + 1;
-    if (targetIndex < 0 || targetIndex >= categories.length) return;
-
-    const reordered = [...categories];
-    const [moved] = reordered.splice(index, 1);
-    reordered.splice(targetIndex, 0, moved);
-
-    reorderCategories(reordered);
-  };
 
   const handleSaveCategory = () => {
     const trimmed = categoryInputValue.trim();
@@ -740,13 +719,13 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                 style={[
                   styles.netWorthHeroNumber,
                   TYPOGRAPHY.heroNumber,
-                  { color: fullNetWorth < 0 ? COLORS.alert : COLORS.textPrimary },
+                  { color: colors.textPrimary },
                 ]}
               >
                 {formattedNetWorth}
               </Text>
               {totalCreditLimit > 0 && (
-                <View style={[styles.availCreditPill, { borderColor: COLORS.border }]}>
+                <View style={[styles.availCreditPill, { borderColor: colors.border }]}>
                   <Ionicons name="card-outline" size={12} color={accent.hex} />
                   <Text style={styles.availCreditText}>
                     Avail. Credit: ₹{totalAvailCredit.toLocaleString('en-IN', { maximumFractionDigits: 0 })} of ₹{totalCreditLimit.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
@@ -772,7 +751,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                 style={[
                   styles.breakdownValue,
                   TYPOGRAPHY.tabularText,
-                  { color: totalLent > 0 ? accent.hex : COLORS.textSecondary },
+                  { color: totalLent > 0 ? colors.success : colors.textSecondary },
                 ]}
               >
                 {totalLent > 0 ? `+₹${totalLent.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '₹0'}
@@ -785,7 +764,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                 style={[
                   styles.breakdownValue,
                   TYPOGRAPHY.tabularText,
-                  { color: totalBorrowed > 0 ? COLORS.alert : COLORS.textSecondary },
+                  { color: totalBorrowed > 0 ? colors.warning : colors.textSecondary },
                 ]}
               >
                 {totalBorrowed > 0 ? `−₹${totalBorrowed.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '₹0'}
@@ -798,7 +777,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                 style={[
                   styles.breakdownValue,
                   TYPOGRAPHY.tabularText,
-                  { color: totalCreditDebt > 0 ? COLORS.alert : COLORS.textSecondary },
+                  { color: totalCreditDebt > 0 ? colors.warning : colors.textSecondary },
                 ]}
               >
                 {totalCreditDebt > 0
@@ -953,7 +932,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                 style={[
                   styles.sourceSectionBadge,
                   TYPOGRAPHY.tabularText,
-                  { color: totalCreditDebt > 0 ? COLORS.alert : accent.hex },
+                  { color: totalCreditDebt > 0 ? colors.warning : colors.success },
                 ]}
               >
                 {totalCreditDebt > 0
@@ -1021,7 +1000,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                             style={[
                               styles.sourceAmount,
                               TYPOGRAPHY.tabularText,
-                              { color: spent > 0 ? COLORS.alert : accent.hex },
+                              { color: spent > 0 ? colors.warning : colors.success },
                             ]}
                           >
                             {spent > 0
@@ -1141,7 +1120,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
         activeOpacity={0.7}
         hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
       >
-        <Ionicons name="add" size={30} color={COLORS.textInverse} />
+        <Ionicons name="add" size={30} color="#FFFFFF" />
       </TouchableOpacity>
 
       {/* CALIBRATION CONFIRMATION MODAL */}
@@ -1371,7 +1350,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
               <Text style={styles.managerSubtitle}>
                 {editingAccount || isAddingNewSource
                   ? 'Configure details and starting balance'
-                  : `${accounts.length} accounts • Hold = to drag & rearrange`}
+                  : `${accounts.length} accounts • Tap ☰ to reorder`}
               </Text>
             </View>
 
@@ -1785,10 +1764,10 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                                   {
                                     color:
                                       acc.type === 'credit_card'
-                                        ? COLORS.alert
+                                        ? colors.warning
                                         : Number(acc.current_balance) >= 0
-                                        ? COLORS.textPrimary
-                                        : COLORS.alert,
+                                        ? colors.textPrimary
+                                        : colors.alert,
                                   },
                                 ]}
                               >
@@ -1813,10 +1792,10 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
 
                         <TouchableOpacity
                           onPress={() => handleOpenDeleteAccount(acc)}
-                          style={[styles.managerCircleBtn, styles.managerDeleteCircleBtn]}
+                          style={styles.managerCircleBtn}
                           hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
                         >
-                          <Ionicons name="trash-outline" size={14} color={COLORS.alert} />
+                          <Ionicons name="trash-outline" size={14} color={colors.textMuted} />
                         </TouchableOpacity>
                       </View>
                     )}
@@ -1830,7 +1809,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                   onPress={() => handleOpenEditSource()}
                   style={[styles.managerPrimaryAddBtn, { backgroundColor: accent.hex }]}
                 >
-                  <Ionicons name="add" size={20} color={COLORS.textInverse} />
+                  <Ionicons name="add" size={20} color="#FFFFFF" />
                   <Text style={styles.managerPrimaryAddBtnText}>Add New Money Source</Text>
                 </TactileButton>
               </View>
@@ -2101,7 +2080,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                   }}
                   style={[styles.managerPrimaryAddBtn, { backgroundColor: accent.hex }]}
                 >
-                  <Ionicons name="add" size={20} color={COLORS.textInverse} />
+                  <Ionicons name="add" size={20} color="#FFFFFF" />
                   <Text style={styles.managerPrimaryAddBtnText}>Add New Category</Text>
                 </TactileButton>
               </View>
@@ -3224,17 +3203,17 @@ const styles = StyleSheet.create({
     borderTopColor: COLORS.border,
   },
   managerPrimaryAddBtn: {
-    height: 48,
-    borderRadius: 12,
+    height: 50,
+    borderRadius: 14,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
   },
   managerPrimaryAddBtnText: {
-    color: COLORS.textInverse,
-    fontSize: 14,
-    fontWeight: '700',
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '600',
     letterSpacing: 0.2,
   },
   categoryInputCard: {

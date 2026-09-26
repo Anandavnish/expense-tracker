@@ -15,7 +15,6 @@ import { useSettingsStore } from '../../store/settingsStore';
 import { COLORS, SPACING, TYPOGRAPHY } from '../../theme/tokens';
 import { TactileButton } from '../../components/TactileButton';
 import { InlineError } from '../../components/InlineError';
-import { Borrow } from '../../types/database';
 
 export const BorrowsScreen = () => {
   const insets = useSafeAreaInsets();
@@ -47,8 +46,6 @@ export const BorrowsScreen = () => {
   // Calculate totals separated cleanly between lent and borrowed
   let totalPendingLent = 0;
   let totalPendingBorrowed = 0;
-  let totalSettled = 0;
-
   borrows.forEach((b) => {
     const { type } = parseBorrowDetails(b, transactions);
     if (b.status === 'pending') {
@@ -57,8 +54,6 @@ export const BorrowsScreen = () => {
       } else {
         totalPendingLent += Number(b.amount || 0);
       }
-    } else {
-      totalSettled += Number(b.amount || 0);
     }
   });
 

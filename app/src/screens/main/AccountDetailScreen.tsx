@@ -45,7 +45,7 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
 }) => {
   const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
-  const { accent } = useSettingsStore();
+  const { accent, colors } = useSettingsStore();
   const accountId = route?.params?.accountId;
 
   const {
@@ -254,12 +254,6 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
   const displayTitle = account.name?.trim() || typeLabel;
   const displaySubtitle = account.name?.trim() ? typeLabel : null;
 
-  const typeLabels: Record<TransactionType, string> = {
-    expense: 'Expense',
-    income: 'Income',
-    borrow_given: 'Lent',
-    borrow_taken: 'Borrowed',
-  };
 
   const accountBalanceNum = Number(account.current_balance || 0);
   const hasNonZeroBalance = Math.abs(accountBalanceNum) > 0.01;
@@ -405,7 +399,7 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
                 style={[
                   styles.statValue,
                   TYPOGRAPHY.tabularText,
-                  { color: COLORS.alert },
+                  { color: colors.textPrimary },
                 ]}
               >
                 −₹{totalOutflow.toLocaleString('en-IN', { maximumFractionDigits: 0 })}

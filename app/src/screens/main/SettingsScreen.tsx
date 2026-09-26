@@ -25,7 +25,7 @@ interface SettingsScreenProps {
 export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) => {
   const insets = useSafeAreaInsets();
   const { user, signOut } = useAuthStore();
-  const { themeMode, accent, setThemeMode, setAccent } = useSettingsStore();
+  const { themeMode, accent, colors, setThemeMode, setAccent } = useSettingsStore();
 
   const handleSelectTheme = (mode: ThemeMode) => {
     setThemeMode(mode);
@@ -36,7 +36,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) =>
   };
 
   return (
-    <View style={[styles.safeArea, { paddingTop: insets.top }]}>
+    <View style={[styles.safeArea, { paddingTop: insets.top, backgroundColor: colors.background }]}>
       {/* Top Header */}
       <View style={styles.header}>
         <TouchableOpacity
@@ -47,14 +47,14 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) =>
           <Ionicons name="chevron-back" size={20} color={accent.hex} />
           <Text style={[styles.backText, { color: accent.hex }]}>Back</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>SETTINGS</Text>
+        <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>Settings</Text>
         <View style={styles.headerRightSpacer} />
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
         {/* Account Info */}
-        <View style={styles.card}>
-          <Text style={styles.sectionLabel}>ACCOUNT</Text>
+        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>ACCOUNT</Text>
           <View style={styles.accountRow}>
             <View style={[styles.avatar, { borderColor: accent.hex }]}>
               <Text style={[styles.avatarText, { color: accent.hex }]}>
@@ -62,15 +62,15 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) =>
               </Text>
             </View>
             <View style={styles.accountDetails}>
-              <Text style={styles.accountEmail}>{user?.email}</Text>
-              <Text style={styles.accountIdText}>ID: {user?.id?.substring(0, 16)}...</Text>
+              <Text style={[styles.accountEmail, { color: colors.textPrimary }]}>{user?.email}</Text>
+              <Text style={[styles.accountIdText, { color: colors.textMuted }]}>ID: {user?.id?.substring(0, 16)}...</Text>
             </View>
           </View>
         </View>
 
         {/* Appearance - Theme Mode */}
-        <View style={styles.card}>
-          <Text style={styles.sectionLabel}>THEME</Text>
+        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>THEME</Text>
           <View style={styles.segmentedRow}>
             {(['dark', 'light', 'system'] as const).map((mode) => {
               const active = themeMode === mode;
@@ -80,16 +80,18 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) =>
                   onPress={() => handleSelectTheme(mode)}
                   style={[
                     styles.segmentBtn,
+                    { backgroundColor: colors.surfaceLight, borderColor: colors.border },
                     active && {
                       borderColor: accent.hex,
-                      backgroundColor: COLORS.surfaceLight,
+                      backgroundColor: accent.hex,
                     },
                   ]}
                 >
                   <Text
                     style={[
                       styles.segmentBtnText,
-                      active && { color: accent.hex, fontWeight: '700' },
+                      { color: colors.textSecondary },
+                      active && { color: '#FFFFFF', fontWeight: '700' },
                     ]}
                   >
                     {mode.toUpperCase()}
@@ -101,9 +103,9 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) =>
         </View>
 
         {/* Appearance - Accent Palette Picker */}
-        <View style={styles.card}>
-          <Text style={styles.sectionLabel}>ACCENT COLOR</Text>
-          <Text style={styles.sectionSub}>
+        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>ACCENT COLOR</Text>
+          <Text style={[styles.sectionSub, { color: colors.textSecondary }]}>
             Updates highlights, active tabs, and primary action buttons across the app.
           </Text>
 
@@ -116,6 +118,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) =>
                   onPress={() => handleSelectAccent(color)}
                   style={[
                     styles.swatchItem,
+                    { backgroundColor: colors.surfaceLight, borderColor: colors.border },
                     active && { borderColor: color.hex, borderWidth: 2 },
                   ]}
                 >
@@ -127,6 +130,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) =>
                   <Text
                     style={[
                       styles.swatchName,
+                      { color: colors.textSecondary },
                       active && { color: color.hex, fontWeight: '700' },
                     ]}
                   >
@@ -139,45 +143,45 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) =>
         </View>
 
         {/* Future Features Placeholders */}
-        <View style={styles.card}>
-          <Text style={styles.sectionLabel}>FEATURES & INTEGRATIONS</Text>
+        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>FEATURES & INTEGRATIONS</Text>
 
           <View style={styles.placeholderRow}>
             <View>
-              <Text style={styles.placeholderTitle}>AI Overview (BYOK)</Text>
-              <Text style={styles.placeholderSub}>
+              <Text style={[styles.placeholderTitle, { color: colors.textPrimary }]}>AI Overview (BYOK)</Text>
+              <Text style={[styles.placeholderSub, { color: colors.textMuted }]}>
                 Bring Your Own Key for Gemini financial summaries
               </Text>
             </View>
-            <View style={styles.soonBadge}>
-              <Text style={styles.soonBadgeText}>COMING SOON</Text>
+            <View style={[styles.soonBadge, { backgroundColor: colors.surfaceLight, borderColor: colors.border }]}>
+              <Text style={[styles.soonBadgeText, { color: colors.textMuted }]}>COMING SOON</Text>
             </View>
           </View>
 
-          <View style={styles.divider} />
+          <View style={[styles.divider, { backgroundColor: colors.border }]} />
 
           <View style={styles.placeholderRow}>
             <View>
-              <Text style={styles.placeholderTitle}>Export Data (CSV)</Text>
-              <Text style={styles.placeholderSub}>
+              <Text style={[styles.placeholderTitle, { color: colors.textPrimary }]}>Export Data (CSV)</Text>
+              <Text style={[styles.placeholderSub, { color: colors.textMuted }]}>
                 Export transaction and budget history
               </Text>
             </View>
-            <View style={styles.soonBadge}>
-              <Text style={styles.soonBadgeText}>COMING SOON</Text>
+            <View style={[styles.soonBadge, { backgroundColor: colors.surfaceLight, borderColor: colors.border }]}>
+              <Text style={[styles.soonBadgeText, { color: colors.textMuted }]}>COMING SOON</Text>
             </View>
           </View>
 
-          <View style={styles.divider} />
+          <View style={[styles.divider, { backgroundColor: colors.border }]} />
 
           <View style={styles.placeholderRow}>
             <View>
-              <Text style={styles.placeholderTitle}>Manage Categories</Text>
-              <Text style={styles.placeholderSub}>
+              <Text style={[styles.placeholderTitle, { color: colors.textPrimary }]}>Manage Categories</Text>
+              <Text style={[styles.placeholderSub, { color: colors.textMuted }]}>
                 Custom categories available via Dashboard settings
               </Text>
             </View>
-            <View style={[styles.soonBadge, { backgroundColor: accent.muted }]}>
+            <View style={[styles.soonBadge, { backgroundColor: accent.muted, borderColor: colors.border }]}>
               <Text style={[styles.soonBadgeText, { color: accent.hex }]}>
                 AVAILABLE
               </Text>
@@ -186,8 +190,11 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) =>
         </View>
 
         {/* Sign Out Button */}
-        <TactileButton onPress={signOut} style={styles.signOutBtn}>
-          <Text style={styles.signOutBtnText}>Sign Out</Text>
+        <TactileButton
+          onPress={signOut}
+          style={[styles.signOutBtn, { backgroundColor: colors.alertMuted, borderColor: colors.alert }]}
+        >
+          <Text style={[styles.signOutBtnText, { color: colors.alert }]}>Sign Out</Text>
         </TactileButton>
 
         <Text style={styles.versionFooter}>

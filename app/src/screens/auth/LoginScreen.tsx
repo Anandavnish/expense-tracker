@@ -10,7 +10,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TextInput, ActivityIndicator } from 'react-native-paper';
 import { useAuthStore } from '../../store/authStore';
-import { COLORS, SPACING, TYPOGRAPHY } from '../../theme/tokens';
+import { COLORS, SPACING } from '../../theme/tokens';
 import { TactileButton } from '../../components/TactileButton';
 
 interface LoginScreenProps {

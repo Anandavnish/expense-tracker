@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useMemo, useEffect } from 'react';
 import {
   View,
   StyleSheet,
@@ -201,21 +201,13 @@ export function YouTubeStyleDraggableList<T>({
   const hoverIndexRef = useRef<number | null>(null);
 
   // Animated values for dragged item
-  const panY = useRef(new Animated.Value(0)).current;
-  const scaleAnim = useRef(new Animated.Value(1)).current;
+  const [panY] = useState(() => new Animated.Value(0));
+  const [scaleAnim] = useState(() => new Animated.Value(1));
 
   // Animated values for other items shifting
-  const shiftAnims = useRef<Animated.Value[]>([]).current;
-
-  // Synchronize shiftAnims array with data length
-  if (shiftAnims.length !== data.length) {
-    while (shiftAnims.length < data.length) {
-      shiftAnims.push(new Animated.Value(0));
-    }
-    while (shiftAnims.length > data.length) {
-      shiftAnims.pop();
-    }
-  }
+  const shiftAnims = useMemo(() => {
+    return Array.from({ length: data.length }, () => new Animated.Value(0));
+  }, [data.length]);
 
   // Helper to update other items' spring shifts based on hover index
   const updateShifts = (dragIdx: number, hoverIdx: number) => {
