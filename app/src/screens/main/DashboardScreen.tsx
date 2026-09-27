@@ -112,6 +112,9 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
     deleteAccountWithCalibration,
     reorderAccounts,
     calibrateAccountBalance,
+    pendingCalibrations,
+    resolvePendingCalibrationAsTransaction,
+    clearPendingCalibration,
     payCreditCardBill,
     addCategory,
     updateCategory,
@@ -136,6 +139,14 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
   const [editCreditLimit, setEditCreditLimit] = useState('');
   const [isAddingNewSource, setIsAddingNewSource] = useState(false);
 
+  // Dedicated Calibration State in Dashboard
+  const [calibratingSource, setCalibratingSource] = useState<Account | null>(null);
+  const [calibrateBalanceInput, setCalibrateBalanceInput] = useState('0');
+  const [isSavingCalibration, setIsSavingCalibration] = useState(false);
+
+  // Quick Sync Sheet State (Home Screen Net Worth card)
+  const [syncSheetVisible, setSyncSheetVisible] = useState(false);
+
   // Delete Account Confirmation State
   const [deleteTargetAccount, setDeleteTargetAccount] = useState<Account | null>(null);
   const [isDeletingSource, setIsDeletingSource] = useState(false);
@@ -146,13 +157,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
   const [payAmount, setPayAmount] = useState('');
   const [paySourceAccountId, setPaySourceAccountId] = useState('');
   const [isPayingBill, setIsPayingBill] = useState(false);
-
-  // Calibration Confirmation Dialog State
-  const [calibrationPending, setCalibrationPending] = useState<{
-    account: Account;
-    newBalance: number;
-    difference: number;
-  } | null>(null);
 
   // Manage Categories State
   const [categoriesManageVisible, setCategoriesManageVisible] = useState(false);
@@ -573,10 +577,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
       setEditingAccount(null);
       setIsAddingNewSource(false);
     } else if (editingAccount) {
-      const oldBalance = Number(editingAccount.current_balance);
-      const diff = parsedBalance - oldBalance;
-
-      // Update name, type, limit first
+      // Update metadata only - no balance tampering
       await updateAccountOptimistic(editingAccount.id, {
         name: finalName,
         type: editType,
@@ -595,32 +596,37 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
             : null,
       });
 
-      // Check if balance changed -> CALIBRATION FLOW
-      if (Math.abs(diff) > 0.01) {
-        setCalibrationPending({
-          account: editingAccount,
-          newBalance: parsedBalance,
-          difference: diff,
-        });
-      }
-
       setEditingAccount(null);
       setIsAddingNewSource(false);
     }
   };
 
-  const handleCalibrationChoice = async (logAsTransaction: boolean) => {
-    if (!user || !calibrationPending) return;
-    const { account, newBalance } = calibrationPending;
+  const handleOpenCalibrateSource = (account: Account) => {
+    setCalibratingSource(account);
+    if (account.type === 'credit_card') {
+      const outstanding = Math.abs(Math.min(0, Number(account.current_balance || 0)));
+      setCalibrateBalanceInput(outstanding > 0 ? String(outstanding) : '0');
+    } else {
+      setCalibrateBalanceInput(String(account.current_balance ?? '0'));
+    }
+  };
+
+  const handleSaveCalibrateSource = async (logAsTransaction: boolean) => {
+    if (!user || !calibratingSource) return;
+    setIsSavingCalibration(true);
+
+    const rawVal = parseFloat(calibrateBalanceInput) || 0;
+    const parsedBalance = calibratingSource.type === 'credit_card' ? -Math.abs(rawVal) : rawVal;
 
     await calibrateAccountBalance(
-      account.id,
-      newBalance,
+      calibratingSource.id,
+      parsedBalance,
       logAsTransaction,
       user.id
     );
 
-    setCalibrationPending(null);
+    setIsSavingCalibration(false);
+    setCalibratingSource(null);
   };
 
   return (
@@ -712,6 +718,20 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                 </View>
               )}
             </View>
+
+            {Object.keys(pendingCalibrations).length > 0 && (
+              <TouchableOpacity
+                style={styles.syncRequiredPill}
+                onPress={() => setSyncSheetVisible(true)}
+                activeOpacity={0.8}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Ionicons name="warning" size={13} color="#D97706" />
+                <Text style={styles.syncRequiredPillText}>
+                  Sync Required ({Object.keys(pendingCalibrations).length})
+                </Text>
+              </TouchableOpacity>
+            )}
           </View>
 
           <View style={styles.netWorthDivider} />
@@ -1102,44 +1122,206 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
         <Ionicons name="add" size={30} color={colors.onPrimary} />
       </TouchableOpacity>
 
-      {/* CALIBRATION CONFIRMATION MODAL */}
+      {/* SYNC REQUIRED BOTTOM SHEET / MODAL */}
       <Modal
-        visible={!!calibrationPending}
+        visible={syncSheetVisible}
         transparent
         animationType="fade"
         statusBarTranslucent
-        onRequestClose={() => setCalibrationPending(null)}
+        onRequestClose={() => setSyncSheetVisible(false)}
       >
         <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Calibrate Balance</Text>
-            {calibrationPending && (
-              <Text style={styles.modalBodyText}>
-                Balance changed from ₹
-                {Number(calibrationPending.account.current_balance).toLocaleString('en-IN')}{' '}
-                to ₹{calibrationPending.newBalance.toLocaleString('en-IN')} — a difference
-                of ₹{Math.abs(calibrationPending.difference).toLocaleString('en-IN')}.
-                {'\n\n'}Log this as an Adjustment transaction in your history?
-              </Text>
-            )}
-
-            <View style={styles.modalButtonRow}>
+          <View style={[styles.modalCard, { maxHeight: '80%' }]}>
+            <View style={styles.syncSheetHeaderRow}>
+              <View style={styles.syncSheetHeaderLeft}>
+                <Ionicons name="warning" size={20} color="#D97706" />
+                <Text style={styles.modalTitle}>Balance Sync Required</Text>
+              </View>
               <TouchableOpacity
-                onPress={() => handleCalibrationChoice(false)}
-                style={styles.modalSecondaryBtn}
+                onPress={() => setSyncSheetVisible(false)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
-                <Text style={styles.modalSecondaryBtnText}>Just adjust</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                onPress={() => handleCalibrationChoice(true)}
-                style={[styles.modalPrimaryBtn, { backgroundColor: accent.hex }]}
-              >
-                <Text style={styles.modalPrimaryBtnText}>Yes, log it</Text>
+                <Ionicons name="close" size={20} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
+
+            <Text style={styles.syncSheetDescription}>
+              The following money sources have balances adjusted directly without logging a transaction. Log an adjustment transaction to keep your ledger accurate, or dismiss the warning.
+            </Text>
+
+            <ScrollView showsVerticalScrollIndicator={false} style={{ marginVertical: SPACING.md }}>
+              {Object.values(pendingCalibrations).length === 0 ? (
+                <Text style={styles.syncSheetEmptyText}>All accounts are currently in sync!</Text>
+              ) : (
+                Object.values(pendingCalibrations).map((item) => {
+                  const targetAcc = accounts.find((a) => a.id === item.accountId);
+                  const accName = targetAcc?.name || 'Account';
+                  const isPositive = item.difference > 0;
+                  const diffText = `${isPositive ? '+' : '−'}₹${Math.abs(item.difference).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
+
+                  return (
+                    <View key={item.accountId} style={styles.syncItemCard}>
+                      <View style={styles.syncItemInfoCol}>
+                        <Text style={styles.syncItemAccountName}>{accName}</Text>
+                        <Text style={[styles.syncItemDiffText, { color: isPositive ? accent.hex : colors.alert }]}>
+                          Unlogged: {diffText}
+                        </Text>
+                        <Text style={styles.syncItemDateText}>
+                          Adjusted on {new Date(item.date).toLocaleDateString()}
+                        </Text>
+                      </View>
+
+                      <View style={styles.syncItemActionsCol}>
+                        <TactileButton
+                          onPress={async () => {
+                            if (!user) return;
+                            await resolvePendingCalibrationAsTransaction(item.accountId, user.id);
+                            if (Object.keys(pendingCalibrations).length <= 1) {
+                              setSyncSheetVisible(false);
+                            }
+                          }}
+                          style={[styles.syncItemLogBtn, { backgroundColor: accent.hex }]}
+                        >
+                          <Text style={styles.syncItemLogBtnText}>Log Tx</Text>
+                        </TactileButton>
+
+                        <TouchableOpacity
+                          onPress={async () => {
+                            await clearPendingCalibration(item.accountId);
+                            if (Object.keys(pendingCalibrations).length <= 1) {
+                              setSyncSheetVisible(false);
+                            }
+                          }}
+                          style={styles.syncItemDismissBtn}
+                        >
+                          <Text style={styles.syncItemDismissBtnText}>Dismiss</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  );
+                })
+              )}
+            </ScrollView>
+
+            <TouchableOpacity
+              onPress={() => setSyncSheetVisible(false)}
+              style={styles.modalSecondaryBtn}
+            >
+              <Text style={styles.modalSecondaryBtnText}>Close</Text>
+            </TouchableOpacity>
           </View>
         </View>
+      </Modal>
+
+      {/* DEDICATED CALIBRATE BALANCE MODAL */}
+      <Modal
+        visible={!!calibratingSource}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={() => setCalibratingSource(null)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.modalBackdrop}
+        >
+          <View style={styles.modalCard}>
+            <View style={styles.syncSheetHeaderRow}>
+              <View>
+                <Text style={styles.modalTitle}>Calibrate Balance</Text>
+                <Text style={styles.modalAccountSubtitle}>{calibratingSource?.name}</Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setCalibratingSource(null)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Ionicons name="close" size={20} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            {calibratingSource && (() => {
+              const isCard = calibratingSource.type === 'credit_card';
+              const spent = Math.abs(Math.min(0, Number(calibratingSource.current_balance || 0)));
+              const rawVal = parseFloat(calibrateBalanceInput) || 0;
+              const parsedNew = isCard ? -Math.abs(rawVal) : rawVal;
+              const oldBal = Number(calibratingSource.current_balance || 0);
+              const diff = parsedNew - oldBal;
+              const absDiff = Math.abs(diff);
+
+              return (
+                <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 380 }}>
+                  <View style={styles.calibrationInfoBox}>
+                    <Text style={styles.calibrationInfoLabel}>
+                      {isCard ? 'CURRENT OUTSTANDING DUE IN APP' : 'CURRENT APP BALANCE'}
+                    </Text>
+                    <Text style={[styles.calibrationCurrentBalance, TYPOGRAPHY.tabularText]}>
+                      ₹{isCard ? spent.toLocaleString('en-IN') : oldBal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                    </Text>
+                  </View>
+
+                  <Text style={styles.inputSectionLabel}>
+                    {isCard ? 'ACTUAL OUTSTANDING DUE (₹)' : 'ACTUAL REAL-WORLD BALANCE (₹)'}
+                  </Text>
+                  <TextInput
+                    value={calibrateBalanceInput}
+                    onChangeText={setCalibrateBalanceInput}
+                    placeholder="0.00"
+                    placeholderTextColor={colors.textMuted}
+                    keyboardType="decimal-pad"
+                    mode="outlined"
+                    outlineColor={colors.border}
+                    activeOutlineColor={accent.hex}
+                    textColor={colors.textPrimary}
+                    theme={{ colors: { background: colors.surfaceLight } }}
+                    style={styles.modalInput}
+                  />
+
+                  <View style={styles.diffPreviewBox}>
+                    <Text style={styles.diffPreviewLabel}>CALCULATED DIFFERENCE</Text>
+                    <Text
+                      style={[
+                        styles.diffPreviewAmount,
+                        TYPOGRAPHY.tabularText,
+                        { color: diff > 0 ? accent.hex : diff < 0 ? colors.alert : colors.textMuted },
+                      ]}
+                    >
+                      {diff > 0
+                        ? `+₹${absDiff.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
+                        : diff < 0
+                        ? `−₹${absDiff.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
+                        : '₹0.00 (No change)'}
+                    </Text>
+                    <Text style={styles.diffHelpText}>
+                      Log an Adjustment transaction to keep ledger in sync, or update directly (which flags 'Sync Required' on home card).
+                    </Text>
+                  </View>
+
+                  <View style={styles.calibrationActionsCol}>
+                    <TactileButton
+                      onPress={() => handleSaveCalibrateSource(true)}
+                      disabled={isSavingCalibration}
+                      style={[styles.modalPrimaryBtn, { backgroundColor: accent.hex }]}
+                    >
+                      <Text style={styles.modalPrimaryBtnText}>
+                        {isSavingCalibration ? 'Saving...' : 'Calibrate & Log Transaction'}
+                      </Text>
+                    </TactileButton>
+
+                    <TouchableOpacity
+                      onPress={() => handleSaveCalibrateSource(false)}
+                      disabled={isSavingCalibration}
+                      style={styles.modalSecondaryBtn}
+                    >
+                      <Text style={styles.modalSecondaryBtnText}>
+                        Update Balance Only (Sets Sync Required)
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </ScrollView>
+              );
+            })()}
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* PAY CREDIT CARD BILL MODAL */}
@@ -1607,7 +1789,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                   style={styles.modalInput}
                 />
 
-                {editType === 'credit_card' ? (
+                {editType === 'credit_card' && (
                   <>
                     <Text style={styles.inputSectionLabel}>TOTAL CREDIT LIMIT (₹)</Text>
                     <TextInput
@@ -1622,46 +1804,52 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                       theme={{ colors: { background: colors.surfaceLight } }}
                       style={styles.modalInput}
                     />
-
-                    <Text style={styles.inputSectionLabel}>CURRENT OUTSTANDING DUE (₹)</Text>
-                    <TextInput
-                      value={editBalance}
-                      onChangeText={setEditBalance}
-                      placeholder="0.00"
-                      keyboardType="decimal-pad"
-                      mode="outlined"
-                      outlineColor={colors.border}
-                      activeOutlineColor={accent.hex}
-                      textColor={colors.textPrimary}
-                      theme={{ colors: { background: colors.surfaceLight } }}
-                      style={styles.modalInput}
-                    />
-
-                    <View style={styles.creditCalcBox}>
-                      <Text style={styles.creditCalcSub}>
-                        Limit: ₹{(parseFloat(editCreditLimit) || 0).toLocaleString('en-IN')}  •  Due: ₹{(parseFloat(editBalance) || 0).toLocaleString('en-IN')}
-                      </Text>
-                      <Text style={[styles.creditCalcMain, { color: accent.hex }]}>
-                        Available Credit: ₹{Math.max(0, (parseFloat(editCreditLimit) || 0) - (parseFloat(editBalance) || 0)).toLocaleString('en-IN')}
-                      </Text>
-                    </View>
                   </>
-                ) : (
-                  <>
-                    <Text style={styles.inputSectionLabel}>CURRENT BALANCE (₹)</Text>
-                    <TextInput
-                      value={editBalance}
-                      onChangeText={setEditBalance}
-                      placeholder="0.00"
-                      keyboardType="decimal-pad"
-                      mode="outlined"
-                      outlineColor={colors.border}
-                      activeOutlineColor={accent.hex}
-                      textColor={colors.textPrimary}
-                      theme={{ colors: { background: colors.surfaceLight } }}
-                      style={styles.modalInput}
-                    />
-                  </>
+                )}
+
+                {isAddingNewSource && (
+                  editType === 'credit_card' ? (
+                    <>
+                      <Text style={styles.inputSectionLabel}>STARTING OUTSTANDING DUE (₹)</Text>
+                      <TextInput
+                        value={editBalance}
+                        onChangeText={setEditBalance}
+                        placeholder="0.00"
+                        keyboardType="decimal-pad"
+                        mode="outlined"
+                        outlineColor={colors.border}
+                        activeOutlineColor={accent.hex}
+                        textColor={colors.textPrimary}
+                        theme={{ colors: { background: colors.surfaceLight } }}
+                        style={styles.modalInput}
+                      />
+
+                      <View style={styles.creditCalcBox}>
+                        <Text style={styles.creditCalcSub}>
+                          Limit: ₹{(parseFloat(editCreditLimit) || 0).toLocaleString('en-IN')}  •  Due: ₹{(parseFloat(editBalance) || 0).toLocaleString('en-IN')}
+                        </Text>
+                        <Text style={[styles.creditCalcMain, { color: accent.hex }]}>
+                          Available Credit: ₹{Math.max(0, (parseFloat(editCreditLimit) || 0) - (parseFloat(editBalance) || 0)).toLocaleString('en-IN')}
+                        </Text>
+                      </View>
+                    </>
+                  ) : (
+                    <>
+                      <Text style={styles.inputSectionLabel}>STARTING BALANCE (₹)</Text>
+                      <TextInput
+                        value={editBalance}
+                        onChangeText={setEditBalance}
+                        placeholder="0.00"
+                        keyboardType="decimal-pad"
+                        mode="outlined"
+                        outlineColor={colors.border}
+                        activeOutlineColor={accent.hex}
+                        textColor={colors.textPrimary}
+                        theme={{ colors: { background: colors.surfaceLight } }}
+                        style={styles.modalInput}
+                      />
+                    </>
+                  )
                 )}
               </ScrollView>
 
@@ -1725,9 +1913,17 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                           </View>
 
                           <View style={styles.managerItemTextCol}>
-                            <Text style={styles.managerItemName} numberOfLines={1}>
-                              {title}
-                            </Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                              <Text style={styles.managerItemName} numberOfLines={1}>
+                                {title}
+                              </Text>
+                              {!!pendingCalibrations[acc.id] && (
+                                <View style={styles.managerSyncBadge}>
+                                  <Ionicons name="warning" size={10} color="#D97706" />
+                                  <Text style={styles.managerSyncBadgeText}>Sync</Text>
+                                </View>
+                              )}
+                            </View>
                             <View style={styles.managerItemMetaRow}>
                               <Text style={styles.managerItemType}>
                                 {acc.type === 'credit_card'
@@ -1762,6 +1958,14 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                     }}
                     renderActions={(acc) => (
                       <View style={styles.managerItemActions}>
+                        <TouchableOpacity
+                          onPress={() => handleOpenCalibrateSource(acc)}
+                          style={[styles.managerCircleBtn, { borderColor: accent.hex + '50' }]}
+                          hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+                        >
+                          <Ionicons name="scale-outline" size={14} color={accent.hex} />
+                        </TouchableOpacity>
+
                         <TouchableOpacity
                           onPress={() => handleOpenEditSource(acc)}
                           style={styles.managerCircleBtn}
@@ -3319,6 +3523,167 @@ function getStyles(colors: ThemeColors) {
   emptySourcesText: {
     color: colors.textMuted,
     fontSize: 14,
+  },
+  syncRequiredPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#FEF3C7',
+    borderColor: '#F59E0B',
+    borderWidth: 1,
+    borderRadius: 20,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  syncRequiredPillText: {
+    color: '#92400E',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  syncSheetHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: SPACING.md,
+  },
+  syncSheetHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+  },
+  syncSheetDescription: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: SPACING.sm,
+  },
+  syncSheetEmptyText: {
+    color: colors.textMuted,
+    fontSize: 13,
+    textAlign: 'center',
+    paddingVertical: SPACING.xl,
+  },
+  syncItemCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.surfaceLight,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: SPACING.md,
+    marginBottom: SPACING.sm,
+  },
+  syncItemInfoCol: {
+    flex: 1,
+    marginRight: SPACING.sm,
+  },
+  syncItemAccountName: {
+    color: colors.textPrimary,
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  syncItemDiffText: {
+    fontSize: 13,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  syncItemDateText: {
+    color: colors.textMuted,
+    fontSize: 11,
+  },
+  syncItemActionsCol: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  syncItemLogBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 6,
+  },
+  syncItemLogBtnText: {
+    color: colors.textInverse,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  syncItemDismissBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 7,
+  },
+  syncItemDismissBtnText: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  modalAccountSubtitle: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    marginTop: 2,
+  },
+  calibrationInfoBox: {
+    backgroundColor: colors.surfaceLight,
+    padding: SPACING.md,
+    borderRadius: 8,
+    marginBottom: SPACING.sm,
+  },
+  calibrationInfoLabel: {
+    color: colors.textMuted,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    marginBottom: 4,
+  },
+  calibrationCurrentBalance: {
+    color: colors.textPrimary,
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  diffPreviewBox: {
+    backgroundColor: colors.surfaceLight,
+    padding: SPACING.md,
+    borderRadius: 8,
+    marginVertical: SPACING.md,
+  },
+  diffPreviewLabel: {
+    color: colors.textMuted,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    marginBottom: 2,
+  },
+  diffPreviewAmount: {
+    fontSize: 16,
+    fontWeight: '800',
+    marginBottom: 4,
+  },
+  diffHelpText: {
+    color: colors.textMuted,
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  calibrationActionsCol: {
+    gap: SPACING.sm,
+    marginTop: SPACING.sm,
+    marginBottom: SPACING.xs,
+  },
+  managerSyncBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: '#FEF3C7',
+    borderColor: '#F59E0B',
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+  },
+  managerSyncBadgeText: {
+    color: '#92400E',
+    fontSize: 10,
+    fontWeight: '700',
   },
 });
 }

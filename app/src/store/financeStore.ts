@@ -14,6 +14,15 @@ import { RealtimeChannel } from '@supabase/supabase-js';
 const STORAGE_KEY = '@finance_store_cache_v2';
 const CATEGORIES_STORAGE_KEY = '@finance_categories_v1';
 const ACCOUNT_ORDER_STORAGE_KEY = '@finance_account_order_v1';
+const PENDING_CALIBRATIONS_STORAGE_KEY = '@finance_pending_calibrations_v1';
+
+export interface PendingCalibration {
+  accountId: string;
+  difference: number;
+  oldBalance: number;
+  newBalance: number;
+  date: string;
+}
 
 export const DEFAULT_STUDENT_CATEGORIES = [
   'Food',
@@ -166,6 +175,13 @@ interface FinanceState {
   ) => Promise<void>;
 
   // Calibration flow
+  pendingCalibrations: Record<string, PendingCalibration>;
+  setPendingCalibration: (item: PendingCalibration) => Promise<void>;
+  clearPendingCalibration: (accountId: string) => Promise<void>;
+  resolvePendingCalibrationAsTransaction: (
+    accountId: string,
+    userId: string
+  ) => Promise<{ success: boolean; error?: string }>;
   calibrateAccountBalance: (
     accountId: string,
     newBalance: number,
@@ -192,6 +208,7 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
   budgetSummaries: [],
   selectedMonth: new Date().toISOString().substring(0, 7), // 'YYYY-MM'
   categories: DEFAULT_STUDENT_CATEGORIES,
+  pendingCalibrations: {},
   isInitialLoading: true,
   inlineError: null,
   activeChannel: null,
@@ -227,10 +244,11 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
 
   loadCachedData: async () => {
     try {
-      const [cached, cachedCats, cachedOrder] = await Promise.all([
+      const [cached, cachedCats, cachedOrder, cachedCalibrations] = await Promise.all([
         AsyncStorage.getItem(STORAGE_KEY),
         AsyncStorage.getItem(CATEGORIES_STORAGE_KEY),
         AsyncStorage.getItem(ACCOUNT_ORDER_STORAGE_KEY),
+        AsyncStorage.getItem(PENDING_CALIBRATIONS_STORAGE_KEY),
       ]);
 
       let categories = DEFAULT_STUDENT_CATEGORIES;
@@ -250,6 +268,13 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
         } catch {}
       }
 
+      let pendingCalibrations: Record<string, PendingCalibration> = {};
+      if (cachedCalibrations) {
+        try {
+          pendingCalibrations = JSON.parse(cachedCalibrations) || {};
+        } catch {}
+      }
+
       if (cached) {
         const parsed = JSON.parse(cached);
         const rawAccounts = (parsed.accounts || []) as Account[];
@@ -262,10 +287,11 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
           budgets: parsed.budgets || [],
           budgetSummaries: parsed.budgetSummaries || [],
           categories,
+          pendingCalibrations,
           isInitialLoading: false,
         });
       } else {
-        set({ categories, isInitialLoading: false });
+        set({ categories, pendingCalibrations, isInitialLoading: false });
       }
     } catch {
       set({ isInitialLoading: false });
@@ -306,7 +332,7 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
     try {
       const month = get().selectedMonth;
 
-      const [accountsRes, txRes, borrowsRes, budgetsRes, summaryRes, cachedOrder] = await Promise.all([
+      const [accountsRes, txRes, borrowsRes, budgetsRes, summaryRes, cachedOrder, cachedCalibrations] = await Promise.all([
         supabase
           .from('accounts')
           .select('*')
@@ -335,12 +361,20 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
           .eq('user_id', userId)
           .eq('month', month),
         AsyncStorage.getItem(ACCOUNT_ORDER_STORAGE_KEY),
+        AsyncStorage.getItem(PENDING_CALIBRATIONS_STORAGE_KEY),
       ]);
 
       let orderIds: string[] | null = null;
       if (cachedOrder) {
         try {
           orderIds = JSON.parse(cachedOrder);
+        } catch {}
+      }
+
+      let pendingCalibrations: Record<string, PendingCalibration> = {};
+      if (cachedCalibrations) {
+        try {
+          pendingCalibrations = JSON.parse(cachedCalibrations) || {};
         } catch {}
       }
 
@@ -357,6 +391,7 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
         borrows,
         budgets,
         budgetSummaries,
+        pendingCalibrations,
         isInitialLoading: false,
       });
 
@@ -1070,10 +1105,14 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
 
   deleteAccountOptimistic: async (accountId) => {
     const prevAccounts = [...get().accounts];
+    const prevCalibrations = { ...get().pendingCalibrations };
+    delete prevCalibrations[accountId];
     set({
       accounts: prevAccounts.filter((a) => a.id !== accountId),
+      pendingCalibrations: prevCalibrations,
       inlineError: null,
     });
+    AsyncStorage.setItem(PENDING_CALIBRATIONS_STORAGE_KEY, JSON.stringify(prevCalibrations)).catch(() => {});
 
     try {
       const { error } = await supabase.from('accounts').delete().eq('id', accountId);
@@ -1082,6 +1121,7 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
     } catch (err: any) {
       set({
         accounts: prevAccounts,
+        pendingCalibrations: get().pendingCalibrations,
         inlineError: `Could not delete account: ${err.message || 'Network error'}`,
       });
       return { success: false, error: err.message };
@@ -1111,6 +1151,66 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
     await AsyncStorage.setItem(ACCOUNT_ORDER_STORAGE_KEY, JSON.stringify(orderIds)).catch(() => {});
   },
 
+  setPendingCalibration: async (item: PendingCalibration) => {
+    const updated = {
+      ...get().pendingCalibrations,
+      [item.accountId]: item,
+    };
+    set({ pendingCalibrations: updated });
+    await AsyncStorage.setItem(PENDING_CALIBRATIONS_STORAGE_KEY, JSON.stringify(updated)).catch(() => {});
+  },
+
+  clearPendingCalibration: async (accountId: string) => {
+    const updated = { ...get().pendingCalibrations };
+    delete updated[accountId];
+    set({ pendingCalibrations: updated });
+    await AsyncStorage.setItem(PENDING_CALIBRATIONS_STORAGE_KEY, JSON.stringify(updated)).catch(() => {});
+  },
+
+  resolvePendingCalibrationAsTransaction: async (accountId: string, userId: string) => {
+    const pending = get().pendingCalibrations[accountId];
+    if (!pending) return { success: false, error: 'No pending calibration found for this account' };
+
+    const targetAccount = get().accounts.find((a) => a.id === accountId);
+    if (!targetAccount) {
+      await get().clearPendingCalibration(accountId);
+      return { success: false, error: 'Account not found' };
+    }
+
+    const diff = pending.difference;
+    const absAmount = Math.abs(diff);
+    const txType = diff > 0 ? 'income' : 'expense';
+
+    try {
+      // Revert current_balance by -diff in DB so trigger restores it to targetAccount.current_balance upon transaction insert
+      await supabase
+        .from('accounts')
+        .update({
+          current_balance: Number(targetAccount.current_balance) - diff,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', accountId);
+
+      const res = await get().addTransactionOptimistic({
+        user_id: userId,
+        account_id: accountId,
+        type: txType,
+        amount: absAmount,
+        category: 'Adjustment',
+        note: `Balance calibration (${diff > 0 ? '+' : '-'}₹${absAmount.toLocaleString('en-IN')})`,
+        date: new Date().toISOString().substring(0, 10),
+        source: 'manual',
+      });
+
+      if (res.success) {
+        await get().clearPendingCalibration(accountId);
+      }
+      return res;
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Failed to resolve calibration' };
+    }
+  },
+
   // Calibration Flow
   calibrateAccountBalance: async (accountId, newBalance, logAsTransaction, userId) => {
     const prevAccounts = [...get().accounts];
@@ -1120,7 +1220,7 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
     const oldBalance = Number(targetAccount.current_balance);
     const diff = newBalance - oldBalance;
 
-    if (diff === 0) return { success: true };
+    if (Math.abs(diff) < 0.01) return { success: true };
 
     if (logAsTransaction) {
       const txType = diff > 0 ? 'income' : 'expense';
@@ -1136,6 +1236,10 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
         date: new Date().toISOString().substring(0, 10),
         source: 'manual',
       });
+
+      if (res.success) {
+        await get().clearPendingCalibration(accountId);
+      }
 
       return res;
     } else {
@@ -1157,6 +1261,15 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
           .eq('id', accountId);
 
         if (error) throw error;
+
+        await get().setPendingCalibration({
+          accountId,
+          difference: diff,
+          oldBalance,
+          newBalance,
+          date: new Date().toISOString(),
+        });
+
         return { success: true };
       } catch (err: any) {
         set({
