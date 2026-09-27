@@ -1,8 +1,19 @@
 // app/src/store/settingsStore.ts
 import { create } from 'zustand';
-import { Appearance } from 'react-native';
+import { Appearance, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { DARK_COLORS, LIGHT_COLORS, ThemeColors } from '../theme/tokens';
+import {
+  isDynamicThemeSupported,
+  Material3Theme,
+} from '@pchmn/expo-material3-theme';
+import {
+  ThemeColors,
+  ThemeStyleId,
+  THEME_STYLES,
+  PRECISION_OBSIDIAN_DARK,
+  PRECISION_OBSIDIAN_LIGHT,
+  buildThemeTokens,
+} from '../theme/tokens';
 
 export type ThemeMode = 'dark' | 'light' | 'system';
 
@@ -12,17 +23,16 @@ export interface AccentColor {
   muted: string;
 }
 
+// Kept for backward compatibility
 export const ACCENT_PALETTE: AccentColor[] = [
-  { name: 'Emerald', hex: '#10B981', muted: '#10B9811A' },
-  { name: 'Gold', hex: '#E5B869', muted: '#E5B8691A' },
-  { name: 'Cobalt', hex: '#3B82F6', muted: '#3B82F61A' },
-  { name: 'Rose', hex: '#F43F5E', muted: '#F43F5E1A' },
-  { name: 'Amber', hex: '#F59E0B', muted: '#F59E0B1A' },
-  { name: 'Violet', hex: '#8B5CF6', muted: '#8B5CF61A' },
+  { name: 'Precision Obsidian', hex: '#6366F1', muted: '#25254B' },
+  { name: 'Warm Executive', hex: '#D97757', muted: '#38231B' },
+  { name: 'Swiss Minimal', hex: '#F4F4F5', muted: '#27272A' },
+  { name: 'Match Wallpaper', hex: '#A8C7FA', muted: '#004A77' },
 ];
 
-const THEME_STORAGE_KEY = '@finance_tracker_theme_mode';
-const ACCENT_STORAGE_KEY = '@finance_tracker_accent_color';
+const THEME_MODE_STORAGE_KEY = '@finance_tracker_theme_mode';
+const THEME_STYLE_STORAGE_KEY = '@finance_tracker_theme_style';
 
 const getSystemScheme = (): 'dark' | 'light' => {
   const scheme = Appearance.getColorScheme();
@@ -34,88 +44,229 @@ const resolveEffectiveTheme = (mode: ThemeMode): 'dark' | 'light' => {
   return mode;
 };
 
+// Check if Android 12+ wallpaper dynamic theme is available on this device
+export const isWallpaperThemeSupported = (): boolean => {
+  return (
+    isDynamicThemeSupported &&
+    Platform.OS === 'android' &&
+    Number(Platform.Version) >= 31
+  );
+};
+
+export const resolveThemeColors = (
+  styleId: ThemeStyleId,
+  effectiveMode: 'dark' | 'light',
+  material3Theme?: Material3Theme | null
+): ThemeColors => {
+  if (styleId === 'system_wallpaper') {
+    // Check if dynamic theme is supported and active
+    if (isWallpaperThemeSupported() && material3Theme) {
+      const scheme = material3Theme[effectiveMode];
+      if (scheme) {
+        return buildThemeTokens(effectiveMode, {
+          primary: scheme.primary,
+          onPrimary: scheme.onPrimary,
+          primaryContainer: scheme.primaryContainer,
+          onPrimaryContainer: scheme.onPrimaryContainer,
+
+          background: scheme.background,
+          onBackground: scheme.onBackground,
+
+          surface: scheme.surface,
+          onSurface: scheme.onSurface,
+          surfaceVariant: scheme.surfaceVariant,
+          onSurfaceVariant: scheme.onSurfaceVariant,
+          surfaceElevated: scheme.surfaceContainerHigh || scheme.surfaceVariant,
+
+          outline: scheme.outline,
+          outlineVariant: scheme.outlineVariant,
+
+          inverseSurface: scheme.inverseSurface,
+          inverseOnSurface: scheme.inverseOnSurface,
+          inversePrimary: scheme.inversePrimary,
+        });
+      }
+    }
+    // Fall back to "Precision Obsidian" automatically on devices below Android 12 or on iOS
+    return effectiveMode === 'dark'
+      ? PRECISION_OBSIDIAN_DARK
+      : PRECISION_OBSIDIAN_LIGHT;
+  }
+
+  const config = THEME_STYLES[styleId] || THEME_STYLES.precision_obsidian;
+  return effectiveMode === 'dark' ? config.dark : config.light;
+};
+
 interface SettingsState {
   themeMode: ThemeMode;
+  themeStyle: ThemeStyleId;
   effectiveTheme: 'dark' | 'light';
   isDark: boolean;
   colors: ThemeColors;
   accent: AccentColor;
+  material3Theme: Material3Theme | null;
+
   loadSettings: () => Promise<void>;
   setThemeMode: (mode: ThemeMode) => Promise<void>;
+  setThemeStyle: (style: ThemeStyleId) => Promise<void>;
+  setMaterial3Theme: (m3Theme: Material3Theme) => void;
   setAccent: (accent: AccentColor) => Promise<void>;
 }
 
 export const useSettingsStore = create<SettingsState>((set, get) => {
   // Listen for real-time system appearance changes
   Appearance.addChangeListener(({ colorScheme }) => {
-    const { themeMode } = get();
+    const { themeMode, themeStyle, material3Theme } = get();
     if (themeMode === 'system') {
       const effective = colorScheme === 'light' ? 'light' : 'dark';
+      const resolvedColors = resolveThemeColors(
+        themeStyle,
+        effective,
+        material3Theme
+      );
       set({
         effectiveTheme: effective,
         isDark: effective === 'dark',
-        colors: effective === 'light' ? LIGHT_COLORS : DARK_COLORS,
+        colors: resolvedColors,
+        accent: {
+          name: THEME_STYLES[themeStyle]?.name || 'Theme',
+          hex: resolvedColors.primary,
+          muted: resolvedColors.primaryContainer,
+        },
       });
     }
   });
 
-  const initialEffective: 'dark' | 'light' = 'dark';
+  const initialColors = PRECISION_OBSIDIAN_DARK;
 
   return {
     themeMode: 'dark',
-    effectiveTheme: initialEffective,
+    themeStyle: 'precision_obsidian',
+    effectiveTheme: 'dark',
     isDark: true,
-    colors: DARK_COLORS,
-    accent: ACCENT_PALETTE[0],
+    colors: initialColors,
+    accent: {
+      name: THEME_STYLES.precision_obsidian.name,
+      hex: initialColors.primary,
+      muted: initialColors.primaryContainer,
+    },
+    material3Theme: null,
 
     loadSettings: async () => {
       try {
-        const [savedTheme, savedAccent] = await Promise.all([
-          AsyncStorage.getItem(THEME_STORAGE_KEY),
-          AsyncStorage.getItem(ACCENT_STORAGE_KEY),
+        const [savedMode, savedStyle] = await Promise.all([
+          AsyncStorage.getItem(THEME_MODE_STORAGE_KEY),
+          AsyncStorage.getItem(THEME_STYLE_STORAGE_KEY),
         ]);
 
         let mode: ThemeMode = 'dark';
-        if (savedTheme && ['dark', 'light', 'system'].includes(savedTheme)) {
-          mode = savedTheme as ThemeMode;
+        if (savedMode && ['dark', 'light', 'system'].includes(savedMode)) {
+          mode = savedMode as ThemeMode;
+        }
+
+        let style: ThemeStyleId = 'precision_obsidian';
+        if (
+          savedStyle &&
+          [
+            'precision_obsidian',
+            'warm_executive',
+            'swiss_minimal',
+            'system_wallpaper',
+          ].includes(savedStyle)
+        ) {
+          style = savedStyle as ThemeStyleId;
         }
 
         const effective = resolveEffectiveTheme(mode);
-
-        let accentColor = ACCENT_PALETTE[0];
-        if (savedAccent) {
-          const found = ACCENT_PALETTE.find((a) => a.hex === savedAccent);
-          if (found) {
-            accentColor = found;
-          }
-        }
+        const resolvedColors = resolveThemeColors(
+          style,
+          effective,
+          get().material3Theme
+        );
 
         set({
           themeMode: mode,
+          themeStyle: style,
           effectiveTheme: effective,
           isDark: effective === 'dark',
-          colors: effective === 'light' ? LIGHT_COLORS : DARK_COLORS,
-          accent: accentColor,
+          colors: resolvedColors,
+          accent: {
+            name: THEME_STYLES[style]?.name || 'Theme',
+            hex: resolvedColors.primary,
+            muted: resolvedColors.primaryContainer,
+          },
         });
       } catch {
-        // Fallback to dark
+        // Fallback to defaults
       }
     },
 
     setThemeMode: async (mode: ThemeMode) => {
+      const { themeStyle, material3Theme } = get();
       const effective = resolveEffectiveTheme(mode);
+      const resolvedColors = resolveThemeColors(
+        themeStyle,
+        effective,
+        material3Theme
+      );
+
       set({
         themeMode: mode,
         effectiveTheme: effective,
         isDark: effective === 'dark',
-        colors: effective === 'light' ? LIGHT_COLORS : DARK_COLORS,
+        colors: resolvedColors,
+        accent: {
+          name: THEME_STYLES[themeStyle]?.name || 'Theme',
+          hex: resolvedColors.primary,
+          muted: resolvedColors.primaryContainer,
+        },
       });
-      await AsyncStorage.setItem(THEME_STORAGE_KEY, mode).catch(() => {});
+
+      await AsyncStorage.setItem(THEME_MODE_STORAGE_KEY, mode).catch(() => {});
+    },
+
+    setThemeStyle: async (style: ThemeStyleId) => {
+      const { effectiveTheme, material3Theme } = get();
+      const resolvedColors = resolveThemeColors(
+        style,
+        effectiveTheme,
+        material3Theme
+      );
+
+      set({
+        themeStyle: style,
+        colors: resolvedColors,
+        accent: {
+          name: THEME_STYLES[style]?.name || 'Theme',
+          hex: resolvedColors.primary,
+          muted: resolvedColors.primaryContainer,
+        },
+      });
+
+      await AsyncStorage.setItem(THEME_STYLE_STORAGE_KEY, style).catch(() => {});
+    },
+
+    setMaterial3Theme: (m3Theme: Material3Theme) => {
+      const { themeStyle, effectiveTheme } = get();
+      const resolvedColors = resolveThemeColors(
+        themeStyle,
+        effectiveTheme,
+        m3Theme
+      );
+
+      set({
+        material3Theme: m3Theme,
+        colors: resolvedColors,
+        accent: {
+          name: THEME_STYLES[themeStyle]?.name || 'Theme',
+          hex: resolvedColors.primary,
+          muted: resolvedColors.primaryContainer,
+        },
+      });
     },
 
     setAccent: async (accent: AccentColor) => {
       set({ accent });
-      await AsyncStorage.setItem(ACCENT_STORAGE_KEY, accent.hex).catch(() => {});
     },
   };
 });

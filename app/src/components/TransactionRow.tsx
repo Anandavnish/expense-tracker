@@ -24,7 +24,7 @@ const typeLabels: Record<TransactionType, string> = {
   borrow_taken: 'Borrowed',
 };
 
-export const TransactionRow: React.FC<TransactionRowProps> = ({
+const TransactionRowComponent: React.FC<TransactionRowProps> = ({
   transaction,
   accountName,
   onPress,
@@ -132,48 +132,82 @@ export const TransactionRow: React.FC<TransactionRowProps> = ({
             </Text>
           </View>
 
-          <View style={styles.metaRow}>
-            {hasCustomNote && (
-              <>
+          {hasCustomNote ? (
+            <>
+              {/* Category & Account on first sub-row */}
+              <View style={styles.metaRow}>
                 <Text
                   style={[styles.metaCategoryTag, { color: categoryStyle.text }]}
                   numberOfLines={1}
                 >
                   {transaction.category.toUpperCase()}
                 </Text>
-                <Text style={[styles.metaDot, { color: colors.textMuted }]}>·</Text>
-              </>
-            )}
 
-            {accountName ? (
-              <>
-                <View
-                  style={[
-                    styles.accountBadge,
-                    { backgroundColor: colors.surfaceLight },
-                  ]}
-                >
-                  <Ionicons
-                    name="wallet-outline"
-                    size={11}
-                    color={colors.textSecondary}
-                    style={{ marginRight: 3 }}
-                  />
-                  <Text
-                    style={[styles.accountBadgeText, { color: colors.textSecondary }]}
-                    numberOfLines={1}
+                {accountName ? (
+                  <>
+                    <Text style={[styles.metaDot, { color: colors.textMuted }]}>·</Text>
+                    <View
+                      style={[
+                        styles.accountBadge,
+                        { backgroundColor: colors.surfaceLight },
+                      ]}
+                    >
+                      <Ionicons
+                        name="wallet-outline"
+                        size={11}
+                        color={colors.textSecondary}
+                        style={{ marginRight: 3 }}
+                      />
+                      <Text
+                        style={[styles.accountBadgeText, { color: colors.textSecondary }]}
+                        numberOfLines={1}
+                      >
+                        {accountName}
+                      </Text>
+                    </View>
+                  </>
+                ) : null}
+              </View>
+
+              {/* Date cleanly sent to the next line */}
+              <View style={styles.dateRow}>
+                <Text style={[styles.dateText, { color: colors.textMuted }]}>
+                  {transaction.date}
+                </Text>
+              </View>
+            </>
+          ) : (
+            <View style={styles.metaRow}>
+              {accountName ? (
+                <>
+                  <View
+                    style={[
+                      styles.accountBadge,
+                      { backgroundColor: colors.surfaceLight },
+                    ]}
                   >
-                    {accountName}
-                  </Text>
-                </View>
-                <Text style={[styles.metaDot, { color: colors.textMuted }]}>·</Text>
-              </>
-            ) : null}
+                    <Ionicons
+                      name="wallet-outline"
+                      size={11}
+                      color={colors.textSecondary}
+                      style={{ marginRight: 3 }}
+                    />
+                    <Text
+                      style={[styles.accountBadgeText, { color: colors.textSecondary }]}
+                      numberOfLines={1}
+                    >
+                      {accountName}
+                    </Text>
+                  </View>
+                  <Text style={[styles.metaDot, { color: colors.textMuted }]}>·</Text>
+                </>
+              ) : null}
 
-            <Text style={[styles.dateText, { color: colors.textMuted }]}>
-              {transaction.date}
-            </Text>
-          </View>
+              <Text style={[styles.dateText, { color: colors.textMuted }]}>
+                {transaction.date}
+              </Text>
+            </View>
+          )}
         </View>
 
         {/* Right Details: Clean Amount & Non-Expense Badges */}
@@ -256,6 +290,8 @@ export const TransactionRow: React.FC<TransactionRowProps> = ({
   );
 };
 
+export const TransactionRow = React.memo(TransactionRowComponent);
+
 const styles = StyleSheet.create({
   cardContainer: {
     borderWidth: 1,
@@ -280,6 +316,7 @@ const styles = StyleSheet.create({
   centerContent: {
     flex: 1,
     marginRight: SPACING.sm,
+    minWidth: 0,
   },
   titleRow: {
     flexDirection: 'row',
@@ -295,6 +332,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     flexWrap: 'nowrap',
+  },
+  dateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 3,
   },
   metaCategoryTag: {
     fontSize: 10,
@@ -324,6 +366,7 @@ const styles = StyleSheet.create({
   rightContent: {
     alignItems: 'flex-end',
     justifyContent: 'center',
+    flexShrink: 0,
   },
   amountText: {
     fontSize: 16,

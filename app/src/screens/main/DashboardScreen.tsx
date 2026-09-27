@@ -17,7 +17,16 @@ import { ProgressBar, TextInput } from 'react-native-paper';
 import { useAuthStore } from '../../store/authStore';
 import { useFinanceStore, parseBorrowDetails } from '../../store/financeStore';
 import { useSettingsStore } from '../../store/settingsStore';
-import { COLORS, SPACING, TYPOGRAPHY } from '../../theme/tokens';
+import {
+  SPACING,
+  TYPOGRAPHY,
+  ThemeColors,
+  BANK_BRAND_COLORS,
+  CARD_BRAND_COLORS,
+  CUSTOM_PALETTE_COLORS,
+  getCategoryToken,
+} from '../../theme/tokens';
+import { getCategoryIcon } from '../../utils/categoryIcons';
 import { TactileButton } from '../../components/TactileButton';
 import { InlineError } from '../../components/InlineError';
 import { YouTubeStyleDraggableList } from '../../components/YouTubeStyleDraggableList';
@@ -36,13 +45,13 @@ interface BankPresetItem {
 }
 
 const BANK_PRESETS: BankPresetItem[] = [
-  { code: 'SBI', label: 'SBI', short: 'State Bank', icon: 'business', color: '#1B5E20' },
-  { code: 'India Post', label: 'India Post', short: 'Post Office', icon: 'mail', color: '#C62828' },
-  { code: 'HDFC', label: 'HDFC', short: 'HDFC Bank', icon: 'shield-checkmark', color: '#0D47A1' },
-  { code: 'Canara', label: 'Canara', short: 'Canara Bank', icon: 'triangle', color: '#00838F' },
-  { code: 'PNB', label: 'PNB', short: 'Punjab National', icon: 'ribbon', color: '#AD1457' },
-  { code: 'BOB', label: 'BOB', short: 'Bank of Baroda', icon: 'sunny', color: '#E65100' },
-  { code: 'Custom', label: '+ Custom', short: 'Other Bank', icon: 'add-circle-outline', color: '#6366F1' },
+  { code: 'SBI', label: 'SBI', short: 'State Bank', icon: 'business', color: BANK_BRAND_COLORS.sbi },
+  { code: 'India Post', label: 'India Post', short: 'Post Office', icon: 'mail', color: BANK_BRAND_COLORS.indiaPost },
+  { code: 'HDFC', label: 'HDFC', short: 'HDFC Bank', icon: 'shield-checkmark', color: BANK_BRAND_COLORS.hdfc },
+  { code: 'Canara', label: 'Canara', short: 'Canara Bank', icon: 'triangle', color: BANK_BRAND_COLORS.canara },
+  { code: 'PNB', label: 'PNB', short: 'Punjab National', icon: 'ribbon', color: BANK_BRAND_COLORS.pnb },
+  { code: 'BOB', label: 'BOB', short: 'Bank of Baroda', icon: 'sunny', color: BANK_BRAND_COLORS.bob },
+  { code: 'Custom', label: '+ Custom', short: 'Other Bank', icon: 'add-circle-outline', color: BANK_BRAND_COLORS.custom },
 ];
 
 interface CardIssuerItem {
@@ -54,20 +63,17 @@ interface CardIssuerItem {
 }
 
 const CARD_ISSUERS: CardIssuerItem[] = [
-  { code: 'HDFC', label: 'HDFC', short: 'HDFC Bank', icon: 'card', color: '#0D47A1' },
-  { code: 'SBI Card', label: 'SBI Card', short: 'SBI Cards', icon: 'card', color: '#1B5E20' },
-  { code: 'ICICI', label: 'ICICI', short: 'ICICI Bank', icon: 'card', color: '#B71C1C' },
-  { code: 'Axis', label: 'Axis', short: 'Axis Bank', icon: 'card', color: '#880E4F' },
-  { code: 'Kotak', label: 'Kotak', short: 'Kotak Mahindra', icon: 'card', color: '#C2185B' },
-  { code: 'Slice', label: 'Slice', short: 'Slice Card', icon: 'card', color: '#7C3AED' },
-  { code: 'OneCard', label: 'OneCard', short: 'OneCard', icon: 'card', color: '#2563EB' },
-  { code: 'Custom', label: '+ Custom', short: 'Other Issuer', icon: 'add-circle-outline', color: '#059669' },
+  { code: 'HDFC', label: 'HDFC', short: 'HDFC Bank', icon: 'card', color: CARD_BRAND_COLORS.hdfc },
+  { code: 'SBI Card', label: 'SBI Card', short: 'SBI Cards', icon: 'card', color: CARD_BRAND_COLORS.sbiCard },
+  { code: 'ICICI', label: 'ICICI', short: 'ICICI Bank', icon: 'card', color: CARD_BRAND_COLORS.icici },
+  { code: 'Axis', label: 'Axis', short: 'Axis Bank', icon: 'card', color: CARD_BRAND_COLORS.axis },
+  { code: 'Kotak', label: 'Kotak', short: 'Kotak Mahindra', icon: 'card', color: CARD_BRAND_COLORS.kotak },
+  { code: 'Slice', label: 'Slice', short: 'Slice Card', icon: 'card', color: CARD_BRAND_COLORS.slice },
+  { code: 'OneCard', label: 'OneCard', short: 'OneCard', icon: 'card', color: CARD_BRAND_COLORS.oneCard },
+  { code: 'Custom', label: '+ Custom', short: 'Other Issuer', icon: 'add-circle-outline', color: CARD_BRAND_COLORS.custom },
 ];
 
-const CUSTOM_COLORS = [
-  '#3B82F6', '#10B981', '#F59E0B', '#EF4444',
-  '#8B5CF6', '#EC4899', '#06B6D4', '#84CC16',
-];
+const CUSTOM_COLORS = CUSTOM_PALETTE_COLORS;
 
 const CUSTOM_ICONS: (keyof typeof Ionicons.glyphMap)[] = [
   'business-outline',
@@ -81,44 +87,17 @@ const CUSTOM_ICONS: (keyof typeof Ionicons.glyphMap)[] = [
 ];
 
 export const getCategoryIconProps = (category: string): { name: keyof typeof Ionicons.glyphMap; color: string } => {
-  const lower = category.toLowerCase();
-  if (lower.includes('food') || lower.includes('dining') || lower.includes('eat') || lower.includes('cafe')) {
-    return { name: 'restaurant-outline', color: '#F97316' };
-  }
-  if (lower.includes('travel') || lower.includes('transport') || lower.includes('fuel') || lower.includes('cab') || lower.includes('bus')) {
-    return { name: 'car-outline', color: '#06B6D4' };
-  }
-  if (lower.includes('rent') || lower.includes('hostel') || lower.includes('home') || lower.includes('room')) {
-    return { name: 'home-outline', color: '#8B5CF6' };
-  }
-  if (lower.includes('recharge') || lower.includes('data') || lower.includes('phone') || lower.includes('wifi')) {
-    return { name: 'phone-portrait-outline', color: '#3B82F6' };
-  }
-  if (lower.includes('subscript') || lower.includes('stream') || lower.includes('ott')) {
-    return { name: 'play-circle-outline', color: '#EC4899' };
-  }
-  if (lower.includes('book') || lower.includes('station') || lower.includes('study') || lower.includes('edu')) {
-    return { name: 'book-outline', color: '#10B981' };
-  }
-  if (lower.includes('shop') || lower.includes('cloth') || lower.includes('grocer') || lower.includes('mart')) {
-    return { name: 'cart-outline', color: '#F59E0B' };
-  }
-  if (lower.includes('entertain') || lower.includes('movie') || lower.includes('game') || lower.includes('party')) {
-    return { name: 'film-outline', color: '#E11D48' };
-  }
-  if (lower.includes('health') || lower.includes('med') || lower.includes('doctor') || lower.includes('gym')) {
-    return { name: 'fitness-outline', color: '#14B8A6' };
-  }
-  if (lower.includes('personal') || lower.includes('care') || lower.includes('salon')) {
-    return { name: 'sparkles-outline', color: '#A855F7' };
-  }
-  return { name: 'pricetag-outline', color: '#94A3B8' };
+  return {
+    name: getCategoryIcon(category, 'expense'),
+    color: getCategoryToken(category).color,
+  };
 };
 
 export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
   const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
   const { accent, colors } = useSettingsStore();
+  const styles = useMemo(() => getStyles(colors), [colors]);
   const {
     accounts,
     transactions,
@@ -151,7 +130,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
   const [editType, setEditType] = useState<AccountType>('bank');
   const [editBankPreset, setEditBankPreset] = useState<BankPresetCode>('SBI');
   const [editCardIssuer, setEditCardIssuer] = useState<CreditCardIssuerCode>('HDFC');
-  const [editCustomColor, setEditCustomColor] = useState('#3B82F6');
+  const [editCustomColor, setEditCustomColor] = useState<string>(CUSTOM_COLORS[0]);
   const [editCustomIcon, setEditCustomIcon] = useState<keyof typeof Ionicons.glyphMap>('business-outline');
   const [editBalance, setEditBalance] = useState('');
   const [editCreditLimit, setEditCreditLimit] = useState('');
@@ -281,7 +260,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
     : 0;
 
   const budgetColor =
-    budgetPct >= 1 ? COLORS.alert : budgetPct > 0.8 ? COLORS.warning : accent.hex;
+    budgetPct >= 1 ? colors.alert : budgetPct > 0.8 ? colors.warning : accent.hex;
 
   // Category spending for selected month
   const categorySpendingMap = useMemo(() => {
@@ -416,7 +395,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
 
     return {
       name: 'cash-outline',
-      color: '#10B981',
+      color: colors.income,
     };
   };
 
@@ -429,7 +408,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
       setEditType(account.type);
       setEditBankPreset(((account.bank_preset || parsed.preset || 'SBI') as BankPresetCode));
       setEditCardIssuer(((account.card_issuer || parsed.issuer || 'HDFC') as CreditCardIssuerCode));
-      setEditCustomColor(account.custom_color || '#3B82F6');
+      setEditCustomColor(account.custom_color || CUSTOM_COLORS[0]);
       setEditCustomIcon(
         (account.custom_icon as any) ||
           (account.type === 'credit_card'
@@ -452,7 +431,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
       setEditType('bank');
       setEditBankPreset('SBI');
       setEditCardIssuer('HDFC');
-      setEditCustomColor('#3B82F6');
+      setEditCustomColor(CUSTOM_COLORS[0]);
       setEditCustomIcon('business-outline');
       setEditBalance('0');
       setEditCreditLimit('');
@@ -665,7 +644,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
             style={styles.settingsIconBtn}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
-            <Ionicons name="settings-outline" size={20} color={COLORS.textSecondary} />
+            <Ionicons name="settings-outline" size={20} color={colors.textSecondary} />
           </TouchableOpacity>
         </View>
       </View>
@@ -695,7 +674,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
 
       <View style={styles.scrollWrapper}>
         <LinearGradient
-          colors={[COLORS.background, 'transparent']}
+          colors={[colors.background, 'transparent']}
           style={styles.topFadeGradient}
           pointerEvents="none"
         />
@@ -825,7 +804,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                   <Text
                     style={[
                       TYPOGRAPHY.tabularText,
-                      { color: budgetRemaining >= 0 ? accent.hex : COLORS.alert },
+                      { color: budgetRemaining >= 0 ? accent.hex : colors.alert },
                     ]}
                   >
                     ₹{budgetRemaining.toLocaleString('en-IN')}
@@ -858,7 +837,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
               style={styles.manageIconBtn}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
-              <Ionicons name="pencil-outline" size={15} color={COLORS.textSecondary} />
+              <Ionicons name="pencil-outline" size={15} color={colors.textSecondary} />
             </TouchableOpacity>
           </View>
 
@@ -909,8 +888,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                           {
                             color:
                               Number(acc.current_balance) >= 0
-                                ? COLORS.textPrimary
-                                : COLORS.alert,
+                                ? colors.textPrimary
+                                : colors.alert,
                           },
                         ]}
                       >
@@ -919,7 +898,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                           minimumFractionDigits: 2,
                         })}
                       </Text>
-                      <Ionicons name="chevron-forward" size={14} color={COLORS.textMuted} />
+                      <Ionicons name="chevron-forward" size={14} color={colors.textMuted} />
                     </View>
                   </TouchableOpacity>
                 );
@@ -967,7 +946,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                 const available = Math.max(0, limit - spent);
                 const isOverspent = spent > limit;
                 const usedRatio = limit > 0 ? Math.min(spent / limit, 1) : 0;
-                const barColor = isOverspent ? COLORS.alert : usedRatio > 0.8 ? COLORS.warning : accent.hex;
+                const barColor = isOverspent ? colors.alert : usedRatio > 0.8 ? colors.warning : accent.hex;
                 const { title } = getAccountDisplay(card);
                 const iconProps = getAccountIconProps(card);
 
@@ -1007,7 +986,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                               ? `₹${spent.toLocaleString('en-IN')} Due`
                               : '₹0 Due'}
                           </Text>
-                          <Ionicons name="chevron-forward" size={14} color={COLORS.textMuted} />
+                          <Ionicons name="chevron-forward" size={14} color={colors.textMuted} />
                         </View>
                       </View>
                       <ProgressBar
@@ -1036,7 +1015,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                           navigation.navigate('AddTransaction', { accountId: card.id })
                         }
                       >
-                        <Ionicons name="add" size={13} color={COLORS.textSecondary} />
+                        <Ionicons name="add" size={13} color={colors.textSecondary} />
                         <Text style={styles.cardExpenseActionPillText}>+ Expense</Text>
                       </TouchableOpacity>
                     </View>
@@ -1056,7 +1035,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
               style={styles.manageIconBtn}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
-              <Ionicons name="pencil-outline" size={15} color={COLORS.textSecondary} />
+              <Ionicons name="pencil-outline" size={15} color={colors.textSecondary} />
             </TouchableOpacity>
           </View>
 
@@ -1073,12 +1052,12 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                 : 0;
               const isOver = hasBudget && spent > limit;
               const barColor = isOver
-                ? COLORS.alert
+                ? colors.alert
                 : hasBudget && ratio > 0.8
-                ? COLORS.warning
+                ? colors.warning
                 : spent > 0
                 ? accent.hex
-                : COLORS.border;
+                : colors.border;
 
               const catIcon = getCategoryIconProps(cat);
 
@@ -1094,7 +1073,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                     <Text style={[styles.categorySpendAmount, TYPOGRAPHY.tabularText]}>
                       ₹{spent.toLocaleString('en-IN', { minimumFractionDigits: 0 })}
                       {hasBudget ? (
-                        <Text style={{ fontSize: 11, color: isOver ? COLORS.alert : COLORS.textMuted }}>
+                        <Text style={{ fontSize: 11, color: isOver ? colors.alert : colors.textMuted }}>
                           {' '}/ ₹{limit.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                         </Text>
                       ) : null}
@@ -1120,7 +1099,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
         activeOpacity={0.7}
         hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
       >
-        <Ionicons name="add" size={30} color="#FFFFFF" />
+        <Ionicons name="add" size={30} color={colors.onPrimary} />
       </TouchableOpacity>
 
       {/* CALIBRATION CONFIRMATION MODAL */}
@@ -1192,7 +1171,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                   setPayingCard(null);
                 }}
               >
-                <Ionicons name="close" size={20} color={COLORS.textSecondary} />
+                <Ionicons name="close" size={20} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
 
@@ -1215,9 +1194,9 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                   placeholder="0.00"
                   keyboardType="decimal-pad"
                   mode="outlined"
-                  outlineColor={COLORS.border}
+                  outlineColor={colors.border}
                   activeOutlineColor={accent.hex}
-                  textColor={COLORS.textPrimary}
+                  textColor={colors.textPrimary}
                   style={styles.modalInput}
                 />
 
@@ -1247,7 +1226,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                           styles.paySourceItem,
                           isSelected && {
                             borderColor: accent.hex,
-                            backgroundColor: COLORS.surfaceLight,
+                            backgroundColor: colors.surfaceLight,
                           },
                         ]}
                       >
@@ -1255,12 +1234,12 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                           <Ionicons
                             name={acc.type === 'cash' ? 'cash-outline' : 'business-outline'}
                             size={16}
-                            color={isSelected ? accent.hex : COLORS.textSecondary}
+                            color={isSelected ? accent.hex : colors.textSecondary}
                           />
                           <Text
                             style={[
                               styles.paySourceName,
-                              isSelected && { color: COLORS.textPrimary, fontWeight: '700' },
+                              isSelected && { color: colors.textPrimary, fontWeight: '700' },
                             ]}
                           >
                             {acc.name}
@@ -1335,7 +1314,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
               <Ionicons
                 name={editingAccount || isAddingNewSource ? 'arrow-back' : 'close'}
                 size={20}
-                color={COLORS.textPrimary}
+                color={colors.textPrimary}
               />
             </TouchableOpacity>
 
@@ -1381,7 +1360,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                     <Ionicons
                       name="business-outline"
                       size={22}
-                      color={editType === 'bank' ? accent.hex : COLORS.textSecondary}
+                      color={editType === 'bank' ? accent.hex : colors.textSecondary}
                     />
                     <Text
                       style={[
@@ -1403,7 +1382,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                     <Ionicons
                       name="cash-outline"
                       size={22}
-                      color={editType === 'cash' ? accent.hex : COLORS.textSecondary}
+                      color={editType === 'cash' ? accent.hex : colors.textSecondary}
                     />
                     <Text
                       style={[
@@ -1425,7 +1404,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                     <Ionicons
                       name="card-outline"
                       size={22}
-                      color={editType === 'credit_card' ? accent.hex : COLORS.textSecondary}
+                      color={editType === 'credit_card' ? accent.hex : colors.textSecondary}
                     />
                     <Text
                       style={[
@@ -1461,7 +1440,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                               <Text
                                 style={[
                                   styles.presetItemTitle,
-                                  isSelected && { color: COLORS.textPrimary, fontWeight: '700' },
+                                  isSelected && { color: colors.textPrimary, fontWeight: '700' },
                                 ]}
                                 numberOfLines={1}
                               >
@@ -1510,7 +1489,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                               <Ionicons
                                 name={ic}
                                 size={20}
-                                color={editCustomIcon === ic ? accent.hex : COLORS.textSecondary}
+                                color={editCustomIcon === ic ? accent.hex : colors.textSecondary}
                               />
                             </TouchableOpacity>
                           ))}
@@ -1543,7 +1522,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                               <Text
                                 style={[
                                   styles.presetItemTitle,
-                                  isSelected && { color: COLORS.textPrimary, fontWeight: '700' },
+                                  isSelected && { color: colors.textPrimary, fontWeight: '700' },
                                 ]}
                                 numberOfLines={1}
                               >
@@ -1592,7 +1571,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                               <Ionicons
                                 name={ic}
                                 size={20}
-                                color={editCustomIcon === ic ? accent.hex : COLORS.textSecondary}
+                                color={editCustomIcon === ic ? accent.hex : colors.textSecondary}
                               />
                             </TouchableOpacity>
                           ))}
@@ -1621,10 +1600,10 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                       : 'e.g. Physical Cash, Pocket Wallet'
                   }
                   mode="outlined"
-                  outlineColor={COLORS.border}
+                  outlineColor={colors.border}
                   activeOutlineColor={accent.hex}
-                  textColor={COLORS.textPrimary}
-                  theme={{ colors: { background: COLORS.surfaceLight } }}
+                  textColor={colors.textPrimary}
+                  theme={{ colors: { background: colors.surfaceLight } }}
                   style={styles.modalInput}
                 />
 
@@ -1637,10 +1616,10 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                       placeholder="e.g. 50000"
                       keyboardType="decimal-pad"
                       mode="outlined"
-                      outlineColor={COLORS.border}
+                      outlineColor={colors.border}
                       activeOutlineColor={accent.hex}
-                      textColor={COLORS.textPrimary}
-                      theme={{ colors: { background: COLORS.surfaceLight } }}
+                      textColor={colors.textPrimary}
+                      theme={{ colors: { background: colors.surfaceLight } }}
                       style={styles.modalInput}
                     />
 
@@ -1651,10 +1630,10 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                       placeholder="0.00"
                       keyboardType="decimal-pad"
                       mode="outlined"
-                      outlineColor={COLORS.border}
+                      outlineColor={colors.border}
                       activeOutlineColor={accent.hex}
-                      textColor={COLORS.textPrimary}
-                      theme={{ colors: { background: COLORS.surfaceLight } }}
+                      textColor={colors.textPrimary}
+                      theme={{ colors: { background: colors.surfaceLight } }}
                       style={styles.modalInput}
                     />
 
@@ -1676,10 +1655,10 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                       placeholder="0.00"
                       keyboardType="decimal-pad"
                       mode="outlined"
-                      outlineColor={COLORS.border}
+                      outlineColor={colors.border}
                       activeOutlineColor={accent.hex}
-                      textColor={COLORS.textPrimary}
-                      theme={{ colors: { background: COLORS.surfaceLight } }}
+                      textColor={colors.textPrimary}
+                      theme={{ colors: { background: colors.surfaceLight } }}
                       style={styles.modalInput}
                     />
                   </>
@@ -1717,7 +1696,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
               >
                 {accounts.length === 0 ? (
                   <View style={styles.emptySourcesContainer}>
-                    <Ionicons name="wallet-outline" size={48} color={COLORS.textMuted} />
+                    <Ionicons name="wallet-outline" size={48} color={colors.textMuted} />
                     <Text style={styles.emptySourcesText}>No money sources found.</Text>
                   </View>
                 ) : (
@@ -1725,6 +1704,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                     data={accounts}
                     keyExtractor={(acc) => acc.id}
                     onReorder={reorderAccounts}
+                    colors={colors}
                     accentColor={accent.hex}
                     itemHeight={64}
                     gap={8}
@@ -1787,7 +1767,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                           style={styles.managerCircleBtn}
                           hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
                         >
-                          <Ionicons name="pencil-outline" size={14} color={COLORS.textSecondary} />
+                          <Ionicons name="pencil-outline" size={14} color={colors.textSecondary} />
                         </TouchableOpacity>
 
                         <TouchableOpacity
@@ -1809,7 +1789,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                   onPress={() => handleOpenEditSource()}
                   style={[styles.managerPrimaryAddBtn, { backgroundColor: accent.hex }]}
                 >
-                  <Ionicons name="add" size={20} color="#FFFFFF" />
+                  <Ionicons name="add" size={20} color={colors.onPrimary} />
                   <Text style={styles.managerPrimaryAddBtnText}>Add New Money Source</Text>
                 </TactileButton>
               </View>
@@ -1829,7 +1809,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
         <View style={styles.modalBackdrop}>
           <View style={styles.deleteConfirmModalCard}>
             <View style={styles.deleteModalIconBadge}>
-              <Ionicons name="trash-outline" size={28} color={COLORS.alert} />
+              <Ionicons name="trash-outline" size={28} color={colors.alert} />
             </View>
 
             <Text style={styles.modalTitle}>Delete Money Source?</Text>
@@ -1837,8 +1817,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
             {deleteTargetAccount && Math.abs(Number(deleteTargetAccount.current_balance || 0)) > 0.01 ? (
               <>
                 <Text style={styles.deleteModalExplanation}>
-                  <Text style={{ fontWeight: '700', color: COLORS.textPrimary }}>{deleteTargetAccount.name}</Text> currently has an active balance of{' '}
-                  <Text style={{ fontWeight: '700', color: COLORS.alert }}>
+                  <Text style={{ fontWeight: '700', color: colors.textPrimary }}>{deleteTargetAccount.name}</Text> currently has an active balance of{' '}
+                  <Text style={{ fontWeight: '700', color: colors.alert }}>
                     ₹{Math.abs(Number(deleteTargetAccount.current_balance || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                   </Text>.
                   {'\n\n'}
@@ -1876,14 +1856,14 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
             ) : (
               <>
                 <Text style={styles.deleteModalExplanation}>
-                  Are you sure you want to delete <Text style={{ fontWeight: '700', color: COLORS.textPrimary }}>{deleteTargetAccount?.name}</Text>? Past transaction history linked to this source will be preserved.
+                  Are you sure you want to delete <Text style={{ fontWeight: '700', color: colors.textPrimary }}>{deleteTargetAccount?.name}</Text>? Past transaction history linked to this source will be preserved.
                 </Text>
 
                 <View style={styles.deleteModalActionList}>
                   <TactileButton
                     onPress={() => handleConfirmDeleteAccount(false)}
                     disabled={isDeletingSource}
-                    style={[styles.modalPrimaryBtn, { backgroundColor: COLORS.alert, paddingVertical: 12 }]}
+                    style={[styles.modalPrimaryBtn, { backgroundColor: colors.alert, paddingVertical: 12 }]}
                   >
                     <Text style={styles.modalPrimaryBtnText}>
                       {isDeletingSource ? 'Deleting...' : 'Delete Account'}
@@ -1935,7 +1915,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
               <Ionicons
                 name={showAddCategoryInput ? 'arrow-back' : 'close'}
                 size={20}
-                color={COLORS.textPrimary}
+                color={colors.textPrimary}
               />
             </TouchableOpacity>
 
@@ -1967,12 +1947,12 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                       value={categoryInputValue}
                       onChangeText={setCategoryInputValue}
                       placeholder="e.g. Books, Subscriptions"
-                      placeholderTextColor={COLORS.textMuted}
+                      placeholderTextColor={colors.textMuted}
                       mode="outlined"
-                      outlineColor={COLORS.border}
+                      outlineColor={colors.border}
                       activeOutlineColor={accent.hex}
-                      textColor={COLORS.textPrimary}
-                      theme={{ colors: { background: COLORS.surfaceLight } }}
+                      textColor={colors.textPrimary}
+                      theme={{ colors: { background: colors.surfaceLight } }}
                       style={styles.categoryInputField}
                       autoFocus
                     />
@@ -1998,7 +1978,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
 
               {categories.length === 0 ? (
                 <View style={styles.emptySourcesContainer}>
-                  <Ionicons name="pricetags-outline" size={48} color={COLORS.textMuted} />
+                  <Ionicons name="pricetags-outline" size={48} color={colors.textMuted} />
                   <Text style={styles.emptySourcesText}>No categories found.</Text>
                 </View>
               ) : (
@@ -2006,6 +1986,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                   data={categories}
                   keyExtractor={(cat) => cat}
                   onReorder={reorderCategories}
+                  colors={colors}
                   accentColor={accent.hex}
                   itemHeight={64}
                   gap={8}
@@ -2036,7 +2017,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                               style={[
                                 styles.managerItemBalance,
                                 TYPOGRAPHY.tabularText,
-                                { color: spent > 0 ? accent.hex : COLORS.textMuted },
+                                { color: spent > 0 ? accent.hex : colors.textMuted },
                               ]}
                             >
                               ₹{spent.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
@@ -2053,7 +2034,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                         style={styles.managerCircleBtn}
                         hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
                       >
-                        <Ionicons name="pencil-outline" size={14} color={COLORS.textSecondary} />
+                        <Ionicons name="pencil-outline" size={14} color={colors.textSecondary} />
                       </TouchableOpacity>
 
                       <TouchableOpacity
@@ -2061,7 +2042,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                         style={[styles.managerCircleBtn, styles.managerDeleteCircleBtn]}
                         hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
                       >
-                        <Ionicons name="trash-outline" size={14} color={COLORS.alert} />
+                        <Ionicons name="trash-outline" size={14} color={colors.alert} />
                       </TouchableOpacity>
                     </View>
                   )}
@@ -2080,7 +2061,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                   }}
                   style={[styles.managerPrimaryAddBtn, { backgroundColor: accent.hex }]}
                 >
-                  <Ionicons name="add" size={20} color="#FFFFFF" />
+                  <Ionicons name="add" size={20} color={colors.onPrimary} />
                   <Text style={styles.managerPrimaryAddBtnText}>Add New Category</Text>
                 </TactileButton>
               </View>
@@ -2100,19 +2081,19 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
         <View style={styles.modalBackdrop}>
           <View style={styles.deleteConfirmModalCard}>
             <View style={styles.deleteModalIconBadge}>
-              <Ionicons name="trash-outline" size={28} color={COLORS.alert} />
+              <Ionicons name="trash-outline" size={28} color={colors.alert} />
             </View>
 
             <Text style={styles.modalTitle}>Delete Category?</Text>
 
             <Text style={styles.deleteModalExplanation}>
-              Are you sure you want to remove <Text style={{ fontWeight: '700', color: COLORS.textPrimary }}>"{categoryDeleteTarget}"</Text>? Existing transactions assigned to this category will not be lost.
+              Are you sure you want to remove <Text style={{ fontWeight: '700', color: colors.textPrimary }}>"{categoryDeleteTarget}"</Text>? Existing transactions assigned to this category will not be lost.
             </Text>
 
             <View style={styles.deleteModalActionList}>
               <TactileButton
                 onPress={handleConfirmDeleteCategory}
-                style={[styles.modalPrimaryBtn, { backgroundColor: COLORS.alert, paddingVertical: 12 }]}
+                style={[styles.modalPrimaryBtn, { backgroundColor: colors.alert, paddingVertical: 12 }]}
               >
                 <Text style={styles.modalPrimaryBtnText}>Delete Category</Text>
               </TactileButton>
@@ -2131,10 +2112,11 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
   );
 };
 
-const styles = StyleSheet.create({
+function getStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: colors.background,
   },
   topBar: {
     flexDirection: 'row',
@@ -2143,10 +2125,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.lg,
     paddingTop: SPACING.md,
     paddingBottom: SPACING.xs,
-    backgroundColor: COLORS.background,
+    backgroundColor: colors.background,
   },
   appGreeting: {
-    color: COLORS.textMuted,
+    color: colors.textMuted,
     fontSize: 11,
     fontWeight: '600',
     textTransform: 'uppercase',
@@ -2154,7 +2136,7 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   appName: {
-    color: COLORS.textPrimary,
+    color: colors.textPrimary,
     fontSize: 18,
     fontWeight: '800',
     letterSpacing: -0.3,
@@ -2171,7 +2153,7 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: COLORS.surfaceLight,
+    backgroundColor: colors.surfaceLight,
   },
   avatarText: {
     fontSize: 13,
@@ -2183,9 +2165,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 8,
-    backgroundColor: COLORS.surface,
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: colors.border,
   },
   monthSelectorContainer: {
     alignItems: 'center',
@@ -2201,9 +2183,9 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingVertical: 8,
     paddingHorizontal: SPACING.md,
-    backgroundColor: COLORS.surface,
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: colors.border,
     borderRadius: 26,
     alignSelf: 'center',
     shadowColor: '#000',
@@ -2217,7 +2199,7 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   monthLabelText: {
-    color: COLORS.textPrimary,
+    color: colors.textPrimary,
     fontSize: 14,
     fontWeight: '700',
     letterSpacing: -0.2,
@@ -2238,8 +2220,8 @@ const styles = StyleSheet.create({
     padding: SPACING.lg,
   },
   netWorthCard: {
-    backgroundColor: COLORS.surface,
-    borderColor: COLORS.border,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
     borderWidth: 1,
     borderRadius: 12,
     padding: SPACING.lg,
@@ -2251,7 +2233,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
   },
   netWorthEyebrow: {
-    color: COLORS.textMuted,
+    color: colors.textMuted,
     fontSize: 11,
     fontWeight: '700',
     letterSpacing: 0.8,
@@ -2260,7 +2242,7 @@ const styles = StyleSheet.create({
   netWorthHeroNumber: {
     fontSize: 32,
     fontWeight: '800',
-    color: COLORS.textPrimary,
+    color: colors.textPrimary,
   },
   quickAddPill: {
     flexDirection: 'row',
@@ -2271,13 +2253,13 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   quickAddPillText: {
-    color: COLORS.textInverse,
+    color: colors.textInverse,
     fontSize: 12,
     fontWeight: '700',
   },
   netWorthDivider: {
     height: 1,
-    backgroundColor: COLORS.border,
+    backgroundColor: colors.border,
     marginVertical: SPACING.md,
   },
   breakdownRow: {
@@ -2292,7 +2274,7 @@ const styles = StyleSheet.create({
     minWidth: 80,
   },
   breakdownLabel: {
-    color: COLORS.textMuted,
+    color: colors.textMuted,
     fontSize: 10,
     fontWeight: '600',
     textTransform: 'uppercase',
@@ -2300,20 +2282,20 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   breakdownValue: {
-    color: COLORS.textPrimary,
+    color: colors.textPrimary,
     fontSize: 14,
     fontWeight: '700',
   },
   card: {
-    backgroundColor: COLORS.surface,
-    borderColor: COLORS.border,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
     borderWidth: 1,
     borderRadius: 12,
     padding: SPACING.lg,
     marginBottom: SPACING.lg,
   },
   cardHeaderLabel: {
-    color: COLORS.textMuted,
+    color: colors.textMuted,
     fontSize: 11,
     fontWeight: '700',
     letterSpacing: 0.8,
@@ -2333,9 +2315,9 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 6,
-    backgroundColor: COLORS.surfaceLight,
+    backgroundColor: colors.surfaceLight,
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -2343,7 +2325,7 @@ const styles = StyleSheet.create({
     marginTop: SPACING.xs,
   },
   budgetStatusLine: {
-    color: COLORS.textPrimary,
+    color: colors.textPrimary,
     fontSize: 14,
     fontWeight: '600',
     marginBottom: SPACING.xs,
@@ -2351,7 +2333,7 @@ const styles = StyleSheet.create({
   budgetProgressBar: {
     height: 8,
     borderRadius: 4,
-    backgroundColor: COLORS.surfaceLight,
+    backgroundColor: colors.surfaceLight,
     marginVertical: SPACING.xs,
   },
   budgetMetaRow: {
@@ -2361,7 +2343,7 @@ const styles = StyleSheet.create({
     marginTop: SPACING.xs,
   },
   budgetRemainingLabel: {
-    color: COLORS.textSecondary,
+    color: colors.textSecondary,
     fontSize: 12,
   },
   budgetPercentText: {
@@ -2372,7 +2354,7 @@ const styles = StyleSheet.create({
     paddingVertical: SPACING.sm,
   },
   emptyCardText: {
-    color: COLORS.textMuted,
+    color: colors.textMuted,
     fontSize: 13,
   },
   sourcesList: {
@@ -2393,27 +2375,27 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 6,
-    backgroundColor: COLORS.surfaceLight,
+    backgroundColor: colors.surfaceLight,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: colors.border,
   },
   sourceIconText: {
     fontSize: 16,
   },
   sourceName: {
-    color: COLORS.textPrimary,
+    color: colors.textPrimary,
     fontSize: 14,
     fontWeight: '600',
   },
   sourceSub: {
-    color: COLORS.textMuted,
+    color: colors.textMuted,
     fontSize: 10,
     fontWeight: '500',
   },
   sourceAmount: {
-    color: COLORS.textPrimary,
+    color: colors.textPrimary,
     fontSize: 14,
     fontWeight: '700',
   },
@@ -2432,25 +2414,25 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     paddingBottom: 2,
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.border + '50',
+    borderBottomColor: colors.border + '50',
   },
   sourceSectionTitle: {
-    color: COLORS.textMuted,
+    color: colors.textMuted,
     fontSize: 10,
     fontWeight: '700',
     letterSpacing: 0.8,
   },
   sourceSectionBadge: {
-    color: COLORS.textSecondary,
+    color: colors.textSecondary,
     fontSize: 11,
     fontWeight: '600',
   },
   creditCardSourceContainer: {
-    backgroundColor: COLORS.surfaceLight + '30',
+    backgroundColor: colors.surfaceLight + '30',
     borderRadius: 8,
     padding: SPACING.xs,
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: colors.border,
   },
   cardActionsRow: {
     flexDirection: 'row',
@@ -2460,7 +2442,7 @@ const styles = StyleSheet.create({
     marginTop: SPACING.xs,
     paddingTop: SPACING.xs,
     borderTopWidth: 1,
-    borderTopColor: COLORS.border + '40',
+    borderTopColor: colors.border + '40',
   },
   payBillActionPill: {
     flexDirection: 'row',
@@ -2482,10 +2464,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 12,
-    backgroundColor: COLORS.surfaceLight,
+    backgroundColor: colors.surfaceLight,
   },
   cardExpenseActionPillText: {
-    color: COLORS.textSecondary,
+    color: colors.textSecondary,
     fontSize: 11,
     fontWeight: '600',
   },
@@ -2498,7 +2480,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
     borderStyle: 'dashed',
-    borderColor: COLORS.border,
+    borderColor: colors.border,
   },
   addCreditCardBtnText: {
     fontSize: 12,
@@ -2510,28 +2492,28 @@ const styles = StyleSheet.create({
     gap: 6,
     marginTop: 6,
     alignSelf: 'flex-start',
-    backgroundColor: COLORS.surfaceLight,
+    backgroundColor: colors.surfaceLight,
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 12,
     borderWidth: 1,
   },
   availCreditText: {
-    color: COLORS.textSecondary,
+    color: colors.textSecondary,
     fontSize: 11,
     fontWeight: '600',
   },
   creditCalcBox: {
-    backgroundColor: COLORS.surfaceLight,
+    backgroundColor: colors.surfaceLight,
     borderRadius: 8,
     padding: SPACING.sm,
     marginTop: SPACING.xs,
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: colors.border,
     gap: 2,
   },
   creditCalcSub: {
-    color: COLORS.textMuted,
+    color: colors.textMuted,
     fontSize: 11,
   },
   creditCalcMain: {
@@ -2539,42 +2521,42 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   payBillModalCard: {
-    backgroundColor: COLORS.surface,
+    backgroundColor: colors.surface,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     padding: SPACING.lg,
     maxHeight: '85%',
     width: '100%',
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: colors.border,
   },
   modalSubTitle: {
-    color: COLORS.textSecondary,
+    color: colors.textSecondary,
     fontSize: 12,
     marginTop: 2,
   },
   billDueSummaryBox: {
-    backgroundColor: COLORS.alert + '15',
+    backgroundColor: colors.alert + '15',
     borderWidth: 1,
-    borderColor: COLORS.alert + '40',
+    borderColor: colors.alert + '40',
     borderRadius: 8,
     padding: SPACING.md,
     marginBottom: SPACING.md,
     gap: 4,
   },
   billDueLabel: {
-    color: COLORS.alert,
+    color: colors.alert,
     fontSize: 11,
     fontWeight: '700',
     letterSpacing: 0.5,
   },
   billDueAmount: {
-    color: COLORS.alert,
+    color: colors.alert,
     fontSize: 22,
     fontWeight: '800',
   },
   billDueHelp: {
-    color: COLORS.textSecondary,
+    color: colors.textSecondary,
     fontSize: 11,
     lineHeight: 15,
   },
@@ -2588,7 +2570,7 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 12,
     borderWidth: 1,
-    backgroundColor: COLORS.surfaceLight,
+    backgroundColor: colors.surfaceLight,
   },
   quickPayChipText: {
     fontSize: 11,
@@ -2605,8 +2587,8 @@ const styles = StyleSheet.create({
     padding: SPACING.sm,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.surface,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
   },
   paySourceItemLeft: {
     flexDirection: 'row',
@@ -2614,18 +2596,18 @@ const styles = StyleSheet.create({
     gap: SPACING.sm,
   },
   paySourceName: {
-    color: COLORS.textSecondary,
+    color: colors.textSecondary,
     fontSize: 13,
   },
   paySourceBalance: {
-    color: COLORS.textPrimary,
+    color: colors.textPrimary,
     fontSize: 13,
     fontWeight: '600',
   },
   creditProgressBar: {
     height: 6,
     borderRadius: 3,
-    backgroundColor: COLORS.surfaceLight,
+    backgroundColor: colors.surfaceLight,
     marginTop: 4,
   },
   categoriesList: {
@@ -2641,19 +2623,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   categorySpendName: {
-    color: COLORS.textSecondary,
+    color: colors.textSecondary,
     fontSize: 13,
     fontWeight: '500',
   },
   categorySpendAmount: {
-    color: COLORS.textPrimary,
+    color: colors.textPrimary,
     fontSize: 13,
     fontWeight: '600',
   },
   categoryProgressBar: {
     height: 6,
     borderRadius: 3,
-    backgroundColor: COLORS.surfaceLight,
+    backgroundColor: colors.surfaceLight,
   },
   floatingAddBtn: {
     position: 'absolute',
@@ -2672,7 +2654,7 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
   },
   floatingAddBtnText: {
-    color: COLORS.textInverse,
+    color: colors.textInverse,
     fontSize: 32,
     fontWeight: '600',
     lineHeight: 34,
@@ -2686,21 +2668,21 @@ const styles = StyleSheet.create({
   },
   modalCard: {
     width: '100%',
-    backgroundColor: COLORS.surface,
-    borderColor: COLORS.border,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
     borderWidth: 1,
     borderRadius: 8,
     padding: SPACING.lg,
   },
   modalTitle: {
-    color: COLORS.textPrimary,
+    color: colors.textPrimary,
     fontSize: 13,
     fontWeight: '800',
     letterSpacing: 0.8,
     marginBottom: SPACING.sm,
   },
   modalBodyText: {
-    color: COLORS.textSecondary,
+    color: colors.textSecondary,
     fontSize: 14,
     lineHeight: 20,
     marginBottom: SPACING.lg,
@@ -2715,10 +2697,10 @@ const styles = StyleSheet.create({
     paddingVertical: SPACING.sm,
     borderRadius: 6,
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: colors.border,
   },
   modalSecondaryBtnText: {
-    color: COLORS.textSecondary,
+    color: colors.textSecondary,
     fontSize: 13,
     fontWeight: '600',
   },
@@ -2728,15 +2710,15 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   modalPrimaryBtnText: {
-    color: COLORS.textInverse,
+    color: colors.textInverse,
     fontSize: 13,
     fontWeight: '700',
   },
   manageSourcesModalCard: {
     width: '100%',
     maxHeight: '85%',
-    backgroundColor: COLORS.surface,
-    borderColor: COLORS.border,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
     borderWidth: 1,
     borderRadius: 8,
     padding: SPACING.lg,
@@ -2744,8 +2726,8 @@ const styles = StyleSheet.create({
   manageCategoriesModalCard: {
     width: '100%',
     maxHeight: '80%',
-    backgroundColor: COLORS.surface,
-    borderColor: COLORS.border,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
     borderWidth: 1,
     borderRadius: 8,
     padding: SPACING.lg,
@@ -2757,7 +2739,7 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.md,
   },
   modalCloseText: {
-    color: COLORS.textSecondary,
+    color: colors.textSecondary,
     fontSize: 16,
     padding: SPACING.xs,
   },
@@ -2765,7 +2747,7 @@ const styles = StyleSheet.create({
     maxHeight: 450,
   },
   inputLabel: {
-    color: COLORS.textMuted,
+    color: colors.textMuted,
     fontSize: 10,
     fontWeight: '700',
     letterSpacing: 0.8,
@@ -2773,7 +2755,7 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.xs,
   },
   modalInput: {
-    backgroundColor: COLORS.surfaceLight,
+    backgroundColor: colors.surfaceLight,
     marginBottom: SPACING.xs,
   },
   typeToggleRow: {
@@ -2787,11 +2769,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderRadius: 6,
     borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.surface,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
   },
   typeToggleBtnText: {
-    color: COLORS.textSecondary,
+    color: colors.textSecondary,
     fontSize: 11,
     fontWeight: '600',
   },
@@ -2804,12 +2786,12 @@ const styles = StyleSheet.create({
     paddingVertical: SPACING.xs,
     borderRadius: 6,
     borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.surfaceLight,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceLight,
     marginRight: SPACING.xs,
   },
   presetChipText: {
-    color: COLORS.textSecondary,
+    color: colors.textSecondary,
     fontSize: 12,
   },
   modalActionButtons: {
@@ -2823,10 +2805,10 @@ const styles = StyleSheet.create({
     paddingVertical: SPACING.sm,
     borderRadius: 6,
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: colors.border,
   },
   cancelBtnText: {
-    color: COLORS.textSecondary,
+    color: colors.textSecondary,
     fontSize: 13,
   },
   saveSourceBtn: {
@@ -2835,7 +2817,7 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   saveSourceBtnText: {
-    color: COLORS.textInverse,
+    color: colors.textInverse,
     fontSize: 13,
     fontWeight: '700',
   },
@@ -2844,7 +2826,7 @@ const styles = StyleSheet.create({
   },
   fullScreenModal: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: colors.background,
   },
   fullScreenModalHeader: {
     flexDirection: 'row',
@@ -2853,8 +2835,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.lg,
     paddingVertical: SPACING.md,
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-    backgroundColor: COLORS.surface,
+    borderBottomColor: colors.border,
+    backgroundColor: colors.surface,
   },
   modalBackNavBtn: {
     width: 38,
@@ -2862,22 +2844,22 @@ const styles = StyleSheet.create({
     borderRadius: 19,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: COLORS.surfaceLight,
+    backgroundColor: colors.surfaceLight,
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: colors.border,
   },
   modalHeaderTitleBlock: {
     flex: 1,
     marginHorizontal: SPACING.md,
   },
   fullScreenModalTitle: {
-    color: COLORS.textPrimary,
+    color: colors.textPrimary,
     fontSize: 15,
     fontWeight: '800',
     letterSpacing: 0.3,
   },
   fullScreenModalSubtitle: {
-    color: COLORS.textMuted,
+    color: colors.textMuted,
     fontSize: 11,
     marginTop: 2,
   },
@@ -2899,7 +2881,7 @@ const styles = StyleSheet.create({
     padding: SPACING.lg,
   },
   inputSectionLabel: {
-    color: COLORS.textMuted,
+    color: colors.textMuted,
     fontSize: 10,
     fontWeight: '700',
     letterSpacing: 0.8,
@@ -2907,7 +2889,7 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   inputSubLabel: {
-    color: COLORS.textMuted,
+    color: colors.textMuted,
     fontSize: 10,
     fontWeight: '700',
     letterSpacing: 0.5,
@@ -2927,11 +2909,11 @@ const styles = StyleSheet.create({
     gap: 6,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.surface,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
   },
   typeSelectorCardText: {
-    color: COLORS.textSecondary,
+    color: colors.textSecondary,
     fontSize: 11,
     fontWeight: '600',
     textAlign: 'center',
@@ -2951,8 +2933,8 @@ const styles = StyleSheet.create({
     padding: 10,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.surface,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
     gap: 8,
   },
   presetIconBadge: {
@@ -2966,21 +2948,21 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   presetItemTitle: {
-    color: COLORS.textPrimary,
+    color: colors.textPrimary,
     fontSize: 12,
     fontWeight: '600',
   },
   presetItemSub: {
-    color: COLORS.textMuted,
+    color: colors.textMuted,
     fontSize: 10,
   },
   customPickerSection: {
-    backgroundColor: COLORS.surfaceLight,
+    backgroundColor: colors.surfaceLight,
     borderRadius: 10,
     padding: SPACING.md,
     marginTop: SPACING.sm,
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: colors.border,
   },
   colorPaletteRow: {
     flexDirection: 'row',
@@ -3006,8 +2988,8 @@ const styles = StyleSheet.create({
     height: 40,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.surface,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 8,
@@ -3021,9 +3003,9 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: SPACING.lg,
     paddingVertical: 14,
-    backgroundColor: COLORS.surface,
+    backgroundColor: colors.surface,
     borderTopWidth: 1,
-    borderTopColor: COLORS.border,
+    borderTopColor: colors.border,
   },
   modalCancelPillBtn: {
     flex: 1,
@@ -3032,11 +3014,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.surfaceLight,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceLight,
   },
   modalCancelPillBtnText: {
-    color: COLORS.textSecondary,
+    color: colors.textSecondary,
     fontSize: 14,
     fontWeight: '700',
   },
@@ -3048,7 +3030,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   modalSavePillBtnText: {
-    color: COLORS.textInverse,
+    color: colors.textInverse,
     fontSize: 14,
     fontWeight: '700',
   },
@@ -3059,16 +3041,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.lg,
     paddingVertical: SPACING.md,
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-    backgroundColor: COLORS.background,
+    borderBottomColor: colors.border,
+    backgroundColor: colors.background,
   },
   managerCloseBtn: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: COLORS.surface,
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -3077,13 +3059,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.md,
   },
   managerTitle: {
-    color: COLORS.textPrimary,
+    color: colors.textPrimary,
     fontSize: 17,
     fontWeight: '800',
     letterSpacing: -0.2,
   },
   managerSubtitle: {
-    color: COLORS.textMuted,
+    color: colors.textMuted,
     fontSize: 11,
     fontWeight: '500',
     marginTop: 2,
@@ -3095,7 +3077,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 8,
-    backgroundColor: COLORS.surface,
+    backgroundColor: colors.surface,
     borderWidth: 1,
   },
   managerHeaderActionText: {
@@ -3115,10 +3097,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 12,
     paddingHorizontal: SPACING.md,
-    backgroundColor: COLORS.surface,
+    backgroundColor: colors.surface,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: colors.border,
     marginBottom: 8,
     gap: 12,
   },
@@ -3144,7 +3126,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   managerItemName: {
-    color: COLORS.textPrimary,
+    color: colors.textPrimary,
     fontSize: 14,
     fontWeight: '700',
     marginBottom: 2,
@@ -3155,12 +3137,12 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   managerItemType: {
-    color: COLORS.textMuted,
+    color: colors.textMuted,
     fontSize: 11,
     fontWeight: '500',
   },
   managerItemBullet: {
-    color: COLORS.textMuted,
+    color: colors.textMuted,
     fontSize: 10,
   },
   managerItemBalance: {
@@ -3176,9 +3158,9 @@ const styles = StyleSheet.create({
     width: 30,
     height: 30,
     borderRadius: 6,
-    backgroundColor: COLORS.surfaceLight,
+    backgroundColor: colors.surfaceLight,
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -3188,8 +3170,8 @@ const styles = StyleSheet.create({
     borderColor: 'transparent',
   },
   managerDeleteCircleBtn: {
-    backgroundColor: COLORS.alert + '14',
-    borderColor: COLORS.alert + '35',
+    backgroundColor: colors.alert + '14',
+    borderColor: colors.alert + '35',
   },
   managerBottomBar: {
     position: 'absolute',
@@ -3198,9 +3180,9 @@ const styles = StyleSheet.create({
     right: 0,
     paddingHorizontal: SPACING.lg,
     paddingTop: 12,
-    backgroundColor: COLORS.background,
+    backgroundColor: colors.background,
     borderTopWidth: 1,
-    borderTopColor: COLORS.border,
+    borderTopColor: colors.border,
   },
   managerPrimaryAddBtn: {
     height: 50,
@@ -3211,22 +3193,22 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   managerPrimaryAddBtnText: {
-    color: '#FFFFFF',
+    color: colors.onPrimary,
     fontSize: 15,
     fontWeight: '600',
     letterSpacing: 0.2,
   },
   categoryInputCard: {
-    backgroundColor: COLORS.surface,
+    backgroundColor: colors.surface,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: colors.border,
     padding: SPACING.md,
     marginBottom: SPACING.md,
     gap: 10,
   },
   categoryInputCardTitle: {
-    color: COLORS.textPrimary,
+    color: colors.textPrimary,
     fontSize: 13,
     fontWeight: '700',
     letterSpacing: 0.4,
@@ -3238,7 +3220,7 @@ const styles = StyleSheet.create({
   },
   categoryInputField: {
     flex: 1,
-    backgroundColor: COLORS.surfaceLight,
+    backgroundColor: colors.surfaceLight,
     height: 42,
   },
   categoryInputButtonsRow: {
@@ -3250,12 +3232,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 6,
-    backgroundColor: COLORS.surfaceLight,
+    backgroundColor: colors.surfaceLight,
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: colors.border,
   },
   categoryInputCancelText: {
-    color: COLORS.textSecondary,
+    color: colors.textSecondary,
     fontSize: 12,
     fontWeight: '600',
   },
@@ -3265,7 +3247,7 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   categoryInputSaveText: {
-    color: COLORS.textInverse,
+    color: colors.textInverse,
     fontSize: 12,
     fontWeight: '700',
   },
@@ -3285,8 +3267,8 @@ const styles = StyleSheet.create({
   deleteConfirmModalCard: {
     width: '100%',
     maxWidth: 380,
-    backgroundColor: COLORS.surface,
-    borderColor: COLORS.border,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
     borderWidth: 1,
     borderRadius: 16,
     padding: SPACING.xl,
@@ -3297,15 +3279,15 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: COLORS.alert + '15',
+    backgroundColor: colors.alert + '15',
     borderWidth: 1,
-    borderColor: COLORS.alert + '40',
+    borderColor: colors.alert + '40',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: SPACING.md,
   },
   deleteModalExplanation: {
-    color: COLORS.textSecondary,
+    color: colors.textSecondary,
     fontSize: 13,
     lineHeight: 20,
     textAlign: 'center',
@@ -3320,11 +3302,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: COLORS.alert + '50',
-    backgroundColor: COLORS.alert + '15',
+    borderColor: colors.alert + '50',
+    backgroundColor: colors.alert + '15',
   },
   forceDeleteSourceBtnText: {
-    color: COLORS.alert,
+    color: colors.alert,
     fontSize: 13,
     fontWeight: '700',
   },
@@ -3335,7 +3317,8 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   emptySourcesText: {
-    color: COLORS.textMuted,
+    color: colors.textMuted,
     fontSize: 14,
   },
 });
+}

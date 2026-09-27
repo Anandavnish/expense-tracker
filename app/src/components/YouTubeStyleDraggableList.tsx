@@ -1,4 +1,5 @@
-import React, { useRef, useState, useMemo, useEffect } from 'react';
+/* eslint-disable react-hooks/refs */
+import React, { useRef, useState, useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -6,7 +7,7 @@ import {
   PanResponder,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
-import { COLORS, SPACING } from '../theme/tokens';
+import { COLORS, SPACING, ThemeColors } from '../theme/tokens';
 
 interface DraggableRowItemProps<T> {
   item: T;
@@ -18,6 +19,7 @@ interface DraggableRowItemProps<T> {
   itemHeight: number;
   gap: number;
   accentColor: string;
+  colors?: ThemeColors;
   holdDurationMs?: number;
   renderContent: (item: T, isDragging: boolean) => React.ReactNode;
   renderActions?: (item: T, isDragging: boolean) => React.ReactNode;
@@ -29,7 +31,6 @@ interface DraggableRowItemProps<T> {
 function DraggableRowItem<T>(props: DraggableRowItemProps<T>) {
   const {
     item,
-    index,
     isDraggingThis,
     panY,
     scaleAnim,
@@ -37,7 +38,7 @@ function DraggableRowItem<T>(props: DraggableRowItemProps<T>) {
     itemHeight,
     gap,
     accentColor,
-    holdDurationMs = 120,
+    colors,
     renderContent,
     renderActions,
   } = props;
@@ -49,66 +50,73 @@ function DraggableRowItem<T>(props: DraggableRowItemProps<T>) {
   const isActivatedRef = useRef(false);
 
   // Stable PanResponder attached strictly to the dual horizontal bar (=) handle
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onStartShouldSetPanResponderCapture: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponderCapture: () => true,
-      onPanResponderTerminationRequest: () => false,
-      onShouldBlockNativeResponder: () => true,
-      onPanResponderGrant: () => {
-        isActivatedRef.current = false;
-        if (holdTimerRef.current) {
-          clearTimeout(holdTimerRef.current);
-        }
-
-        // Hold for 1 second (1000ms) before elevation and haptics to get ready to move
-        holdTimerRef.current = setTimeout(() => {
-          isActivatedRef.current = true;
-          propsRef.current.onDragStart(propsRef.current.index);
-        }, propsRef.current.holdDurationMs || 1000);
-      },
-      onPanResponderMove: (_, gestureState) => {
-        // If finger moves more than touch slop before 1s hold expires, cancel the hold
-        if (!isActivatedRef.current) {
-          if (Math.abs(gestureState.dy) > 10 || Math.abs(gestureState.dx) > 10) {
-            if (holdTimerRef.current) {
-              clearTimeout(holdTimerRef.current);
-              holdTimerRef.current = null;
-            }
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onStartShouldSetPanResponderCapture: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponderCapture: () => true,
+        onPanResponderTerminationRequest: () => false,
+        onShouldBlockNativeResponder: () => true,
+        onPanResponderGrant: () => {
+          isActivatedRef.current = false;
+          if (holdTimerRef.current) {
+            clearTimeout(holdTimerRef.current);
           }
-          return;
-        }
 
-        propsRef.current.onDragMove(gestureState.dy);
-      },
-      onPanResponderRelease: () => {
-        if (holdTimerRef.current) {
-          clearTimeout(holdTimerRef.current);
-          holdTimerRef.current = null;
-        }
-        if (isActivatedRef.current) {
-          propsRef.current.onDragRelease();
-        }
-        isActivatedRef.current = false;
-      },
-      onPanResponderTerminate: () => {
-        if (holdTimerRef.current) {
-          clearTimeout(holdTimerRef.current);
-          holdTimerRef.current = null;
-        }
-        if (isActivatedRef.current) {
-          propsRef.current.onDragRelease();
-        }
-        isActivatedRef.current = false;
-      },
-    })
-  ).current;
+          // Hold for 1 second (1000ms) before elevation and haptics to get ready to move
+          holdTimerRef.current = setTimeout(() => {
+            isActivatedRef.current = true;
+            propsRef.current.onDragStart(propsRef.current.index);
+          }, propsRef.current.holdDurationMs || 1000);
+        },
+        onPanResponderMove: (_, gestureState) => {
+          // If finger moves more than touch slop before 1s hold expires, cancel the hold
+          if (!isActivatedRef.current) {
+            if (Math.abs(gestureState.dy) > 10 || Math.abs(gestureState.dx) > 10) {
+              if (holdTimerRef.current) {
+                clearTimeout(holdTimerRef.current);
+                holdTimerRef.current = null;
+              }
+            }
+            return;
+          }
+
+          propsRef.current.onDragMove(gestureState.dy);
+        },
+        onPanResponderRelease: () => {
+          if (holdTimerRef.current) {
+            clearTimeout(holdTimerRef.current);
+            holdTimerRef.current = null;
+          }
+          if (isActivatedRef.current) {
+            propsRef.current.onDragRelease();
+          }
+          isActivatedRef.current = false;
+        },
+        onPanResponderTerminate: () => {
+          if (holdTimerRef.current) {
+            clearTimeout(holdTimerRef.current);
+            holdTimerRef.current = null;
+          }
+          if (isActivatedRef.current) {
+            propsRef.current.onDragRelease();
+          }
+          isActivatedRef.current = false;
+        },
+      }),
+    []
+  );
 
   const translateY = isDraggingThis ? panY : (shiftAnim || 0);
   const scale = isDraggingThis ? scaleAnim : 1.0;
   const zIndex = isDraggingThis ? 9999 : 1;
+
+  const currentBorder = colors ? colors.border : COLORS.border;
+  const currentSurface = colors ? colors.surface : COLORS.surface;
+  const currentSurfaceLight = colors ? colors.surfaceLight : COLORS.surfaceLight;
+  const currentTextMuted = colors ? colors.textMuted : COLORS.textMuted;
 
   return (
     <Animated.View
@@ -120,8 +128,8 @@ function DraggableRowItem<T>(props: DraggableRowItemProps<T>) {
           transform: [{ translateY }, { scale }],
           zIndex,
           elevation: isDraggingThis ? 24 : 0,
-          borderColor: isDraggingThis ? accentColor : COLORS.border,
-          backgroundColor: isDraggingThis ? COLORS.surfaceLight : COLORS.surface,
+          borderColor: isDraggingThis ? accentColor : currentBorder,
+          backgroundColor: isDraggingThis ? currentSurfaceLight : currentSurface,
           shadowColor: isDraggingThis ? '#000' : 'transparent',
           shadowOffset: { width: 0, height: 8 },
           shadowOpacity: isDraggingThis ? 0.45 : 0,
@@ -138,13 +146,13 @@ function DraggableRowItem<T>(props: DraggableRowItemProps<T>) {
         <View
           style={[
             styles.dualBar,
-            isDraggingThis && { backgroundColor: accentColor },
+            { backgroundColor: isDraggingThis ? accentColor : currentTextMuted },
           ]}
         />
         <View
           style={[
             styles.dualBar,
-            isDraggingThis && { backgroundColor: accentColor },
+            { backgroundColor: isDraggingThis ? accentColor : currentTextMuted },
           ]}
         />
       </View>
@@ -173,6 +181,7 @@ export interface YouTubeStyleDraggableListProps<T> {
   itemHeight?: number;
   gap?: number;
   accentColor?: string;
+  colors?: ThemeColors;
   holdDurationMs?: number;
   contentContainerStyle?: any;
   onDragBegin?: () => void;
@@ -188,6 +197,7 @@ export function YouTubeStyleDraggableList<T>({
   itemHeight = 64,
   gap = 8,
   accentColor = COLORS.accent,
+  colors,
   holdDurationMs = 1000,
   contentContainerStyle,
   onDragBegin,
@@ -346,6 +356,8 @@ export function YouTubeStyleDraggableList<T>({
             itemHeight={itemHeight}
             gap={gap}
             accentColor={accentColor}
+            colors={colors}
+            holdDurationMs={holdDurationMs}
             renderContent={renderContent}
             renderActions={renderActions}
             onDragStart={handleDragStart}

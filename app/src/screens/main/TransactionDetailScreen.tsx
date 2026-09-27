@@ -20,7 +20,12 @@ import { COLORS, SPACING, TYPOGRAPHY } from '../../theme/tokens';
 import { TactileButton } from '../../components/TactileButton';
 import { InlineError } from '../../components/InlineError';
 import { TransactionType } from '../../types/database';
-import { getCategoryIcon, getCategoryColor } from '../../utils/categoryIcons';
+import {
+  getCategoryIcon,
+  getCategoryColor,
+  DEFAULT_INCOME_CATEGORIES,
+  DEFAULT_BORROW_CATEGORIES,
+} from '../../utils/categoryIcons';
 
 export const TransactionDetailScreen = () => {
   const insets = useSafeAreaInsets();
@@ -79,6 +84,24 @@ export const TransactionDetailScreen = () => {
       setEditNote(transaction.note || '');
     }
     setIsEditing(true);
+  };
+
+  const getAvailableCategoriesForEdit = () => {
+    if (editType === 'income') return DEFAULT_INCOME_CATEGORIES;
+    if (editType === 'borrow_given' || editType === 'borrow_taken') return DEFAULT_BORROW_CATEGORIES;
+    return categories;
+  };
+
+  const handleTypeSelect = (newType: TransactionType) => {
+    setEditType(newType);
+    let available: string[];
+    if (newType === 'income') available = DEFAULT_INCOME_CATEGORIES;
+    else if (newType === 'borrow_given' || newType === 'borrow_taken') available = DEFAULT_BORROW_CATEGORIES;
+    else available = categories;
+
+    if (!available.includes(editCategory)) {
+      setEditCategory(available[0] || 'Other');
+    }
   };
 
   if (!transaction) {
@@ -540,7 +563,7 @@ export const TransactionDetailScreen = () => {
                   return (
                     <TouchableOpacity
                       key={t.type}
-                      onPress={() => setEditType(t.type)}
+                      onPress={() => handleTypeSelect(t.type)}
                       style={[
                         styles.typePill,
                         active && {
@@ -605,7 +628,7 @@ export const TransactionDetailScreen = () => {
             <View style={styles.formField}>
               <Text style={styles.formFieldLabel}>CATEGORY</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsRow}>
-                {categories.map((cat) => {
+                {getAvailableCategoriesForEdit().map((cat) => {
                   const active = editCategory === cat;
                   return (
                     <TouchableOpacity

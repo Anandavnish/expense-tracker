@@ -15,10 +15,10 @@ import { ProgressBar, TextInput } from 'react-native-paper';
 import { useAuthStore } from '../../store/authStore';
 import { useFinanceStore } from '../../store/financeStore';
 import { useSettingsStore } from '../../store/settingsStore';
-import { COLORS, SPACING, TYPOGRAPHY } from '../../theme/tokens';
+import { SPACING, TYPOGRAPHY, ThemeColors } from '../../theme/tokens';
 import { TactileButton } from '../../components/TactileButton';
 import { TransactionRow } from '../../components/TransactionRow';
-import { TransactionType, AccountType, BankPreset } from '../../types/database';
+import { AccountType, BankPreset } from '../../types/database';
 
 interface AccountDetailScreenProps {
   navigation?: any;
@@ -46,6 +46,7 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
   const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
   const { accent, colors } = useSettingsStore();
+  const styles = useMemo(() => getStyles(colors), [colors]);
   const accountId = route?.params?.accountId;
 
   const {
@@ -214,13 +215,13 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
             style={styles.backButton}
             hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
           >
-            <Ionicons name="arrow-back" size={24} color={COLORS.textPrimary} />
+            <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>ACCOUNT DETAILS</Text>
           <View style={{ width: 40 }} />
         </View>
         <View style={styles.notFoundContainer}>
-          <Ionicons name="alert-circle-outline" size={48} color={COLORS.textMuted} />
+          <Ionicons name="alert-circle-outline" size={48} color={colors.textMuted} />
           <Text style={styles.notFoundText}>Account not found or was removed.</Text>
           <TactileButton
             onPress={() => navigation.goBack()}
@@ -242,7 +243,7 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
   const availableCredit = Math.max(0, limit - spent);
   const isOverspent = spent > limit;
   const usedRatio = limit > 0 ? Math.min(spent / limit, 1) : 0;
-  const barColor = isOverspent ? COLORS.alert : usedRatio > 0.8 ? COLORS.warning : accent.hex;
+  const barColor = isOverspent ? colors.alert : usedRatio > 0.8 ? colors.warning : accent.hex;
 
   const typeLabel =
     account.type === 'bank'
@@ -267,7 +268,7 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
           style={styles.backButton}
           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
         >
-          <Ionicons name="arrow-back" size={24} color={COLORS.textPrimary} />
+          <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>ACCOUNT DETAILS</Text>
         <TouchableOpacity
@@ -275,7 +276,7 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
           style={styles.actionHeaderBtn}
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >
-          <Ionicons name="pencil-outline" size={18} color={COLORS.textSecondary} />
+          <Ionicons name="pencil-outline" size={18} color={colors.textSecondary} />
         </TouchableOpacity>
       </View>
 
@@ -287,7 +288,7 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
         <View style={styles.heroCard}>
           <View style={styles.heroTopRow}>
             <View style={styles.accountIdentity}>
-              <View style={[styles.accountIconBadge, { backgroundColor: COLORS.surfaceLight }]}>
+              <View style={[styles.accountIconBadge, { backgroundColor: colors.surfaceLight }]}>
                 <Ionicons
                   name={
                     isCreditCard
@@ -362,8 +363,8 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
                   {
                     color:
                       Number(account.current_balance) >= 0
-                        ? COLORS.textPrimary
-                        : COLORS.alert,
+                        ? colors.textPrimary
+                        : colors.alert,
                   },
                 ]}
               >
@@ -445,7 +446,7 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
             <Ionicons
               name="add"
               size={18}
-              color={!isCreditCard ? accent.hex : COLORS.textSecondary}
+              color={!isCreditCard ? accent.hex : colors.textSecondary}
             />
             <Text
               style={[
@@ -462,7 +463,7 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
             onPress={openEditModal}
             activeOpacity={0.7}
           >
-            <Ionicons name="pencil-outline" size={16} color={COLORS.textSecondary} />
+            <Ionicons name="pencil-outline" size={16} color={colors.textSecondary} />
             <Text style={styles.quickActionText}>Edit Account</Text>
           </TouchableOpacity>
         </View>
@@ -510,7 +511,7 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
         {filteredTransactions.length === 0 ? (
           <View style={styles.emptyContainer}>
             <View style={styles.emptyIconCircle}>
-              <Ionicons name="receipt-outline" size={36} color={COLORS.textMuted} />
+              <Ionicons name="receipt-outline" size={36} color={colors.textMuted} />
             </View>
             <Text style={styles.emptyTitle}>No Transactions Yet</Text>
             <Text style={styles.emptySubtitle}>
@@ -525,7 +526,7 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
               style={[styles.emptyActionBtn, { backgroundColor: accent.hex }]}
               activeOpacity={0.8}
             >
-              <Ionicons name="add" size={18} color={COLORS.textInverse} />
+              <Ionicons name="add" size={18} color={colors.textInverse} />
               <Text style={styles.emptyActionBtnText}>Record First Transaction</Text>
             </TouchableOpacity>
           </View>
@@ -548,7 +549,7 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
             onPress={handleOpenDeleteConfirm}
             activeOpacity={0.7}
           >
-            <Ionicons name="trash-outline" size={18} color={COLORS.alert} />
+            <Ionicons name="trash-outline" size={18} color={colors.alert} />
             <Text style={styles.prominentDeleteBtnText}>Delete This Money Source</Text>
           </TouchableOpacity>
           <Text style={styles.deleteHintText}>
@@ -576,7 +577,7 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
                 onPress={() => setEditModalVisible(false)}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
-                <Ionicons name="close" size={20} color={COLORS.textSecondary} />
+                <Ionicons name="close" size={20} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
 
@@ -586,11 +587,12 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
                 value={editName}
                 onChangeText={setEditName}
                 placeholder="e.g. Salary, Slice, Main Wallet"
+                placeholderTextColor={colors.textMuted}
                 mode="outlined"
-                textColor={COLORS.textPrimary}
-                outlineColor={COLORS.border}
+                textColor={colors.textPrimary}
+                outlineColor={colors.border}
                 activeOutlineColor={accent.hex}
-                theme={{ colors: { background: COLORS.surfaceLight } }}
+                theme={{ colors: { background: colors.surfaceLight } }}
                 style={styles.modalInput}
               />
 
@@ -602,7 +604,7 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
                     onPress={() => setEditType(t)}
                     style={[
                       styles.typeToggleBtn,
-                      editType === t && { borderColor: accent.hex, backgroundColor: COLORS.surfaceLight },
+                      editType === t && { borderColor: accent.hex, backgroundColor: colors.surfaceLight },
                     ]}
                   >
                     <Text
@@ -629,7 +631,7 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
                           styles.presetChip,
                           editBankPreset === p.name && {
                             borderColor: accent.hex,
-                            backgroundColor: COLORS.surfaceLight,
+                            backgroundColor: colors.surfaceLight,
                           },
                         ]}
                       >
@@ -654,12 +656,13 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
                     value={editCreditLimit}
                     onChangeText={setEditCreditLimit}
                     placeholder="e.g. 25000"
+                    placeholderTextColor={colors.textMuted}
                     keyboardType="numeric"
                     mode="outlined"
-                    textColor={COLORS.textPrimary}
-                    outlineColor={COLORS.border}
+                    textColor={colors.textPrimary}
+                    outlineColor={colors.border}
                     activeOutlineColor={accent.hex}
-                    theme={{ colors: { background: COLORS.surfaceLight } }}
+                    theme={{ colors: { background: colors.surfaceLight } }}
                     style={styles.modalInput}
                   />
 
@@ -668,12 +671,13 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
                     value={editBalance}
                     onChangeText={setEditBalance}
                     placeholder="0.00"
+                    placeholderTextColor={colors.textMuted}
                     keyboardType="decimal-pad"
                     mode="outlined"
-                    textColor={COLORS.textPrimary}
-                    outlineColor={COLORS.border}
+                    textColor={colors.textPrimary}
+                    outlineColor={colors.border}
                     activeOutlineColor={accent.hex}
-                    theme={{ colors: { background: COLORS.surfaceLight } }}
+                    theme={{ colors: { background: colors.surfaceLight } }}
                     style={styles.modalInput}
                   />
 
@@ -693,12 +697,13 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
                     value={editBalance}
                     onChangeText={setEditBalance}
                     placeholder="0.00"
+                    placeholderTextColor={colors.textMuted}
                     keyboardType="decimal-pad"
                     mode="outlined"
-                    textColor={COLORS.textPrimary}
-                    outlineColor={COLORS.border}
+                    textColor={colors.textPrimary}
+                    outlineColor={colors.border}
                     activeOutlineColor={accent.hex}
-                    theme={{ colors: { background: COLORS.surfaceLight } }}
+                    theme={{ colors: { background: colors.surfaceLight } }}
                     style={styles.modalInput}
                   />
                 </>
@@ -730,7 +735,7 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
                   disabled={isSavingEdit}
                   style={styles.deleteAccountBtn}
                 >
-                  <Ionicons name="trash-outline" size={15} color={COLORS.alert} />
+                  <Ionicons name="trash-outline" size={15} color={colors.alert} />
                   <Text style={styles.deleteAccountBtnText}>Delete This Account</Text>
                 </TouchableOpacity>
               </View>
@@ -761,7 +766,7 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
                 onPress={() => setPayBillModalVisible(false)}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
-                <Ionicons name="close" size={20} color={COLORS.textSecondary} />
+                <Ionicons name="close" size={20} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
 
@@ -781,12 +786,13 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
                 value={payAmount}
                 onChangeText={setPayAmount}
                 placeholder="0.00"
+                placeholderTextColor={colors.textMuted}
                 keyboardType="decimal-pad"
                 mode="outlined"
-                textColor={COLORS.textPrimary}
-                outlineColor={COLORS.border}
+                textColor={colors.textPrimary}
+                outlineColor={colors.border}
                 activeOutlineColor={accent.hex}
-                theme={{ colors: { background: COLORS.surfaceLight } }}
+                theme={{ colors: { background: colors.surfaceLight } }}
                 style={styles.modalInput}
               />
 
@@ -813,7 +819,7 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
                         styles.paySourceItem,
                         isSelected && {
                           borderColor: accent.hex,
-                          backgroundColor: COLORS.surfaceLight,
+                          backgroundColor: colors.surfaceLight,
                         },
                       ]}
                     >
@@ -821,12 +827,12 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
                         <Ionicons
                           name={acc.type === 'cash' ? 'cash-outline' : 'business-outline'}
                           size={16}
-                          color={isSelected ? accent.hex : COLORS.textSecondary}
+                          color={isSelected ? accent.hex : colors.textSecondary}
                         />
                         <Text
                           style={[
                             styles.paySourceName,
-                            isSelected && { color: COLORS.textPrimary, fontWeight: '700' },
+                            isSelected && { color: colors.textPrimary, fontWeight: '700' },
                           ]}
                         >
                           {acc.name}
@@ -875,7 +881,7 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
         <View style={styles.modalOverlay}>
           <View style={styles.deleteConfirmCard}>
             <View style={styles.deleteIconBadge}>
-              <Ionicons name="trash-outline" size={28} color={COLORS.alert} />
+              <Ionicons name="trash-outline" size={28} color={colors.alert} />
             </View>
 
             <Text style={styles.deleteConfirmTitle}>Delete Money Source?</Text>
@@ -883,8 +889,8 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
             {hasNonZeroBalance ? (
               <>
                 <Text style={styles.deleteConfirmBody}>
-                  <Text style={{ fontWeight: '700', color: COLORS.textPrimary }}>{account.name}</Text> currently has an active balance of{' '}
-                  <Text style={{ fontWeight: '700', color: accountBalanceNum < 0 ? COLORS.alert : accent.hex }}>
+                  <Text style={{ fontWeight: '700', color: colors.textPrimary }}>{account.name}</Text> currently has an active balance of{' '}
+                  <Text style={{ fontWeight: '700', color: accountBalanceNum < 0 ? colors.alert : accent.hex }}>
                     ₹{Math.abs(accountBalanceNum).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                   </Text>.
                   {'\n\n'}
@@ -923,14 +929,14 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
             ) : (
               <>
                 <Text style={styles.deleteConfirmBody}>
-                  Are you sure you want to delete <Text style={{ fontWeight: '700', color: COLORS.textPrimary }}>{account.name}</Text>? Past transaction records linked to this source will remain in your history.
+                  Are you sure you want to delete <Text style={{ fontWeight: '700', color: colors.textPrimary }}>{account.name}</Text>? Past transaction records linked to this source will remain in your history.
                 </Text>
 
                 <View style={styles.deleteActionButtons}>
                   <TactileButton
                     onPress={() => handleConfirmDelete(false)}
                     disabled={isDeleting}
-                    style={[styles.modalApplyBtn, { backgroundColor: COLORS.alert }]}
+                    style={[styles.modalApplyBtn, { backgroundColor: colors.alert }]}
                   >
                     <Text style={styles.modalApplyBtnText}>
                       {isDeleting ? 'Deleting...' : 'Delete Account'}
@@ -954,657 +960,659 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
   );
 };
 
-const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: SPACING.lg,
-    paddingTop: SPACING.md,
-    paddingBottom: SPACING.md,
-    backgroundColor: 'transparent',
-  },
-  backButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: COLORS.surface,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  headerTitle: {
-    color: COLORS.textPrimary,
-    fontSize: 15,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
-  actionHeaderBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: COLORS.surface,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  scrollContent: {
-    padding: SPACING.lg,
-    gap: SPACING.lg,
-  },
-  heroCard: {
-    backgroundColor: COLORS.surface,
-    borderColor: COLORS.border,
-    borderWidth: 1,
-    borderRadius: 16,
-    padding: SPACING.lg,
-    gap: SPACING.md,
-  },
-  heroTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  accountIdentity: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.md,
-  },
-  accountIconBadge: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  accountNameText: {
-    color: COLORS.textPrimary,
-    fontSize: 18,
-    fontWeight: '800',
-    marginBottom: 4,
-  },
-  accountBadgeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  typeBadge: {
-    backgroundColor: COLORS.surfaceLight,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  typeBadgeText: {
-    color: COLORS.textMuted,
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-  },
-  standardBalanceBox: {
-    paddingVertical: SPACING.sm,
-  },
-  creditCardDetailsBox: {
-    gap: SPACING.sm,
-    paddingVertical: SPACING.xs,
-  },
-  balanceHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-end',
-  },
-  balanceLabel: {
-    color: COLORS.textMuted,
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.8,
-    marginBottom: 4,
-  },
-  heroBalanceText: {
-    color: COLORS.textPrimary,
-    fontSize: 28,
-    fontWeight: '800',
-  },
-  creditLimitText: {
-    color: COLORS.textMuted,
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  progressContainer: {
-    gap: 6,
-    marginTop: 4,
-  },
-  progressBar: {
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: COLORS.surfaceLight,
-  },
-  progressSubRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  progressSubText: {
-    color: COLORS.textMuted,
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  statsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: COLORS.surfaceLight,
-    borderRadius: 10,
-    paddingVertical: SPACING.sm,
-    paddingHorizontal: SPACING.md,
-    marginTop: SPACING.xs,
-  },
-  statItem: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  statDivider: {
-    width: 1,
-    height: 24,
-    backgroundColor: COLORS.border,
-  },
-  statLabel: {
-    color: COLORS.textMuted,
-    fontSize: 9,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-    marginBottom: 2,
-  },
-  statValue: {
-    color: COLORS.textPrimary,
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  quickActionsContainer: {
-    flexDirection: 'row',
-    gap: SPACING.sm,
-  },
-  quickActionButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    backgroundColor: COLORS.surface,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 10,
-    paddingVertical: 10,
-    paddingHorizontal: SPACING.md,
-  },
-  quickActionText: {
-    color: COLORS.textPrimary,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  sectionHeaderContainer: {
-    gap: SPACING.sm,
-    marginTop: SPACING.xs,
-  },
-  sectionTitleWithCount: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  sectionTitle: {
-    color: COLORS.textMuted,
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.8,
-  },
-  countBadge: {
-    backgroundColor: COLORS.surfaceLight,
-    paddingHorizontal: 6,
-    paddingVertical: 1,
-    borderRadius: 10,
-  },
-  countBadgeText: {
-    color: COLORS.textSecondary,
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  filterChipsRow: {
-    flexDirection: 'row',
-    gap: 6,
-  },
-  filterChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.surface,
-  },
-  filterChipText: {
-    color: COLORS.textMuted,
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  transactionsList: {
-    gap: SPACING.sm,
-  },
-  transactionCard: {
-    backgroundColor: COLORS.surface,
-    borderColor: COLORS.border,
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-  },
-  txRowLine1: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  txTitleText: {
-    color: COLORS.textPrimary,
-    fontSize: 15,
-    fontWeight: '700',
-    flex: 1,
-    marginRight: SPACING.md,
-  },
-  txAmountText: {
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  txRowLine2: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  txCategoryTag: {
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-  },
-  txTagDivider: {
-    color: COLORS.textMuted,
-    marginHorizontal: 6,
-    fontSize: 12,
-  },
-  txTypeTag: {
-    color: COLORS.warning,
-    fontSize: 11,
-    fontWeight: '600',
-    letterSpacing: 0.5,
-  },
-  txRowLine3: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  txDateText: {
-    color: COLORS.textMuted,
-    fontSize: 11,
-    fontWeight: '500',
-  },
-  txNoteSnippet: {
-    color: COLORS.textSecondary,
-    fontSize: 11,
-    fontStyle: 'italic',
-    maxWidth: '50%',
-  },
-  emptyContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 40,
-    paddingHorizontal: SPACING.lg,
-    backgroundColor: COLORS.surface,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 14,
-    gap: SPACING.sm,
-  },
-  emptyIconCircle: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: COLORS.surfaceLight,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 4,
-  },
-  emptyTitle: {
-    color: COLORS.textPrimary,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  emptySubtitle: {
-    color: COLORS.textMuted,
-    fontSize: 13,
-    textAlign: 'center',
-    marginBottom: SPACING.sm,
-  },
-  emptyActionBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-  },
-  emptyActionBtnText: {
-    color: COLORS.textInverse,
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  notFoundContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: SPACING.xl,
-    gap: SPACING.md,
-  },
-  notFoundText: {
-    color: COLORS.textMuted,
-    fontSize: 15,
-  },
-  primaryBtn: {
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 8,
-  },
-  primaryBtnText: {
-    color: COLORS.textInverse,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.75)',
-    justifyContent: 'center',
-    padding: SPACING.lg,
-  },
-  modalContainer: {
-    backgroundColor: COLORS.surface,
-    borderColor: COLORS.border,
-    borderWidth: 1,
-    borderRadius: 14,
-    padding: SPACING.lg,
-  },
-  modalHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: SPACING.sm,
-  },
-  modalTitle: {
-    color: COLORS.textPrimary,
-    fontSize: 14,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
-  modalHelperText: {
-    color: COLORS.textMuted,
-    fontSize: 12,
-    lineHeight: 18,
-    marginBottom: SPACING.md,
-  },
-  modalInput: {
-    marginBottom: SPACING.md,
-  },
-  modalActionsCol: {
-    gap: SPACING.sm,
-  },
-  modalApplyBtn: {
-    paddingVertical: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  modalApplyBtnText: {
-    color: COLORS.textInverse,
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  modalSecondaryBtn: {
-    paddingVertical: 10,
-    alignItems: 'center',
-  },
-  modalSecondaryBtnText: {
-    color: COLORS.textMuted,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  inputLabel: {
-    color: COLORS.textMuted,
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.8,
-    marginBottom: 6,
-    marginTop: 8,
-  },
-  typeToggleRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: SPACING.md,
-  },
-  typeToggleBtn: {
-    flex: 1,
-    paddingVertical: 10,
-    alignItems: 'center',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.surface,
-  },
-  typeToggleBtnText: {
-    color: COLORS.textSecondary,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  presetScroll: {
-    flexDirection: 'row',
-    marginBottom: SPACING.md,
-  },
-  presetChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.surfaceLight,
-    marginRight: 8,
-  },
-  presetChipText: {
-    color: COLORS.textSecondary,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  deleteAccountBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 10,
-    marginTop: 4,
-  },
-  deleteAccountBtnText: {
-    color: COLORS.alert,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  creditCalcBox: {
-    backgroundColor: COLORS.surfaceLight,
-    borderRadius: 8,
-    padding: SPACING.sm,
-    marginTop: SPACING.xs,
-    marginBottom: SPACING.md,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    gap: 2,
-  },
-  creditCalcSub: {
-    color: COLORS.textMuted,
-    fontSize: 11,
-  },
-  creditCalcMain: {
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  modalSubtitleText: {
-    color: COLORS.textSecondary,
-    fontSize: 12,
-    marginTop: 2,
-  },
-  billDueSummaryBox: {
-    backgroundColor: COLORS.alert + '15',
-    borderWidth: 1,
-    borderColor: COLORS.alert + '40',
-    borderRadius: 8,
-    padding: SPACING.md,
-    marginBottom: SPACING.md,
-    gap: 4,
-  },
-  billDueLabel: {
-    color: COLORS.alert,
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-  },
-  billDueAmount: {
-    color: COLORS.alert,
-    fontSize: 22,
-    fontWeight: '800',
-  },
-  billDueHelp: {
-    color: COLORS.textSecondary,
-    fontSize: 11,
-    lineHeight: 15,
-  },
-  quickPayChipsRow: {
-    flexDirection: 'row',
-    marginTop: 6,
-    marginBottom: SPACING.xs,
-  },
-  quickPayChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-    borderWidth: 1,
-    backgroundColor: COLORS.surfaceLight,
-  },
-  quickPayChipText: {
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  paySourceList: {
-    gap: 8,
-    marginBottom: SPACING.md,
-  },
-  paySourceItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: SPACING.sm,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.surfaceLight,
-  },
-  paySourceItemLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.sm,
-  },
-  paySourceName: {
-    color: COLORS.textSecondary,
-    fontSize: 13,
-  },
-  paySourceBalance: {
-    color: COLORS.textPrimary,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  deleteSection: {
-    marginTop: SPACING.md,
-    gap: 8,
-    alignItems: 'center',
-  },
-  prominentDeleteBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    width: '100%',
-    paddingVertical: 14,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: COLORS.alert + '60',
-    backgroundColor: COLORS.alert + '12',
-  },
-  prominentDeleteBtnText: {
-    color: COLORS.alert,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  deleteHintText: {
-    color: COLORS.textMuted,
-    fontSize: 11,
-    textAlign: 'center',
-  },
-  deleteConfirmCard: {
-    backgroundColor: COLORS.surface,
-    borderColor: COLORS.border,
-    borderWidth: 1,
-    borderRadius: 16,
-    padding: SPACING.xl,
-    alignItems: 'center',
-    maxWidth: 380,
-    alignSelf: 'center',
-    width: '100%',
-  },
-  deleteIconBadge: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: COLORS.alert + '15',
-    borderWidth: 1,
-    borderColor: COLORS.alert + '40',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: SPACING.md,
-  },
-  deleteConfirmTitle: {
-    color: COLORS.textPrimary,
-    fontSize: 18,
-    fontWeight: '800',
-    marginBottom: SPACING.sm,
-    textAlign: 'center',
-  },
-  deleteConfirmBody: {
-    color: COLORS.textSecondary,
-    fontSize: 13,
-    lineHeight: 20,
-    textAlign: 'center',
-    marginBottom: SPACING.lg,
-  },
-  deleteActionButtons: {
-    width: '100%',
-    gap: SPACING.sm,
-  },
-  deleteAnywayBtn: {
-    paddingVertical: 12,
-    alignItems: 'center',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: COLORS.alert + '50',
-    backgroundColor: COLORS.alert + '15',
-  },
-  deleteAnywayBtnText: {
-    color: COLORS.alert,
-    fontSize: 13,
-    fontWeight: '700',
-  },
-});
+function getStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    safeArea: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    header: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: SPACING.lg,
+      paddingTop: SPACING.md,
+      paddingBottom: SPACING.md,
+      backgroundColor: 'transparent',
+    },
+    backButton: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    headerTitle: {
+      color: colors.textPrimary,
+      fontSize: 15,
+      fontWeight: '800',
+      letterSpacing: 0.5,
+    },
+    actionHeaderBtn: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    scrollContent: {
+      padding: SPACING.lg,
+      gap: SPACING.lg,
+    },
+    heroCard: {
+      backgroundColor: colors.surface,
+      borderColor: colors.border,
+      borderWidth: 1,
+      borderRadius: 16,
+      padding: SPACING.lg,
+      gap: SPACING.md,
+    },
+    heroTopRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    accountIdentity: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: SPACING.md,
+    },
+    accountIconBadge: {
+      width: 48,
+      height: 48,
+      borderRadius: 24,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    accountNameText: {
+      color: colors.textPrimary,
+      fontSize: 18,
+      fontWeight: '800',
+      marginBottom: 4,
+    },
+    accountBadgeRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    typeBadge: {
+      backgroundColor: colors.surfaceLight,
+      paddingHorizontal: 8,
+      paddingVertical: 2,
+      borderRadius: 6,
+    },
+    typeBadgeText: {
+      color: colors.textMuted,
+      fontSize: 10,
+      fontWeight: '700',
+      letterSpacing: 0.5,
+    },
+    standardBalanceBox: {
+      paddingVertical: SPACING.sm,
+    },
+    creditCardDetailsBox: {
+      gap: SPACING.sm,
+      paddingVertical: SPACING.xs,
+    },
+    balanceHeaderRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'flex-end',
+    },
+    balanceLabel: {
+      color: colors.textMuted,
+      fontSize: 11,
+      fontWeight: '700',
+      letterSpacing: 0.8,
+      marginBottom: 4,
+    },
+    heroBalanceText: {
+      color: colors.textPrimary,
+      fontSize: 28,
+      fontWeight: '800',
+    },
+    creditLimitText: {
+      color: colors.textMuted,
+      fontSize: 18,
+      fontWeight: '700',
+    },
+    progressContainer: {
+      gap: 6,
+      marginTop: 4,
+    },
+    progressBar: {
+      height: 6,
+      borderRadius: 3,
+      backgroundColor: colors.surfaceLight,
+    },
+    progressSubRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+    },
+    progressSubText: {
+      color: colors.textMuted,
+      fontSize: 11,
+      fontWeight: '600',
+    },
+    statsRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      backgroundColor: colors.surfaceLight,
+      borderRadius: 10,
+      paddingVertical: SPACING.sm,
+      paddingHorizontal: SPACING.md,
+      marginTop: SPACING.xs,
+    },
+    statItem: {
+      flex: 1,
+      alignItems: 'center',
+    },
+    statDivider: {
+      width: 1,
+      height: 24,
+      backgroundColor: colors.border,
+    },
+    statLabel: {
+      color: colors.textMuted,
+      fontSize: 9,
+      fontWeight: '700',
+      letterSpacing: 0.5,
+      marginBottom: 2,
+    },
+    statValue: {
+      color: colors.textPrimary,
+      fontSize: 13,
+      fontWeight: '700',
+    },
+    quickActionsContainer: {
+      flexDirection: 'row',
+      gap: SPACING.sm,
+    },
+    quickActionButton: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 10,
+      paddingVertical: 10,
+      paddingHorizontal: SPACING.md,
+    },
+    quickActionText: {
+      color: colors.textPrimary,
+      fontSize: 13,
+      fontWeight: '600',
+    },
+    sectionHeaderContainer: {
+      gap: SPACING.sm,
+      marginTop: SPACING.xs,
+    },
+    sectionTitleWithCount: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    sectionTitle: {
+      color: colors.textMuted,
+      fontSize: 11,
+      fontWeight: '700',
+      letterSpacing: 0.8,
+    },
+    countBadge: {
+      backgroundColor: colors.surfaceLight,
+      paddingHorizontal: 6,
+      paddingVertical: 1,
+      borderRadius: 10,
+    },
+    countBadgeText: {
+      color: colors.textSecondary,
+      fontSize: 11,
+      fontWeight: '700',
+    },
+    filterChipsRow: {
+      flexDirection: 'row',
+      gap: 6,
+    },
+    filterChip: {
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+    },
+    filterChipText: {
+      color: colors.textMuted,
+      fontSize: 11,
+      fontWeight: '600',
+    },
+    transactionsList: {
+      gap: SPACING.sm,
+    },
+    transactionCard: {
+      backgroundColor: colors.surface,
+      borderColor: colors.border,
+      borderWidth: 1,
+      borderRadius: 10,
+      paddingHorizontal: SPACING.md,
+      paddingVertical: SPACING.sm,
+    },
+    txRowLine1: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 4,
+    },
+    txTitleText: {
+      color: colors.textPrimary,
+      fontSize: 15,
+      fontWeight: '700',
+      flex: 1,
+      marginRight: SPACING.md,
+    },
+    txAmountText: {
+      fontSize: 15,
+      fontWeight: '700',
+    },
+    txRowLine2: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 4,
+    },
+    txCategoryTag: {
+      fontSize: 11,
+      fontWeight: '700',
+      letterSpacing: 0.5,
+    },
+    txTagDivider: {
+      color: colors.textMuted,
+      marginHorizontal: 6,
+      fontSize: 12,
+    },
+    txTypeTag: {
+      color: colors.warning,
+      fontSize: 11,
+      fontWeight: '600',
+      letterSpacing: 0.5,
+    },
+    txRowLine3: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    txDateText: {
+      color: colors.textMuted,
+      fontSize: 11,
+      fontWeight: '500',
+    },
+    txNoteSnippet: {
+      color: colors.textSecondary,
+      fontSize: 11,
+      fontStyle: 'italic',
+      maxWidth: '50%',
+    },
+    emptyContainer: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 40,
+      paddingHorizontal: SPACING.lg,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 14,
+      gap: SPACING.sm,
+    },
+    emptyIconCircle: {
+      width: 64,
+      height: 64,
+      borderRadius: 32,
+      backgroundColor: colors.surfaceLight,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 4,
+    },
+    emptyTitle: {
+      color: colors.textPrimary,
+      fontSize: 16,
+      fontWeight: '700',
+    },
+    emptySubtitle: {
+      color: colors.textMuted,
+      fontSize: 13,
+      textAlign: 'center',
+      marginBottom: SPACING.sm,
+    },
+    emptyActionBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+      borderRadius: 20,
+    },
+    emptyActionBtnText: {
+      color: colors.textInverse,
+      fontSize: 13,
+      fontWeight: '700',
+    },
+    notFoundContainer: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: SPACING.xl,
+      gap: SPACING.md,
+    },
+    notFoundText: {
+      color: colors.textMuted,
+      fontSize: 15,
+    },
+    primaryBtn: {
+      paddingHorizontal: 20,
+      paddingVertical: 10,
+      borderRadius: 8,
+    },
+    primaryBtnText: {
+      color: colors.textInverse,
+      fontSize: 14,
+      fontWeight: '700',
+    },
+    modalOverlay: {
+      flex: 1,
+      backgroundColor: 'rgba(0, 0, 0, 0.75)',
+      justifyContent: 'center',
+      padding: SPACING.lg,
+    },
+    modalContainer: {
+      backgroundColor: colors.surface,
+      borderColor: colors.border,
+      borderWidth: 1,
+      borderRadius: 14,
+      padding: SPACING.lg,
+    },
+    modalHeaderRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: SPACING.sm,
+    },
+    modalTitle: {
+      color: colors.textPrimary,
+      fontSize: 14,
+      fontWeight: '800',
+      letterSpacing: 0.5,
+    },
+    modalHelperText: {
+      color: colors.textMuted,
+      fontSize: 12,
+      lineHeight: 18,
+      marginBottom: SPACING.md,
+    },
+    modalInput: {
+      marginBottom: SPACING.md,
+    },
+    modalActionsCol: {
+      gap: SPACING.sm,
+    },
+    modalApplyBtn: {
+      paddingVertical: 12,
+      borderRadius: 8,
+      alignItems: 'center',
+    },
+    modalApplyBtnText: {
+      color: colors.textInverse,
+      fontSize: 13,
+      fontWeight: '700',
+    },
+    modalSecondaryBtn: {
+      paddingVertical: 10,
+      alignItems: 'center',
+    },
+    modalSecondaryBtnText: {
+      color: colors.textMuted,
+      fontSize: 12,
+      fontWeight: '600',
+    },
+    inputLabel: {
+      color: colors.textMuted,
+      fontSize: 10,
+      fontWeight: '700',
+      letterSpacing: 0.8,
+      marginBottom: 6,
+      marginTop: 8,
+    },
+    typeToggleRow: {
+      flexDirection: 'row',
+      gap: 8,
+      marginBottom: SPACING.md,
+    },
+    typeToggleBtn: {
+      flex: 1,
+      paddingVertical: 10,
+      alignItems: 'center',
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+    },
+    typeToggleBtnText: {
+      color: colors.textSecondary,
+      fontSize: 12,
+      fontWeight: '600',
+    },
+    presetScroll: {
+      flexDirection: 'row',
+      marginBottom: SPACING.md,
+    },
+    presetChip: {
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surfaceLight,
+      marginRight: 8,
+    },
+    presetChipText: {
+      color: colors.textSecondary,
+      fontSize: 12,
+      fontWeight: '600',
+    },
+    deleteAccountBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      paddingVertical: 10,
+      marginTop: 4,
+    },
+    deleteAccountBtnText: {
+      color: colors.alert,
+      fontSize: 12,
+      fontWeight: '700',
+    },
+    creditCalcBox: {
+      backgroundColor: colors.surfaceLight,
+      borderRadius: 8,
+      padding: SPACING.sm,
+      marginTop: SPACING.xs,
+      marginBottom: SPACING.md,
+      borderWidth: 1,
+      borderColor: colors.border,
+      gap: 2,
+    },
+    creditCalcSub: {
+      color: colors.textMuted,
+      fontSize: 11,
+    },
+    creditCalcMain: {
+      fontSize: 13,
+      fontWeight: '700',
+    },
+    modalSubtitleText: {
+      color: colors.textSecondary,
+      fontSize: 12,
+      marginTop: 2,
+    },
+    billDueSummaryBox: {
+      backgroundColor: colors.alert + '15',
+      borderWidth: 1,
+      borderColor: colors.alert + '40',
+      borderRadius: 8,
+      padding: SPACING.md,
+      marginBottom: SPACING.md,
+      gap: 4,
+    },
+    billDueLabel: {
+      color: colors.alert,
+      fontSize: 11,
+      fontWeight: '700',
+      letterSpacing: 0.5,
+    },
+    billDueAmount: {
+      color: colors.alert,
+      fontSize: 22,
+      fontWeight: '800',
+    },
+    billDueHelp: {
+      color: colors.textSecondary,
+      fontSize: 11,
+      lineHeight: 15,
+    },
+    quickPayChipsRow: {
+      flexDirection: 'row',
+      marginTop: 6,
+      marginBottom: SPACING.xs,
+    },
+    quickPayChip: {
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      borderRadius: 12,
+      borderWidth: 1,
+      backgroundColor: colors.surfaceLight,
+    },
+    quickPayChipText: {
+      fontSize: 11,
+      fontWeight: '700',
+    },
+    paySourceList: {
+      gap: 8,
+      marginBottom: SPACING.md,
+    },
+    paySourceItem: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      padding: SPACING.sm,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surfaceLight,
+    },
+    paySourceItemLeft: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: SPACING.sm,
+    },
+    paySourceName: {
+      color: colors.textSecondary,
+      fontSize: 13,
+    },
+    paySourceBalance: {
+      color: colors.textPrimary,
+      fontSize: 13,
+      fontWeight: '600',
+    },
+    deleteSection: {
+      marginTop: SPACING.md,
+      gap: 8,
+      alignItems: 'center',
+    },
+    prominentDeleteBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      width: '100%',
+      paddingVertical: 14,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.alert + '60',
+      backgroundColor: colors.alert + '12',
+    },
+    prominentDeleteBtnText: {
+      color: colors.alert,
+      fontSize: 14,
+      fontWeight: '700',
+    },
+    deleteHintText: {
+      color: colors.textMuted,
+      fontSize: 11,
+      textAlign: 'center',
+    },
+    deleteConfirmCard: {
+      backgroundColor: colors.surface,
+      borderColor: colors.border,
+      borderWidth: 1,
+      borderRadius: 16,
+      padding: SPACING.xl,
+      alignItems: 'center',
+      maxWidth: 380,
+      alignSelf: 'center',
+      width: '100%',
+    },
+    deleteIconBadge: {
+      width: 56,
+      height: 56,
+      borderRadius: 28,
+      backgroundColor: colors.alert + '15',
+      borderWidth: 1,
+      borderColor: colors.alert + '40',
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: SPACING.md,
+    },
+    deleteConfirmTitle: {
+      color: colors.textPrimary,
+      fontSize: 18,
+      fontWeight: '800',
+      marginBottom: SPACING.sm,
+      textAlign: 'center',
+    },
+    deleteConfirmBody: {
+      color: colors.textSecondary,
+      fontSize: 13,
+      lineHeight: 20,
+      textAlign: 'center',
+      marginBottom: SPACING.lg,
+    },
+    deleteActionButtons: {
+      width: '100%',
+      gap: SPACING.sm,
+    },
+    deleteAnywayBtn: {
+      paddingVertical: 12,
+      alignItems: 'center',
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: colors.alert + '50',
+      backgroundColor: colors.alert + '15',
+    },
+    deleteAnywayBtnText: {
+      color: colors.alert,
+      fontSize: 13,
+      fontWeight: '700',
+    },
+  });
+}

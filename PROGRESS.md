@@ -63,7 +63,7 @@ Foundational architecture build for a high-performance cross-platform personal f
 - [x] **YouTube-Style Drag-and-Drop Reorder Engine (`YouTubeStyleDraggableList.tsx`)**:
   - Implemented YouTube queue-style drag-and-drop reordering for both **Manage Money Sources** and **Manage Categories** modals.
   - Eliminated pointed chevron arrows (`^`, `v`) and replaced with dual horizontal bar handle (`=`) on the left of each row.
-  - Dual bar handle initiates drag on ~120ms hold with `expo-haptics` Medium impact vibration.
+  - Dual bar handle initiates drag on a deliberate 1-second (1000ms) hold (`holdDurationMs: 1000`) before elevating with `expo-haptics` Medium impact vibration, complete with touch-slop cancellation to eliminate accidental drag triggers during scrolling.
   - Dynamic card lift (`scale: 1.03`, `elevation: 24`, accent border glow) with real-time vertical tracking via `Animated.Value`.
   - Floating slot physics: As an item is dragged over other rows, surrounding items smoothly float and spring-shift (`Animated.spring` with native driver) to reassign space with a tactile selection tick (`Haptics.selectionAsync()`).
   - Snaps into target slot on release with `Haptics.impactAsync(Light)` and persists new sequence to Zustand and Supabase.
@@ -282,9 +282,128 @@ Foundational architecture build for a high-performance cross-platform personal f
 
 ---
 
+### 7. Dark/Light Theme System & Performance Optimization
+- [x] **Expanded Accent Palette (10 Options)**:
+  - Expanded `ACCENT_PALETTE` in `settingsStore.ts` with 10 rich palettes: `Mint #00D09C`, `Emerald #10B981`, `Cyan #06B6D4`, `Sapphire #3B82F6`, `Violet #8B5CF6`, `Amethyst #A855F7`, `Rose #F43F5E`, `Orange #F97316`, `Gold #F59E0B`, and `Pink #EC4899`.
+- [x] **Complete Light Mode Support across DashboardScreen**:
+  - Converted static `styles` into theme-reactive `getStyles(colors)` hook using `useMemo(() => getStyles(colors), [colors])`.
+  - Converted all containers, cards, text labels, top bar, month capsule, modal forms, and `LinearGradient` to use dynamic `colors.*` (`colors.background`, `colors.surface`, `colors.surfaceLight`, `colors.border`, `colors.textPrimary`, `colors.textSecondary`, `colors.textMuted`, etc.).
+  - Added `colors` prop to `YouTubeStyleDraggableList` and `DraggableRowItem` for dynamic Light Mode card borders and backgrounds.
+- [x] **Eliminated Lag on TransactionsScreen**:
+  - Added 150ms debounced search query (`debouncedQuery`) to prevent expensive re-filtering loops on every keystroke.
+  - Memoized `renderItem` using `useCallback` and wrapped `TransactionRow` in `React.memo` to eliminate unnecessary row re-renders.
+  - Added FlatList windowing and batching optimizations (`initialNumToRender={12}`, `maxToRenderPerBatch={10}`, `windowSize={5}`, `removeClippedSubviews={Platform.OS === 'android'}`).
+- [x] **Complete Light Mode Support across TransactionsScreen**:
+  - Converted `TransactionsScreen` styles to `getStyles(colors)` hook using `useMemo(() => getStyles(colors), [colors])`.
+  - Filter tabs, search container, interactive quick-filter pills, metrics strip, and filter sheet modal fully adapt between Light and Dark mode.
+- [x] **Verification**:
+  - Full TypeScript compilation passes with 0 errors (`npx tsc --noEmit`).
+  - Expo lint passes with 0 errors and 0 warnings (`npx expo lint`).
+  - Android Hermes bundle export builds cleanly (`npx expo export --platform android`).
+
+### 9. Render Error Fix & Distinct Categories by Transaction Type
+- [x] **Render Error Fix (`Property 'getStyles' doesn't exist`)**:
+  - Resolved `ReferenceError: Property 'getStyles' doesn't exist` that crashed `TransactionsScreen.tsx` on render.
+  - Converted `const getStyles = (colors) => StyleSheet.create(...)` into a hoisted `function getStyles(colors: ThemeColors) { return StyleSheet.create(...); }` across both `TransactionsScreen.tsx` and `DashboardScreen.tsx`, guaranteeing proper hoisting and initialization during module evaluation.
+- [x] **Distinct Categories per Transaction Type in Filter Popup (`TransactionsScreen.tsx`)**:
+  - Added interactive category type tabs inside Section D (CATEGORIES) of the Filter Modal:
+    - `All Categories`
+    - `Expense` (with alert dot indicator)
+    - `Income` (with accent dot indicator)
+    - `Lent & Borrow` (with warning dot indicator)
+  - Dynamically merges curated defaults (`DEFAULT_INCOME_CATEGORIES`, `DEFAULT_BORROW_CATEGORIES`, expense `categories`) with any existing custom categories recorded in past user transactions.
+  - Added active item count badges on tabs displaying how many selected categories belong to that specific type.
+  - **Auto-Syncing**: When the user selects a Transaction Type in Section C (e.g. `Income`), the Categories tab below automatically switches to the `Income` tab to show relevant categories instantly.
+  - Retained independent multi-selection: filtering by category remains flexible without forcing single-type locks.
+- [x] **Distinct Categories in Edit Mode (`TransactionDetailScreen.tsx`)**:
+  - Updated transaction edit form to show type-specific categories dynamically when switching between Expense, Income, and Lent/Borrow.
+- [x] **Verification**:
+  - Full TypeScript typecheck passes with 0 errors (`npx tsc --noEmit`).
+  - Expo lint passes with 0 errors (`npx expo lint`).
+  - Automated E2E verification test suite (`node test_e2e.mjs`) passes 100%.
+
+### 10. Single-Section Filter Modal & Quick Pill Direct Access
+- [x] **Context-Sensitive Filter Modal**:
+  - Replaced monolithic filter modal state (`isFilterModalVisible`) with section-targeted modal state (`filterModalSection: 'all' | 'date' | 'account' | 'type' | 'category' | null`).
+  - Clicking any quick filter pill on `TransactionsScreen` now opens the popup displaying **only** the selected section:
+    - **Date Range Pill** (`calendar-outline`) -> Opens strictly the Date Range selector (This Month, Last 30 Days, All Time, Custom Range with start/end date pickers).
+    - **Account Pill** (`wallet-outline`) -> Opens strictly the Money Source / Account list (All Accounts, Bank, Credit Card, Cash, etc.).
+    - **Transaction Type Pill** (`swap-horizontal-outline`) -> Added dedicated quick pill to the filter strip, opens strictly the Transaction Type options (Expense, Income, Lent, Borrowed).
+    - **Categories Pill** (`pricetags-outline`) -> Opens strictly the Categories view with type tabs (`All`, `Expense`, `Income`, `Lent & Borrow`) and category chips.
+    - **General Filter Button** (`options-outline` in search bar) -> Opens all filter sections simultaneously.
+- [x] **Section Switcher Tabs in Modal Header**:
+  - Added horizontal section switcher tabs (`All`, `Date`, `Account`, `Type`, `Categories`) at the top of the popup.
+  - Users can jump smoothly between filter sections without closing and reopening the modal.
+  - Active section badges and dot indicators highlight which filters are currently applied.
+- [x] **Adaptive Modal Sizing & Contextual Header**:
+  - Modal title and subtitle dynamically adapt to the active section (`"Date Range"`, `"Money Source"`, `"Transaction Type"`, `"Categories"`).
+  - Clear / Reset button in the modal header dynamically resets only the currently viewed filter section (or all filters when viewing `All`).
+  - Modal card height dynamically contracts when viewing single sections for a sleek, compact bottom sheet experience.
+- [x] **Verification**:
+  - Full TypeScript typecheck passes with 0 errors (`npx tsc --noEmit`).
+  - Expo lint passes with 0 errors and 0 warnings (`npx expo lint`).
+  - Automated E2E verification test suite (`node test_e2e.mjs`) passes 100%.
+
+
+### 11. Light Mode Integration for Account Details & Log Transaction Screens
+- [x] **Complete Light Mode Support for Account Details (`AccountDetailScreen.tsx`)**:
+  - Replaced all static `COLORS` tokens with dynamic `ThemeColors` from `../../theme/tokens`.
+  - Converted static StyleSheet to theme-reactive hoisted `function getStyles(colors: ThemeColors)` hook with `useMemo(() => getStyles(colors), [colors])`.
+  - Full dynamic theme binding across hero balance card, account details, progress bars, quick action buttons, Indian bank preset pills, transaction history list, and empty states.
+  - Adapted all 3 modal dialogs (Edit Account, Pay Credit Card Bill, Delete Confirmation) with theme-adaptive modal backgrounds, borders, and text contrast.
+  - Configured React Native Paper `TextInput` components with dynamic `textColor`, `placeholderTextColor`, `outlineColor`, `activeOutlineColor`, and `theme={{ colors: { background: colors.surfaceLight } }}`.
+- [x] **Complete Light Mode Support for Log Transaction (`AddTransactionScreen.tsx`)**:
+  - Replaced all static `COLORS` tokens with dynamic `ThemeColors` from `../../theme/tokens`.
+  - Injected `const { accent, colors, effectiveTheme } = useSettingsStore()` and `useMemo(() => getStyles(colors), [colors])`.
+  - Converted static StyleSheet to theme-reactive hoisted `function getStyles(colors: ThemeColors)`.
+  - Dynamic styling across transaction type tabs (Expense coral, Income accent, Lent/Borrow warning/purple), hero amount card, money source selection grid, category chips, and note inputs.
+  - Native calendar picker on iOS dynamically syncs `themeVariant={effectiveTheme === 'light' ? 'light' : 'dark'}`.
+  - Verified 0 remaining static `COLORS.` references.
+- [x] **Verification**:
+  - Full TypeScript compilation passes with 0 errors (`npx tsc --noEmit`).
+  - Expo lint passes with 0 errors and 0 warnings (`npx expo lint`).
+  - Automated E2E verification test suite (`node test_e2e.mjs`) passes 100%.
+
+### 12. Theme System — Multi-Style Engine & Android Material You Support
+- [x] **Full Material Design 3 (MD3) Token Architecture (`tokens.ts`)**:
+  - Replaced ad-hoc flat naming with formal MD3 roles: `background`, `onBackground`, `surface`, `onSurface`, `surfaceVariant`, `onSurfaceVariant`, `surfaceElevated`, `outline`, `outlineVariant`, `primary`, `onPrimary`, `primaryContainer`, `onPrimaryContainer`, `inverseSurface`, `inverseOnSurface`, `inversePrimary`, `shadow`, `scrim`.
+  - Mapped directly onto React Native Paper's `MD3DarkTheme` and `MD3LightTheme` in `theme.ts`.
+- [x] **Three Named Design Styles (Full Dark & Light Variants)**:
+  1. *Precision Obsidian*: Indigo brand (`#6366F1` dark / `#4F46E5` light) over a deep, warm near-black base (`#111113`, zero blue-slate bias) and zinc cards (`#18181B`).
+  2. *Warm Executive*: Copper brand (`#D97757` dark / `#A85C32` light) with umber dark mode (`#151311` canvas, `#1E1A17` card) and warm paper light mode (`#F7F4EE` canvas, `#FFFDF9` ivory card, `#27221E` espresso ink).
+  3. *Swiss Minimal*: High-contrast monochrome ink brand (near-white `#F4F4F5` pill in dark mode with `#09090B` text; near-black `#18181B` pill in light mode with `#FFFFFF` text). All buttons, tabs, borders, and pills are strictly monochrome, leaving financial status colors as the sole color in the UI.
+- [x] **Strictly Locked Semantic Financial Flow Tokens**:
+  - `income`: `#10B981` (dark) / `#059669` (light)
+  - `expense`: `#F43F5E` (dark) / `#E11D48` (light)
+  - `lent`: `#F59E0B` (dark) / `#D97706` (light)
+  - `borrowed`: `#38BDF8` (dark) / `#0284C7` (light)
+  - Locked across all styles and dynamic wallpaper themes — completely independent of brand/accent color.
+- [x] **Android 12+ Material You Dynamic Theming (`@pchmn/expo-material3-theme`)**:
+  - Installed `@pchmn/expo-material3-theme` via `npx expo install`.
+  - Continuous Native Generation: executed `npx expo prebuild --platform android`.
+  - Hooked `useMaterial3Theme` in `App.tsx` and dynamically fed system wallpaper schemes into `settingsStore`.
+  - Added 4th option in Settings: "Match wallpaper (Android 12+)".
+  - Automatic fallback: gracefully falls back to "Precision Obsidian" on iOS, Android < 12, or web.
+- [x] **Centralized Design Tokens & Zero Hex Duplication**:
+  - Centralized every token in `tokens.ts`, including 12 category tokens (`CATEGORY_TOKENS`), bank presets (`BANK_BRAND_COLORS`), card presets (`CARD_BRAND_COLORS`), custom swatches (`CUSTOM_PALETTE_COLORS`), and account type colors (`ACCOUNT_TYPE_COLORS`).
+  - Deleted every duplicate hardcoded hex value across `categoryIcons.ts` and `DashboardScreen.tsx`.
+- [x] **SettingsScreen Redesign**:
+  - Dedicated "THEME SYSTEM" section with 4 selectable style cards, visual brand swatches, radio selectors, and fallback status badges.
+  - Dedicated "APPEARANCE MODE" segmented control (Dark / Light / System) with dynamic high-contrast active text (`onPrimary`).
+  - Educational "LOCKED SEMANTIC TOKENS" showcase displaying live income, expense, lent, and borrowed status pills.
+- [x] **Interactive Simulator & Visual Verification**:
+  - Created standalone interactive simulator artifact `theme_system_showcase.html` with real-time toggle between all styles, Dark/Light modes, and Dashboard/Settings mockups.
+  - Generated visual assets for Precision Obsidian and Warm Executive.
+- [x] **Verification**:
+  - TypeScript typecheck passed with 0 errors (`npx tsc --noEmit`).
+  - ESLint passed with 0 errors and 0 warnings (`npx expo lint`).
+
+---
+
 ## Next Steps
 - Implement Screenshot OCR & share-intent parsing (requires dev-client native builds).
 - Implement Gemini AI overview & BYOK API key settings modal.
+
 
 
 

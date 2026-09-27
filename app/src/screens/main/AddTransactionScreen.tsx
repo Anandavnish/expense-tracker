@@ -16,7 +16,7 @@ import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/dat
 import { useAuthStore } from '../../store/authStore';
 import { useFinanceStore } from '../../store/financeStore';
 import { useSettingsStore } from '../../store/settingsStore';
-import { COLORS, SPACING, TYPOGRAPHY } from '../../theme/tokens';
+import { SPACING, TYPOGRAPHY, ThemeColors, ACCOUNT_TYPE_COLORS } from '../../theme/tokens';
 import { TactileButton } from '../../components/TactileButton';
 import { TransactionType } from '../../types/database';
 
@@ -34,12 +34,12 @@ const formatLocalDate = (d: Date) => {
 
 const getAccountIconProps = (acc: { type: string }) => {
   if (acc.type === 'credit_card') {
-    return { name: 'card-outline' as const, color: '#8B5CF6' };
+    return { name: 'card-outline' as const, color: ACCOUNT_TYPE_COLORS.credit_card };
   }
   if (acc.type === 'cash') {
-    return { name: 'cash-outline' as const, color: '#10B981' };
+    return { name: 'cash-outline' as const, color: ACCOUNT_TYPE_COLORS.cash };
   }
-  return { name: 'business-outline' as const, color: '#3B82F6' };
+  return { name: 'business-outline' as const, color: ACCOUNT_TYPE_COLORS.bank };
 };
 
 const INCOME_CATEGORIES = [
@@ -71,7 +71,8 @@ const CREDIT_CARD_INCOME_CATEGORIES = [
 export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navigation, route }) => {
   const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
-  const { accent } = useSettingsStore();
+  const { accent, colors, effectiveTheme } = useSettingsStore();
+  const styles = useMemo(() => getStyles(colors), [colors]);
   const {
     accounts,
     categories,
@@ -297,7 +298,7 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
                     style={[
                       styles.typeTabText,
                       active && styles.typeTabTextActive,
-                      active && item.key === 'expense' && { color: COLORS.alert },
+                      active && item.key === 'expense' && { color: colors.alert },
                       active && item.key === 'income' && { color: accent.hex },
                     ]}
                   >
@@ -318,9 +319,9 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
                 setAmount(text.replace(/[^0-9.]/g, ''));
               }}
               placeholder="0.00"
-              placeholderTextColor={COLORS.textMuted}
+              placeholderTextColor={colors.textMuted}
               keyboardType="decimal-pad"
-              textColor={COLORS.textPrimary}
+              textColor={colors.textPrimary}
               style={[styles.amountInput, TYPOGRAPHY.heroNumber]}
               underlineColor="transparent"
               activeUnderlineColor="transparent"
@@ -375,7 +376,7 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
                       <Text
                         style={[
                           styles.sourceName,
-                          active && { color: COLORS.textPrimary, fontWeight: '700' },
+                          active && { color: colors.textPrimary, fontWeight: '700' },
                         ]}
                         numberOfLines={1}
                       >
@@ -417,11 +418,11 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
                 value={personName}
                 onChangeText={setPersonName}
                 placeholder="e.g. Rahul, Priya"
-                placeholderTextColor={COLORS.textMuted}
+                placeholderTextColor={colors.textMuted}
                 mode="outlined"
-                outlineColor={COLORS.border}
+                outlineColor={colors.border}
                 activeOutlineColor={accent.hex}
-                textColor={COLORS.textPrimary}
+                textColor={colors.textPrimary}
                 style={styles.textInput}
               />
             </View>
@@ -481,7 +482,7 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
                   <Text
                     style={[
                       styles.quickDateText,
-                      { color: date === formatLocalDate(today) ? accent.hex : COLORS.textSecondary },
+                      { color: date === formatLocalDate(today) ? accent.hex : colors.textSecondary },
                     ]}
                   >
                     Today
@@ -525,7 +526,7 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
                               )
                             )
                               ? accent.hex
-                              : COLORS.textSecondary,
+                              : colors.textSecondary,
                         },
                       ]}
                     >
@@ -587,7 +588,7 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
                         display="inline"
                         minimumDate={minDate}
                         maximumDate={maxDate}
-                        themeVariant="dark"
+                        themeVariant={effectiveTheme === 'light' ? 'light' : 'dark'}
                         onChange={handleDateChange}
                       />
                     </View>
@@ -612,11 +613,11 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
               value={note}
               onChangeText={setNote}
               placeholder="e.g. Lunch with friends, Book purchase"
-              placeholderTextColor={COLORS.textMuted}
+              placeholderTextColor={colors.textMuted}
               mode="outlined"
-              outlineColor={COLORS.border}
+              outlineColor={colors.border}
               activeOutlineColor={accent.hex}
-              textColor={COLORS.textPrimary}
+              textColor={colors.textPrimary}
               style={styles.textInput}
             />
           </View>
@@ -634,288 +635,290 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
   );
 };
 
-const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: SPACING.lg,
-    paddingTop: SPACING.md,
-    paddingBottom: SPACING.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-  },
-  backBtn: {
-    paddingVertical: SPACING.xs,
-  },
-  backText: {
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  headerTitle: {
-    color: COLORS.textPrimary,
-    fontSize: 14,
-    fontWeight: '800',
-    letterSpacing: 1,
-  },
-  headerSpacer: {
-    width: 48,
-  },
-  keyboardContainer: {
-    flex: 1,
-  },
-  scrollContent: {
-    padding: SPACING.lg,
-    paddingBottom: SPACING.xl * 2,
-  },
-  errorBanner: {
-    backgroundColor: COLORS.alertMuted,
-    borderColor: COLORS.alert,
-    borderWidth: 1,
-    borderRadius: 8,
-    padding: SPACING.md,
-    marginBottom: SPACING.md,
-  },
-  errorBannerText: {
-    color: COLORS.alert,
-    fontSize: 13,
-  },
-  typeSelector: {
-    flexDirection: 'row',
-    backgroundColor: COLORS.surface,
-    borderColor: COLORS.border,
-    borderWidth: 1,
-    borderRadius: 8,
-    padding: 3,
-    marginBottom: SPACING.lg,
-  },
-  typeTab: {
-    flex: 1,
-    paddingVertical: SPACING.sm,
-    alignItems: 'center',
-    borderRadius: 6,
-  },
-  typeTabActive: {
-    backgroundColor: COLORS.surfaceLight,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  typeTabText: {
-    color: COLORS.textMuted,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  typeTabTextActive: {
-    color: COLORS.textPrimary,
-    fontWeight: '700',
-  },
-  amountContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.surface,
-    borderColor: COLORS.border,
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: SPACING.lg,
-    paddingVertical: SPACING.xs,
-    marginBottom: SPACING.lg,
-  },
-  currencyPrefix: {
-    fontSize: 28,
-    fontWeight: '800',
-    marginRight: SPACING.xs,
-  },
-  amountInput: {
-    flex: 1,
-    backgroundColor: 'transparent',
-    fontSize: 32,
-    fontWeight: '800',
-  },
-  section: {
-    marginBottom: SPACING.lg,
-  },
-  sectionLabel: {
-    color: COLORS.textMuted,
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.8,
-    marginBottom: SPACING.sm,
-  },
-  moneySourcesGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  sourceCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.surface,
-    borderColor: COLORS.border,
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    minWidth: '47%',
-    flex: 1,
-    gap: 8,
-  },
-  sourceIconBadge: {
-    width: 28,
-    height: 28,
-    borderRadius: 6,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  sourceTextCol: {
-    flex: 1,
-    justifyContent: 'center',
-  },
-  sourceName: {
-    color: COLORS.textSecondary,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  sourceBalance: {
-    color: COLORS.textMuted,
-    fontSize: 11,
-    marginTop: 1,
-  },
-  sourceCheckIcon: {
-    marginLeft: 2,
-  },
-  categoriesGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: SPACING.xs,
-  },
-  categoryPill: {
-    backgroundColor: COLORS.surface,
-    borderColor: COLORS.border,
-    borderWidth: 1,
-    borderRadius: 6,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-  },
-  categoryPillText: {
-    color: COLORS.textSecondary,
-    fontSize: 12,
-  },
-  dateHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: SPACING.xs,
-  },
-  quickDateRow: {
-    flexDirection: 'row',
-    gap: SPACING.xs,
-  },
-  quickDateBtn: {
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: 4,
-    backgroundColor: COLORS.surfaceLight,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: 'transparent',
-  },
-  quickDateText: {
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  dateSelectorCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.surface,
-    borderColor: COLORS.border,
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    gap: 12,
-  },
-  dateIconBadge: {
-    width: 36,
-    height: 36,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  dateTextCol: {
-    flex: 1,
-    justifyContent: 'center',
-  },
-  dateSelectedText: {
-    color: COLORS.textPrimary,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  dateMonthRestrictionHint: {
-    color: COLORS.textMuted,
-    fontSize: 11,
-    marginTop: 2,
-  },
-  dateChangeBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 6,
-    borderWidth: 1,
-    backgroundColor: COLORS.surfaceLight,
-  },
-  dateChangeBadgeText: {
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  datePickerModalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: SPACING.lg,
-  },
-  datePickerModalCard: {
-    width: '100%',
-    maxWidth: 360,
-    backgroundColor: COLORS.surface,
-    borderColor: COLORS.border,
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: SPACING.md,
-  },
-  datePickerModalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: SPACING.md,
-    paddingHorizontal: SPACING.xs,
-  },
-  datePickerModalTitle: {
-    color: COLORS.textPrimary,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  datePickerModalDoneText: {
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  textInput: {
-    backgroundColor: COLORS.surface,
-  },
-  submitBtn: {
-    borderRadius: 8,
-    paddingVertical: SPACING.md,
-    alignItems: 'center',
-    marginTop: SPACING.md,
-  },
-  submitBtnText: {
-    color: COLORS.textInverse,
-    fontSize: 15,
-    fontWeight: '700',
-  },
-});
+function getStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    safeArea: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    header: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: SPACING.lg,
+      paddingTop: SPACING.md,
+      paddingBottom: SPACING.sm,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+    },
+    backBtn: {
+      paddingVertical: SPACING.xs,
+    },
+    backText: {
+      fontSize: 15,
+      fontWeight: '700',
+    },
+    headerTitle: {
+      color: colors.textPrimary,
+      fontSize: 14,
+      fontWeight: '800',
+      letterSpacing: 1,
+    },
+    headerSpacer: {
+      width: 48,
+    },
+    keyboardContainer: {
+      flex: 1,
+    },
+    scrollContent: {
+      padding: SPACING.lg,
+      paddingBottom: SPACING.xl * 2,
+    },
+    errorBanner: {
+      backgroundColor: colors.alertMuted,
+      borderColor: colors.alert,
+      borderWidth: 1,
+      borderRadius: 8,
+      padding: SPACING.md,
+      marginBottom: SPACING.md,
+    },
+    errorBannerText: {
+      color: colors.alert,
+      fontSize: 13,
+    },
+    typeSelector: {
+      flexDirection: 'row',
+      backgroundColor: colors.surface,
+      borderColor: colors.border,
+      borderWidth: 1,
+      borderRadius: 8,
+      padding: 3,
+      marginBottom: SPACING.lg,
+    },
+    typeTab: {
+      flex: 1,
+      paddingVertical: SPACING.sm,
+      alignItems: 'center',
+      borderRadius: 6,
+    },
+    typeTabActive: {
+      backgroundColor: colors.surfaceLight,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    typeTabText: {
+      color: colors.textMuted,
+      fontSize: 12,
+      fontWeight: '600',
+    },
+    typeTabTextActive: {
+      color: colors.textPrimary,
+      fontWeight: '700',
+    },
+    amountContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.surface,
+      borderColor: colors.border,
+      borderWidth: 1,
+      borderRadius: 8,
+      paddingHorizontal: SPACING.lg,
+      paddingVertical: SPACING.xs,
+      marginBottom: SPACING.lg,
+    },
+    currencyPrefix: {
+      fontSize: 28,
+      fontWeight: '800',
+      marginRight: SPACING.xs,
+    },
+    amountInput: {
+      flex: 1,
+      backgroundColor: 'transparent',
+      fontSize: 32,
+      fontWeight: '800',
+    },
+    section: {
+      marginBottom: SPACING.lg,
+    },
+    sectionLabel: {
+      color: colors.textMuted,
+      fontSize: 11,
+      fontWeight: '700',
+      letterSpacing: 0.8,
+      marginBottom: SPACING.sm,
+    },
+    moneySourcesGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+    },
+    sourceCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.surface,
+      borderColor: colors.border,
+      borderWidth: 1,
+      borderRadius: 8,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      minWidth: '47%',
+      flex: 1,
+      gap: 8,
+    },
+    sourceIconBadge: {
+      width: 28,
+      height: 28,
+      borderRadius: 6,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    sourceTextCol: {
+      flex: 1,
+      justifyContent: 'center',
+    },
+    sourceName: {
+      color: colors.textSecondary,
+      fontSize: 13,
+      fontWeight: '600',
+    },
+    sourceBalance: {
+      color: colors.textMuted,
+      fontSize: 11,
+      marginTop: 1,
+    },
+    sourceCheckIcon: {
+      marginLeft: 2,
+    },
+    categoriesGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: SPACING.xs,
+    },
+    categoryPill: {
+      backgroundColor: colors.surface,
+      borderColor: colors.border,
+      borderWidth: 1,
+      borderRadius: 6,
+      paddingHorizontal: SPACING.md,
+      paddingVertical: SPACING.sm,
+    },
+    categoryPillText: {
+      color: colors.textSecondary,
+      fontSize: 12,
+    },
+    dateHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: SPACING.xs,
+    },
+    quickDateRow: {
+      flexDirection: 'row',
+      gap: SPACING.xs,
+    },
+    quickDateBtn: {
+      paddingHorizontal: SPACING.sm,
+      paddingVertical: 4,
+      backgroundColor: colors.surfaceLight,
+      borderRadius: 6,
+      borderWidth: 1,
+      borderColor: 'transparent',
+    },
+    quickDateText: {
+      fontSize: 11,
+      fontWeight: '600',
+    },
+    dateSelectorCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.surface,
+      borderColor: colors.border,
+      borderWidth: 1,
+      borderRadius: 8,
+      paddingHorizontal: 12,
+      paddingVertical: 12,
+      gap: 12,
+    },
+    dateIconBadge: {
+      width: 36,
+      height: 36,
+      borderRadius: 8,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    dateTextCol: {
+      flex: 1,
+      justifyContent: 'center',
+    },
+    dateSelectedText: {
+      color: colors.textPrimary,
+      fontSize: 14,
+      fontWeight: '700',
+    },
+    dateMonthRestrictionHint: {
+      color: colors.textMuted,
+      fontSize: 11,
+      marginTop: 2,
+    },
+    dateChangeBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: 6,
+      borderWidth: 1,
+      backgroundColor: colors.surfaceLight,
+    },
+    dateChangeBadgeText: {
+      fontSize: 12,
+      fontWeight: '700',
+    },
+    datePickerModalBackdrop: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.7)',
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: SPACING.lg,
+    },
+    datePickerModalCard: {
+      width: '100%',
+      maxWidth: 360,
+      backgroundColor: colors.surface,
+      borderColor: colors.border,
+      borderWidth: 1,
+      borderRadius: 12,
+      padding: SPACING.md,
+    },
+    datePickerModalHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: SPACING.md,
+      paddingHorizontal: SPACING.xs,
+    },
+    datePickerModalTitle: {
+      color: colors.textPrimary,
+      fontSize: 14,
+      fontWeight: '700',
+    },
+    datePickerModalDoneText: {
+      fontSize: 14,
+      fontWeight: '700',
+    },
+    textInput: {
+      backgroundColor: colors.surface,
+    },
+    submitBtn: {
+      borderRadius: 8,
+      paddingVertical: SPACING.md,
+      alignItems: 'center',
+      marginTop: SPACING.md,
+    },
+    submitBtnText: {
+      color: colors.textInverse,
+      fontSize: 15,
+      fontWeight: '700',
+    },
+  });
+}
