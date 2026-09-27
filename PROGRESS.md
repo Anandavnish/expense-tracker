@@ -399,6 +399,17 @@ Foundational architecture build for a high-performance cross-platform personal f
   - TypeScript typecheck passed with 0 errors (`npx tsc --noEmit`).
   - ESLint passed with 0 errors and 0 warnings (`npx expo lint`).
 
+### 13. UI Polish & Theme Consistency Audit
+- [x] **Budget Screen Duplicate Plus Icon Fix (`BudgetsScreen.tsx`)**:
+  - Resolved the duplicate `+` indicator on the "+ Set Budget" header action button. The text now renders cleanly as "Set Budget" alongside the `<Ionicons name={showForm ? 'close' : 'add'} />` icon.
+- [x] **Complete Hardcoded Hex Purge (`DashboardScreen.tsx`)**:
+  - Purged all remaining hardcoded hex values in `DashboardScreen.tsx` (`#D97706` warning icons, `#000` card shadows, `#fff` active border, `#FEF3C7` / `#F59E0B` / `#92400E` sync pills).
+  - Fully bound to dynamic design tokens (`colors.warning`, `colors.warningMuted`, `colors.shadow`, `colors.textPrimary`).
+- [x] **Verification**:
+  - Full TypeScript compilation passes with 0 errors (`npx tsc --noEmit`).
+  - Expo lint passes with 0 errors and 0 warnings (`npx expo lint`).
+  - Automated E2E verification test suite (`node test_e2e.mjs`) passes 100%.
+
 ---
 
 ## Next Steps

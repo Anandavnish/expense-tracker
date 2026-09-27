@@ -15,7 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { ProgressBar, TextInput } from 'react-native-paper';
 import { useAuthStore } from '../../store/authStore';
-import { useFinanceStore, parseBorrowDetails } from '../../store/financeStore';
+import { useFinanceStore, parseBorrowDetails, calculateNetWorth } from '../../store/financeStore';
 import { useSettingsStore } from '../../store/settingsStore';
 import {
   SPACING,
@@ -247,7 +247,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
   const totalAvailCredit = Math.max(0, totalCreditLimit - totalCreditDebt);
 
   // Net Worth: Liquid (Bank + Cash) + Lent - Borrowed - Credit Card Dues
-  const fullNetWorth = liquidTotal + totalLent - totalBorrowed - totalCreditDebt;
+  const fullNetWorth = calculateNetWorth(accounts, borrows, transactions);
   const formattedNetWorth = fullNetWorth < 0
     ? `−₹${Math.abs(fullNetWorth).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
     : `₹${fullNetWorth.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
@@ -726,7 +726,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                 activeOpacity={0.8}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
-                <Ionicons name="warning" size={13} color="#D97706" />
+                <Ionicons name="warning" size={13} color={colors.warning} />
                 <Text style={styles.syncRequiredPillText}>
                   Sync Required ({Object.keys(pendingCalibrations).length})
                 </Text>
@@ -1134,7 +1134,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
           <View style={[styles.modalCard, { maxHeight: '80%' }]}>
             <View style={styles.syncSheetHeaderRow}>
               <View style={styles.syncSheetHeaderLeft}>
-                <Ionicons name="warning" size={20} color="#D97706" />
+                <Ionicons name="warning" size={20} color={colors.warning} />
                 <Text style={styles.modalTitle}>Balance Sync Required</Text>
               </View>
               <TouchableOpacity
@@ -1919,7 +1919,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                               </Text>
                               {!!pendingCalibrations[acc.id] && (
                                 <View style={styles.managerSyncBadge}>
-                                  <Ionicons name="warning" size={10} color="#D97706" />
+                                  <Ionicons name="warning" size={10} color={colors.warning} />
                                   <Text style={styles.managerSyncBadgeText}>Sync</Text>
                                 </View>
                               )}
@@ -2392,7 +2392,7 @@ function getStyles(colors: ThemeColors) {
     borderColor: colors.border,
     borderRadius: 26,
     alignSelf: 'center',
-    shadowColor: '#000',
+    shadowColor: colors.shadow,
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.35,
     shadowRadius: 6,
@@ -2852,7 +2852,7 @@ function getStyles(colors: ThemeColors) {
     justifyContent: 'center',
     elevation: 10,
     zIndex: 999,
-    shadowColor: '#000',
+    shadowColor: colors.shadow,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.4,
     shadowRadius: 6,
@@ -3181,7 +3181,7 @@ function getStyles(colors: ThemeColors) {
   },
   colorCircleActive: {
     borderWidth: 3,
-    borderColor: '#fff',
+    borderColor: colors.textPrimary,
   },
   iconScrollRow: {
     flexDirection: 'row',
@@ -3528,15 +3528,15 @@ function getStyles(colors: ThemeColors) {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: '#FEF3C7',
-    borderColor: '#F59E0B',
+    backgroundColor: colors.warningMuted,
+    borderColor: colors.warning,
     borderWidth: 1,
     borderRadius: 20,
     paddingHorizontal: 8,
     paddingVertical: 4,
   },
   syncRequiredPillText: {
-    color: '#92400E',
+    color: colors.warning,
     fontSize: 11,
     fontWeight: '700',
   },
@@ -3673,15 +3673,15 @@ function getStyles(colors: ThemeColors) {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 3,
-    backgroundColor: '#FEF3C7',
-    borderColor: '#F59E0B',
+    backgroundColor: colors.warningMuted,
+    borderColor: colors.warning,
     borderWidth: 1,
     borderRadius: 10,
     paddingHorizontal: 6,
     paddingVertical: 1,
   },
   managerSyncBadgeText: {
-    color: '#92400E',
+    color: colors.warning,
     fontSize: 10,
     fontWeight: '700',
   },

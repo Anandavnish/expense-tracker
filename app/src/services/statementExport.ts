@@ -3,6 +3,7 @@
 import { Platform } from 'react-native';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import * as FileSystem from 'expo-file-system/legacy';
 import { Transaction } from '../types/database';
 
 export interface StatementExportOptions {
@@ -15,6 +16,7 @@ export interface StatementExportOptions {
   searchQuery?: string;
   transactions: Transaction[];
   accountMap: Record<string, string>;
+  method?: 'save' | 'share' | 'auto';
 }
 
 export function generateStatementHtml(options: StatementExportOptions): string {
@@ -485,25 +487,57 @@ export async function exportTransactionsStatement(options: StatementExportOption
       return { success: false, error: 'Popup blocked by browser' };
     }
 
-    // Generate local PDF file via expo-print
-    const { uri } = await Print.printToFileAsync({
-      html,
-      base64: false,
-    });
+    const { method = 'auto' } = options;
 
-    // Check if sharing is available on device
-    if (await Sharing.isAvailableAsync()) {
-      await Sharing.shareAsync(uri, {
-        mimeType: 'application/pdf',
-        dialogTitle: 'Save Transaction Statement',
-        UTI: 'com.adobe.pdf',
-      });
-      return { success: true };
-    } else {
-      // Fallback: direct print dialog
-      await Print.printAsync({ uri });
+    // 1. Direct Save as PDF / System Print Dialog (Android OS Save-as-PDF & physical print)
+    if (method === 'save') {
+      await Print.printAsync({ html });
       return { success: true };
     }
+
+    // 2. Share PDF flow
+    let shareSuccessful = false;
+    try {
+      // Generate with base64 so we can write into the app's scoped sandbox directory
+      const { base64, uri } = await Print.printToFileAsync({
+        html,
+        base64: true,
+      });
+
+      let shareUri = uri;
+
+      // On Android / Expo Go, sharing files from outside the app sandbox triggers:
+      // "Not allowed to read file under given URL". Writing to FileSystem.cacheDirectory
+      // places the PDF into the permitted scoped storage.
+      if (base64 && FileSystem.cacheDirectory) {
+        const cleanName = `Statement_${new Date().toISOString().slice(0, 10)}.pdf`;
+        const localPath = `${FileSystem.cacheDirectory}${cleanName}`;
+        await FileSystem.writeAsStringAsync(localPath, base64, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        shareUri = localPath;
+      }
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(shareUri, {
+          mimeType: 'application/pdf',
+          dialogTitle: 'Share Transaction Statement',
+          UTI: 'com.adobe.pdf',
+        });
+        shareSuccessful = true;
+        return { success: true };
+      }
+    } catch (shareErr) {
+      console.warn('Native share failed, falling back to system print/save dialog:', shareErr);
+    }
+
+    // 3. Fallback to system print & "Save as PDF" dialog if sharing failed or was unavailable
+    if (!shareSuccessful) {
+      await Print.printAsync({ html });
+      return { success: true };
+    }
+
+    return { success: true };
   } catch (err: any) {
     return { success: false, error: err?.message || 'Failed to export statement' };
   }

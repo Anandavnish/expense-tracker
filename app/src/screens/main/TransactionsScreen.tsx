@@ -12,6 +12,7 @@ import {
   Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { TextInput } from 'react-native-paper';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
@@ -49,6 +50,7 @@ const formatLocalDate = (d: Date) => {
 
 export const TransactionsScreen = () => {
   const insets = useSafeAreaInsets();
+  const navigation = useNavigation<any>();
   const { user } = useAuthStore();
   const { accent, colors } = useSettingsStore();
   const styles = useMemo(() => getStyles(colors), [colors]);
@@ -393,7 +395,7 @@ export const TransactionsScreen = () => {
     activeFiltersCount,
   ]);
 
-  const handleDownloadStatement = async () => {
+  const performExport = async (method: 'save' | 'share') => {
     try {
       setIsExporting(true);
       const catLabel =
@@ -413,6 +415,7 @@ export const TransactionsScreen = () => {
         searchQuery: searchQuery.trim() || undefined,
         transactions: filteredTransactions,
         accountMap,
+        method,
       });
 
       if (!result.success && result.error) {
@@ -423,6 +426,27 @@ export const TransactionsScreen = () => {
     } finally {
       setIsExporting(false);
     }
+  };
+
+  const handleDownloadStatement = () => {
+    Alert.alert(
+      'Export Statement',
+      `Export ${filteredTransactions.length} filtered transaction${filteredTransactions.length === 1 ? '' : 's'} as PDF:`,
+      [
+        {
+          text: 'Save as PDF (Direct)',
+          onPress: () => performExport('save'),
+        },
+        {
+          text: 'Share via Apps',
+          onPress: () => performExport('share'),
+        },
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+      ]
+    );
   };
 
   return (
@@ -1228,6 +1252,16 @@ export const TransactionsScreen = () => {
           onChange={handleCustomDateChange}
         />
       )}
+
+      {/* Floating Circular "+" Button (Identical to Dashboard) */}
+      <TouchableOpacity
+        onPress={() => navigation.navigate('AddTransaction')}
+        style={[styles.floatingAddBtn, { backgroundColor: accent.hex }]}
+        activeOpacity={0.7}
+        hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
+      >
+        <Ionicons name="add" size={30} color={colors.onPrimary} />
+      </TouchableOpacity>
     </View>
   );
 };
@@ -1460,7 +1494,7 @@ function getStyles(colors: ThemeColors) {
     },
     listContent: {
       paddingHorizontal: SPACING.lg,
-      paddingBottom: SPACING.xl * 2,
+      paddingBottom: 96,
       gap: SPACING.xs,
     },
     emptyContainer: {
@@ -1744,6 +1778,22 @@ function getStyles(colors: ThemeColors) {
       color: colors.textInverse,
       fontSize: 14,
       fontWeight: '700',
+    },
+    floatingAddBtn: {
+      position: 'absolute',
+      bottom: 24,
+      right: 20,
+      width: 56,
+      height: 56,
+      borderRadius: 28,
+      alignItems: 'center',
+      justifyContent: 'center',
+      elevation: 10,
+      zIndex: 999,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.4,
+      shadowRadius: 6,
     },
   });
 }

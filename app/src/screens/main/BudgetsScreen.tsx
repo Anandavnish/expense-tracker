@@ -16,7 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { ProgressBar, TextInput, ActivityIndicator } from 'react-native-paper';
 import * as Haptics from 'expo-haptics';
 import { useAuthStore } from '../../store/authStore';
-import { useFinanceStore } from '../../store/financeStore';
+import { useFinanceStore, calculateNetWorth } from '../../store/financeStore';
 import { useSettingsStore } from '../../store/settingsStore';
 import { COLORS, SPACING, TYPOGRAPHY } from '../../theme/tokens';
 import { InlineError } from '../../components/InlineError';
@@ -132,6 +132,14 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
     if (totalBudgetLimit <= 0) return 0;
     return Math.round((totalSpent / totalBudgetLimit) * 100);
   }, [totalSpent, totalBudgetLimit]);
+
+  // Total Net Worth ceiling calculation
+  const totalNetWorth = useMemo(() => {
+    return calculateNetWorth(accounts, borrows, transactions);
+  }, [accounts, borrows, transactions]);
+
+  const parsedLimit = parseFloat(limitAmount);
+  const isExceedingNetWorth = !isNaN(parsedLimit) && parsedLimit > totalNetWorth;
 
   // Days remaining in the selected period
   const daysLeftInPeriod = useMemo(() => {
@@ -361,15 +369,17 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
 
   const handlePresetSelect = (preset: number) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-    setLimitAmount(String(preset));
+    const val = totalNetWorth > 0 && preset > totalNetWorth ? totalNetWorth : preset;
+    setLimitAmount(String(val));
     setFetchedMeta(null);
   };
 
   const handleIncrementLimit = (increment: number) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     const current = parseFloat(limitAmount) || 0;
-    const nextVal = Math.max(0, current + increment);
-    setLimitAmount(String(nextVal));
+    const nextVal = current + increment;
+    const val = totalNetWorth > 0 && nextVal > totalNetWorth ? totalNetWorth : Math.max(0, nextVal);
+    setLimitAmount(String(val));
     setFetchedMeta(null);
   };
 
@@ -378,6 +388,17 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
     const numLimit = parseFloat(limitAmount);
     if (isNaN(numLimit) || numLimit <= 0) {
       setFormError('Please enter a valid monthly limit (e.g. 5000)');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
+      return;
+    }
+
+    // Strict Rule: Budget limit cannot exceed total net worth (must be less than or equal) for all types of budget
+    if (numLimit > totalNetWorth) {
+      const errorMsg =
+        totalNetWorth <= 0
+          ? `Budget limit (₹${numLimit.toLocaleString('en-IN')}) cannot exceed your total net worth (₹${totalNetWorth.toLocaleString('en-IN')}). Please increase your net worth or clear debts before setting budgets.`
+          : `Budget limit (₹${numLimit.toLocaleString('en-IN')}) cannot exceed your total net worth (₹${totalNetWorth.toLocaleString('en-IN')}).`;
+      setFormError(errorMsg);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
       return;
     }
@@ -480,7 +501,7 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
               { color: showForm ? colors.textSecondary : accent.hex },
             ]}
           >
-            {showForm ? 'Cancel' : '+ Set Budget'}
+            {showForm ? 'Cancel' : 'Set Budget'}
           </Text>
         </TouchableOpacity>
       </View>
@@ -1436,6 +1457,9 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '800',
   },
+  metricCenter: {
+    alignItems: 'center',
+  },
   metricRight: {
     alignItems: 'flex-end',
   },
@@ -1578,6 +1602,30 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    marginBottom: SPACING.xs,
+  },
+  limitLabelWithCap: {
+    flexDirection: 'column',
+  },
+  netWorthCapText: {
+    fontSize: 10,
+    fontWeight: '700',
+    marginTop: 1,
+  },
+  netWorthWarningBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 7,
+    marginBottom: SPACING.sm,
+  },
+  netWorthWarningText: {
+    fontSize: 11,
+    fontWeight: '600',
+    flex: 1,
   },
   fetchStatusRow: {
     flexDirection: 'row',

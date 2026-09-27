@@ -76,6 +76,41 @@ export const parseBorrowDetails = (
   };
 };
 
+export const calculateNetWorth = (
+  accounts: Account[],
+  borrows: Borrow[],
+  transactions?: Transaction[]
+): number => {
+  const liquidAccounts = accounts.filter(
+    (a) => a.type === 'bank' || a.type === 'cash'
+  );
+  const liquidTotal = liquidAccounts.reduce(
+    (sum, a) => sum + Number(a.current_balance || 0),
+    0
+  );
+
+  const pendingBorrows = borrows.filter((b) => b.status === 'pending');
+  let totalLent = 0;
+  let totalBorrowed = 0;
+
+  pendingBorrows.forEach((b) => {
+    const { type } = parseBorrowDetails(b, transactions);
+    if (type === 'borrowed') {
+      totalBorrowed += Number(b.amount || 0);
+    } else {
+      totalLent += Number(b.amount || 0);
+    }
+  });
+
+  const creditAccounts = accounts.filter((a) => a.type === 'credit_card');
+  const totalCreditDebt = creditAccounts.reduce(
+    (sum, a) => sum + Math.abs(Math.min(0, Number(a.current_balance || 0))),
+    0
+  );
+
+  return liquidTotal + totalLent - totalBorrowed - totalCreditDebt;
+};
+
 const sortAccountsByOrder = (accounts: Account[], orderIds: string[] | null): Account[] => {
   if (!orderIds || orderIds.length === 0) return accounts;
   const orderMap = new Map<string, number>();
@@ -892,6 +927,14 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
   },
 
   setBudgetOptimistic: async (budgetData) => {
+    // Enforce Rule: Budget limit cannot exceed total net worth (can be less or equal) for all types of budget
+    const netWorth = calculateNetWorth(get().accounts, get().borrows, get().transactions);
+    if (budgetData.monthly_limit > netWorth) {
+      const errorMsg = `Budget limit (₹${budgetData.monthly_limit.toLocaleString('en-IN')}) cannot exceed your total net worth (₹${Math.max(0, netWorth).toLocaleString('en-IN')}).`;
+      set({ inlineError: errorMsg });
+      return { success: false, error: errorMsg };
+    }
+
     const prevBudgets = [...get().budgets];
     const prevSummaries = [...get().budgetSummaries];
     const allTx = get().transactions;
