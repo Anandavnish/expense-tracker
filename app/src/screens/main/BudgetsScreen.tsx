@@ -51,6 +51,8 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
   const { user } = useAuthStore();
   const { accent, colors } = useSettingsStore();
   const {
+    accounts,
+    borrows,
     budgets,
     budgetSummaries,
     categories,
@@ -138,8 +140,6 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
     return calculateNetWorth(accounts, borrows, transactions);
   }, [accounts, borrows, transactions]);
 
-  const parsedLimit = parseFloat(limitAmount);
-  const isExceedingNetWorth = !isNaN(parsedLimit) && parsedLimit > totalNetWorth;
 
   // Days remaining in the selected period
   const daysLeftInPeriod = useMemo(() => {
