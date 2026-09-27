@@ -486,9 +486,60 @@ Foundational architecture build for a high-performance cross-platform personal f
   - `AccountDetailScreen.tsx`: Dynamic keyboard offset calculation on modal sheets (`Math.min(keyboardHeight * 0.75, 200)`) + `KeyboardAwareScrollView` in Edit Account and Pay Card Bill modals.
   - `TransactionDetailScreen.tsx`: Replaced outer `ScrollView` with `KeyboardAwareScrollView`, replaced nested `KeyboardAvoidingView` with a responsive layout, and added auto-scrolling on Amount, Date, and Note fields.
   - `LoginScreen.tsx` & `SignUpScreen.tsx`: Replaced non-responsive `KeyboardAvoidingView` with `KeyboardAwareScrollView` and auto-scrolling focus handlers.
+### 18. Borrows & Lending Architecture Redesign & Money Source Integration
+- [x] **Store & Database Ledger Synchronization (`financeStore.ts`)**:
+  - Implemented `addBorrowWithTransactionOptimistic`:
+    - Synchronously links new Lent/Borrowed entries to money source accounts (`accounts` table).
+    - When money is lent (`borrow_given`): generates an outflow transaction, deducting `amount` from the selected account via optimistic state & the database trigger `trigger_update_account_balance`.
+    - When money is borrowed (`borrow_taken`): generates an inflow transaction, crediting `amount` to the selected account.
+    - Accurately links `linked_transaction_id = tx.id` in both Supabase and Zustand.
+    - Also supports untracked personal IOUs (balance unaffected) if explicitly toggled by user.
+  - Implemented `settleBorrowWithTransactionOptimistic`:
+    - Full settlement dialog supporting deposit/deduction into user's Bank or Cash account.
+    - When lent money is repaid: generates an `income` repayment transaction, depositing money back into the selected account.
+    - When borrowed money is repaid: generates an `expense` repayment transaction, deducting money from the selected account.
+    - Updates borrow status to `'settled'`.
+  - Implemented `deleteBorrowOptimistic`:
+    - Deletes borrow record with optional restoration/deletion of the linked account transaction.
+  - Implemented `reopenBorrowOptimistic`:
+    - Restores a settled borrow to active pending status.
+- [x] **AddTransactionScreen Synchronization**:
+  - Updated `AddTransactionScreen.tsx` to call `addBorrowWithTransactionOptimistic` when `borrow_given` or `borrow_taken` is logged, ensuring borrows created from the general transaction logging flow are bidirectionally linked with their transactions instead of leaving `linked_transaction_id: null`.
+- [x] **Complete BorrowsScreen Visual & UI Redesign (`BorrowsScreen.tsx`)**:
+  - Fully dynamic theme synchronization: references `colors` and `accent` from `useSettingsStore()`, replacing all legacy static `COLORS`.
+  - Financial tokens adherence: uses `colors.lent` (`#F59E0B` Amber) and `colors.borrowed` (`#38BDF8` Sky blue) for tags, badges, icons, and amounts.
+  - Sleek top header bar with back navigation and `+ Add Entry` tactile button.
+  - 3-part executive metric overview:
+    - **To Receive** card (active lent sum & count)
+    - **To Pay** card (active borrowed sum & count)
+    - **Net Position** dynamic capsule banner (+ Net Receivable / − Net Payable / Settled).
+  - Search & filter command bar: live keyword search across person names and notes + horizontal filter pills (`All`, `Pending`, `Settled`, `Lent Only`, `Borrowed Only`).
+  - Interactive item cards:
+    - Person avatar circle with initial
+    - Direction badge (`LENT` / `BORROWED`)
+    - Status badge (`PENDING` / `SETTLED`)
+    - Connected Money Source tag with account name and type icon
+    - Tabular formatted amounts with strike-through when settled
+    - Quick actions: Settle Up, Reopen, Delete, and "View Transaction" navigation link.
+  - Interactive "Add Entry" modal sheet with live account picker, balance preview, and balance impact notice.
+  - Dedicated "Settle Up" modal dialog with account selector for repayment deposits/deductions.
+  - Delete confirmation dialog with option to revert the linked account transaction.
+  - Native calendar picker integration: Replaced static text inputs with interactive date selector cards invoking `@react-native-community/datetimepicker` in both Add Entry and Settle modals.
+  - Header spacing refinement: Distributed flex bounds with dedicated `headerTitleCol` and generous horizontal gaps (`gap: SPACING.md`), giving ample breathing room between screen titles and the `+ Add Entry` tactile button.
 - [x] **Verification**:
   - Full TypeScript compilation passes with 0 errors (`npx tsc --noEmit`).
   - Expo lint passes with 0 errors and 0 warnings (`npm run lint`).
+
+### 21. Budget Card Action Button & Title Wrapping Fix
+- [x] **Card Header Boundary & Delete Button Containment (`BudgetsScreen.tsx`)**:
+  - Resolved issue where `cardDeletePill` (trash button) overflowed outside the right border of budget cards on compact screens or with long category names.
+  - Constrained `cardHeaderTitleRow` and `catTitleLeft` with `flex: 1`, `marginRight: SPACING.xs`, and `minWidth: 0`.
+  - Added dedicated text column containers `cardHeaderTitleTextCol` and `catTitleTextCol` (`flex: 1, minWidth: 0`) with `numberOfLines={2}` and `flexShrink: 1` on `budgetCardName` and `categoryName`, allowing lengthy titles to cleanly wrap to the next line without encroaching on the action buttons.
+  - Added `numberOfLines={1}` to `categorySub` to constrain amount texts.
+  - Set `flexShrink: 0` on `cardHeaderRight`, `cardActionsCluster`, `cardEditPill`, and `cardDeletePill`, guaranteeing that the percentage badge, edit button, and delete trash button stay strictly anchored inside the card's right boundary.
+- [x] **Verification**:
+  - Full TypeScript compilation passes with 0 errors (`npx tsc --noEmit`).
+  - Expo lint passes with 0 errors and 0 warnings (`npx expo lint`).
 
 ---
 

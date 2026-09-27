@@ -9,6 +9,7 @@ import {
   Platform,
   UIManager,
   LayoutAnimation,
+  Modal,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
@@ -22,6 +23,7 @@ import { COLORS, SPACING, TYPOGRAPHY } from '../../theme/tokens';
 import { InlineError } from '../../components/InlineError';
 import { TactileButton } from '../../components/TactileButton';
 import { ReanimatedNumber } from '../../components/ReanimatedNumber';
+import { KeyboardAwareScrollView } from '../../components/KeyboardAwareScrollView';
 import { getCategoryIcon, getCategoryColor } from '../../utils/categoryIcons';
 import { supabase } from '../../services/supabase';
 
@@ -59,6 +61,7 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
     transactions,
     selectedMonth,
     setBudgetOptimistic,
+    deleteBudgetOptimistic,
     inlineError,
     setInlineError,
   } = useFinanceStore();
@@ -76,6 +79,8 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
   const [formError, setFormError] = useState<string | null>(null);
   const [isFetchingLimit, setIsFetchingLimit] = useState(false);
   const [fetchedMeta, setFetchedMeta] = useState<FetchedMeta | null>(null);
+  const [budgetToDelete, setBudgetToDelete] = useState<string | null>(null);
+  const [isDeletingBudget, setIsDeletingBudget] = useState(false);
 
   // Auto-handle edit params from route during render (avoids setState in effect)
   if (route?.params?.editCategory !== prevParamCategory) {
@@ -425,6 +430,46 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
     });
   };
 
+  const promptDeleteBudget = (categoryName: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    setBudgetToDelete(categoryName);
+  };
+
+  const handleConfirmDeleteBudget = async () => {
+    if (!budgetToDelete || !user) return;
+    setIsDeletingBudget(true);
+
+    const catTarget = budgetToDelete === 'Overall Budget' ? null : budgetToDelete;
+    const existing = budgetSummaries.find(
+      (b) => b.category === catTarget && b.month === selectedMonth
+    );
+
+    const deletedCategory = budgetToDelete;
+
+    if (existing) {
+      await deleteBudgetOptimistic(existing.budget_id, catTarget, selectedMonth, user.id);
+    }
+
+    delete draftLimits.current[deletedCategory];
+
+    if (selectedCategory === deletedCategory) {
+      setLimitAmount('');
+      setFetchedMeta(null);
+      handleCloseForm();
+    }
+
+    setIsDeletingBudget(false);
+    setBudgetToDelete(null);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+  };
+
+  const handleClearFormData = () => {
+    setLimitAmount('');
+    setFetchedMeta(null);
+    delete draftLimits.current[selectedCategory];
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+  };
+
   const getStatusColor = (pct: number) => {
     if (pct >= 100) return colors.alert;
     if (pct >= 80) return colors.warning;
@@ -511,9 +556,10 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
 
       <InlineError message={inlineError} onDismiss={() => setInlineError(null)} />
 
-      <ScrollView
+      <KeyboardAwareScrollView
         ref={scrollViewRef}
         contentContainerStyle={styles.scrollContent}
+        extraScrollHeight={80}
         showsVerticalScrollIndicator={false}
       >
         {/* Alive Budget Overview Cockpit */}
@@ -887,6 +933,11 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
                 setLimitAmount(text);
                 setFetchedMeta(null);
               }}
+              onFocus={() => {
+                setTimeout(() => {
+                  scrollViewRef.current?.scrollTo({ y: 550, animated: true });
+                }, 100);
+              }}
               placeholder="e.g. 5000"
               placeholderTextColor={colors.textMuted}
               keyboardType="decimal-pad"
@@ -1070,7 +1121,7 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
               </ScrollView>
             </View>
 
-            {/* Form Actions: Cancel (Collapse) + Save Budget */}
+            {/* Form Actions: Cancel + Delete/Clear + Save Budget */}
             <View style={styles.formActionsRow}>
               <TouchableOpacity
                 onPress={handleCloseForm}
@@ -1087,6 +1138,42 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
                   Cancel
                 </Text>
               </TouchableOpacity>
+
+              {isEditingExisting ? (
+                <TouchableOpacity
+                  onPress={() => promptDeleteBudget(selectedCategory)}
+                  style={[
+                    styles.deleteFormBtn,
+                    {
+                      borderColor: colors.alert + '45',
+                      backgroundColor: colors.alertMuted,
+                    },
+                  ]}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="trash-outline" size={14} color={colors.alert} />
+                  <Text style={[styles.deleteFormBtnText, { color: colors.alert }]}>
+                    Delete
+                  </Text>
+                </TouchableOpacity>
+              ) : limitAmount !== '' ? (
+                <TouchableOpacity
+                  onPress={handleClearFormData}
+                  style={[
+                    styles.clearFormBtn,
+                    {
+                      borderColor: colors.border,
+                      backgroundColor: colors.surfaceLight,
+                    },
+                  ]}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="backspace-outline" size={14} color={colors.textSecondary} />
+                  <Text style={[styles.clearFormBtnText, { color: colors.textSecondary }]}>
+                    Clear
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
 
               <TactileButton
                 onPress={handleSaveBudget}
@@ -1129,9 +1216,14 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
                 >
                   <Ionicons name="pie-chart" size={17} color={accent.hex} />
                 </View>
-                <Text style={[styles.budgetCardName, { color: colors.textPrimary }]}>
-                  Overall Budget
-                </Text>
+                <View style={styles.cardHeaderTitleTextCol}>
+                  <Text
+                    style={[styles.budgetCardName, { color: colors.textPrimary }]}
+                    numberOfLines={2}
+                  >
+                    Overall Budget
+                  </Text>
+                </View>
               </View>
               <View style={styles.cardHeaderRight}>
                 <Text
@@ -1146,19 +1238,37 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
                 >
                   {Math.round(Number(overallSummary.spent_percentage))}% spent
                 </Text>
-                <View
-                  style={[
-                    styles.cardEditPill,
-                    {
-                      borderColor: accent.hex,
-                      backgroundColor: colors.surfaceLight,
-                    },
-                  ]}
-                >
-                  <Ionicons name="pencil-outline" size={12} color={accent.hex} />
-                  <Text style={[styles.cardEditPillText, { color: accent.hex }]}>
-                    Edit
-                  </Text>
+                <View style={styles.cardActionsCluster}>
+                  <View
+                    style={[
+                      styles.cardEditPill,
+                      {
+                        borderColor: accent.hex,
+                        backgroundColor: colors.surfaceLight,
+                      },
+                    ]}
+                  >
+                    <Ionicons name="pencil-outline" size={12} color={accent.hex} />
+                    <Text style={[styles.cardEditPillText, { color: accent.hex }]}>
+                      Edit
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      promptDeleteBudget('Overall Budget');
+                    }}
+                    style={[
+                      styles.cardDeletePill,
+                      {
+                        borderColor: colors.alert + '40',
+                        backgroundColor: colors.alertMuted,
+                      },
+                    ]}
+                    hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
+                  >
+                    <Ionicons name="trash-outline" size={12} color={colors.alert} />
+                  </TouchableOpacity>
                 </View>
               </View>
             </View>
@@ -1296,11 +1406,17 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
                     >
                       <Ionicons name={iconName} size={15} color={colorToken.text} />
                     </View>
-                    <View>
-                      <Text style={[styles.categoryName, { color: colors.textPrimary }]}>
+                    <View style={styles.catTitleTextCol}>
+                      <Text
+                        style={[styles.categoryName, { color: colors.textPrimary }]}
+                        numberOfLines={2}
+                      >
                         {catSummary.category}
                       </Text>
-                      <Text style={[styles.categorySub, { color: colors.textMuted }]}>
+                      <Text
+                        style={[styles.categorySub, { color: colors.textMuted }]}
+                        numberOfLines={1}
+                      >
                         ₹{Number(catSummary.spent).toLocaleString('en-IN')} of ₹
                         {Number(catSummary.monthly_limit).toLocaleString('en-IN')}
                       </Text>
@@ -1317,19 +1433,37 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
                     >
                       {Math.round(Number(catSummary.spent_percentage))}%
                     </Text>
-                    <View
-                      style={[
-                        styles.cardEditPill,
-                        {
-                          borderColor: accent.hex,
-                          backgroundColor: colors.surfaceLight,
-                        },
-                      ]}
-                    >
-                      <Ionicons name="pencil-outline" size={11} color={accent.hex} />
-                      <Text style={[styles.cardEditPillText, { color: accent.hex }]}>
-                        Edit
-                      </Text>
+                    <View style={styles.cardActionsCluster}>
+                      <View
+                        style={[
+                          styles.cardEditPill,
+                          {
+                            borderColor: accent.hex,
+                            backgroundColor: colors.surfaceLight,
+                          },
+                        ]}
+                      >
+                        <Ionicons name="pencil-outline" size={11} color={accent.hex} />
+                        <Text style={[styles.cardEditPillText, { color: accent.hex }]}>
+                          Edit
+                        </Text>
+                      </View>
+                      <TouchableOpacity
+                        onPress={(e) => {
+                          e.stopPropagation();
+                          promptDeleteBudget(catName);
+                        }}
+                        style={[
+                          styles.cardDeletePill,
+                          {
+                            borderColor: colors.alert + '40',
+                            backgroundColor: colors.alertMuted,
+                          },
+                        ]}
+                        hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
+                      >
+                        <Ionicons name="trash-outline" size={11} color={colors.alert} />
+                      </TouchableOpacity>
                     </View>
                   </View>
                 </View>
@@ -1401,7 +1535,59 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
             </View>
           </TouchableOpacity>
         )}
-      </ScrollView>
+      </KeyboardAwareScrollView>
+
+      {/* Delete Budget Confirmation Modal */}
+      <Modal
+        visible={!!budgetToDelete}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={() => !isDeletingBudget && setBudgetToDelete(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.deleteModalContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <View style={[styles.deleteIconBubble, { backgroundColor: colors.alertMuted }]}>
+              <Ionicons name="trash-outline" size={26} color={colors.alert} />
+            </View>
+            <Text style={[styles.deleteModalTitle, { color: colors.textPrimary }]}>
+              Delete Budget?
+            </Text>
+            <Text style={[styles.deleteModalDescription, { color: colors.textSecondary }]}>
+              Are you sure you want to remove the monthly spending limit for{' '}
+              <Text style={{ fontWeight: '700', color: colors.textPrimary }}>
+                {budgetToDelete}
+              </Text>
+              ? This will clear the budget card for {selectedMonth}.
+            </Text>
+            <View style={styles.deleteModalActionsRow}>
+              <TouchableOpacity
+                onPress={() => setBudgetToDelete(null)}
+                disabled={isDeletingBudget}
+                style={[
+                  styles.deleteModalCancelBtn,
+                  { borderColor: colors.border, backgroundColor: colors.surfaceLight },
+                ]}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.deleteModalCancelText, { color: colors.textSecondary }]}>
+                  Cancel
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={handleConfirmDeleteBudget}
+                disabled={isDeletingBudget}
+                style={[styles.deleteModalConfirmBtn, { backgroundColor: colors.alert }]}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.deleteModalConfirmText, { color: colors.textInverse }]}>
+                  {isDeletingBudget ? 'Deleting...' : 'Delete Budget'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -1785,9 +1971,16 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.md,
   },
   cardHeaderTitleRow: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: SPACING.sm,
+    marginRight: SPACING.xs,
+    minWidth: 0,
+  },
+  cardHeaderTitleTextCol: {
+    flex: 1,
+    minWidth: 0,
   },
   cardHeaderIconCircle: {
     width: 32,
@@ -1795,19 +1988,23 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
   },
   budgetCardName: {
     fontSize: 16,
     fontWeight: '700',
+    flexShrink: 1,
   },
   cardHeaderRight: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: SPACING.sm,
+    gap: SPACING.xs,
+    flexShrink: 0,
   },
   pctBadgeText: {
     fontSize: 12,
     fontWeight: '700',
+    flexShrink: 0,
   },
   cardEditPill: {
     flexDirection: 'row',
@@ -1817,6 +2014,7 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 6,
     borderWidth: 1,
+    flexShrink: 0,
   },
   cardEditPillText: {
     fontSize: 11,
@@ -1869,9 +2067,16 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.sm,
   },
   catTitleLeft: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: SPACING.sm,
+    marginRight: SPACING.xs,
+    minWidth: 0,
+  },
+  catTitleTextCol: {
+    flex: 1,
+    minWidth: 0,
   },
   catIconBubble: {
     width: 32,
@@ -1879,10 +2084,12 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
   },
   categoryName: {
     fontSize: 14,
     fontWeight: '700',
+    flexShrink: 1,
   },
   categorySub: {
     fontSize: 11,
@@ -1891,6 +2098,7 @@ const styles = StyleSheet.create({
   categoryPct: {
     fontSize: 12,
     fontWeight: '700',
+    flexShrink: 0,
   },
   catProgressBar: {
     height: 6,
@@ -1941,6 +2149,113 @@ const styles = StyleSheet.create({
   },
   emptyActionText: {
     fontSize: 12,
+    fontWeight: '700',
+  },
+  cardActionsCluster: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexShrink: 0,
+  },
+  cardDeletePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 7,
+    paddingVertical: 4,
+    borderRadius: 6,
+    borderWidth: 1,
+    flexShrink: 0,
+  },
+  deleteFormBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingVertical: 12,
+  },
+  deleteFormBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  clearFormBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingVertical: 12,
+  },
+  clearFormBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: SPACING.lg,
+  },
+  deleteModalContainer: {
+    width: '100%',
+    maxWidth: 360,
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: SPACING.xl,
+    alignItems: 'center',
+  },
+  deleteIconBubble: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: SPACING.md,
+  },
+  deleteModalTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    marginBottom: SPACING.xs,
+    textAlign: 'center',
+  },
+  deleteModalDescription: {
+    fontSize: 13,
+    lineHeight: 19,
+    textAlign: 'center',
+    marginBottom: SPACING.xl,
+  },
+  deleteModalActionsRow: {
+    flexDirection: 'row',
+    gap: SPACING.md,
+    width: '100%',
+  },
+  deleteModalCancelBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  deleteModalCancelText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  deleteModalConfirmBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  deleteModalConfirmText: {
+    fontSize: 13,
     fontWeight: '700',
   },
 });
