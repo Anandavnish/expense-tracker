@@ -77,13 +77,14 @@ Foundational architecture build for a high-performance cross-platform personal f
 - [x] **Account Creation & Presets Schema Fix (`financeStore.ts` & `DashboardScreen.tsx`)**:
   - Resolved `Could not find the 'bank_preset' column of 'accounts' in the schema cache` error by sanitizing database payloads in `createAccountOptimistic` and `updateAccountOptimistic` to send strictly valid PostgreSQL table columns (`user_id`, `name`, `type`, `current_balance`, `credit_limit`).
   - Seamlessly embedded bank presets and card issuers into `name` (`SBI • Salary`, `HDFC`, etc.) with intelligent two-way parsing in `parseAccountDetails` so icons and names work across all devices without requiring database schema alterations.
-- [x] **TransactionsScreen Rebuilt (Unified Search, Segmented Filters, Financial Metrics, & Modal Sheet)**:
+- [x] **TransactionsScreen Rebuilt (Unified Search, Segmented Filters, Financial Metrics, Modal Sheet, & Statement PDF Export)**:
   - *Unified Search Bar*: Added live search input supporting notes, merchants, people, categories, amounts, and source accounts with clear button.
-  - *Dedicated Filter Modal Trigger*: Replaced 3 stacked horizontal scrollbars with a compact filter trigger button with active filter badge counter.
-  - *1-Tap Type Segment Strip*: Clean segmented control for `All`, `Expense` (coral), `Income` (accent), `Lent` (warning), and `Borrowed` (purple).
-  - *Interactive Quick-Filter Pills*: Single-line scrollable bar showing active date range, selected account, active categories with `✕` dismiss pills, and a 1-tap `Reset` button.
+  - *Dedicated Filter Modal Trigger*: Compact filter trigger button with active filter badge counter.
+  - *1-Tap Type Segment Strip*: Clean segmented control for `All`, `Expense`, `Income`, `Lent`, and `Borrowed` with unified active styling matching `All` tab (`surfaceLight` background, `border`, `textPrimary` bold text) across all tabs.
+  - *Interactive Quick-Filter Pills*: Single-line scrollable bar showing active date range, selected account, and active categories with `✕` dismiss pills (removed redundant duplicate type pill).
   - *Real-time Financial Summary Strip*: Compact inline bar displaying live totals for filtered results: `Total Spent: ₹X`, `Total Income: ₹Y`, `Net Lent: ₹Z`, and total matching records.
   - *Comprehensive Filter Sheet Modal*: Bottom sheet modal supporting Date Range presets, custom date pickers with `@react-native-community/datetimepicker`, Money Source account selection, and multi-select Category pills with icons from `categoryIcons.ts`.
+  - *Statement PDF Export Engine (`statementExport.ts`)*: Added download header icon button invoking cross-platform PDF generation (`expo-print`) and native share/save sheet (`expo-sharing`). Generates a fintech-grade A4 statement containing user account info (email, user ID), active filter tags, detailed indexed transaction ledger with timestamp and category badges, export datetime, and comprehensive financial breakdown totals at the end.
 - [x] **SettingsScreen Added**:
   - *Theme Selector*: Dark / Light / System mode switcher persisted to AsyncStorage via `settingsStore`.
   - *Accent Palette Picker*: 6 swatches (Emerald `#00D09C`, Cyan `#06B6D4`, Amber `#F59E0B`, Rose `#F43F5E`, Blue `#3B82F6`, Violet `#8B5CF6`).

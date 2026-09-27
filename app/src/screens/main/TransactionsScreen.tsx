@@ -8,13 +8,17 @@ import {
   FlatList,
   Modal,
   Platform,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { TextInput } from 'react-native-paper';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import { useAuthStore } from '../../store/authStore';
 import { useFinanceStore } from '../../store/financeStore';
 import { useSettingsStore } from '../../store/settingsStore';
+import { exportTransactionsStatement } from '../../services/statementExport';
 import { SPACING, TYPOGRAPHY, ThemeColors } from '../../theme/tokens';
 import { Transaction, TransactionType } from '../../types/database';
 import { TransactionRow } from '../../components/TransactionRow';
@@ -45,9 +49,13 @@ const formatLocalDate = (d: Date) => {
 
 export const TransactionsScreen = () => {
   const insets = useSafeAreaInsets();
+  const { user } = useAuthStore();
   const { accent, colors } = useSettingsStore();
   const styles = useMemo(() => getStyles(colors), [colors]);
   const { transactions, accounts, categories, selectedMonth } = useFinanceStore();
+
+  // Export State
+  const [isExporting, setIsExporting] = useState(false);
 
   // Search State with 150ms debounce for lag-free typing & filtering
   const [searchQuery, setSearchQuery] = useState('');
@@ -385,6 +393,38 @@ export const TransactionsScreen = () => {
     activeFiltersCount,
   ]);
 
+  const handleDownloadStatement = async () => {
+    try {
+      setIsExporting(true);
+      const catLabel =
+        selectedCategories.length === 0
+          ? 'All Categories'
+          : selectedCategories.length === 1
+          ? selectedCategories[0]
+          : `${selectedCategories.length} Categories`;
+
+      const result = await exportTransactionsStatement({
+        userEmail: user?.email || 'Account Holder',
+        userId: user?.id,
+        dateFilterLabel,
+        accountFilterLabel: selectedAccountId ? accountMap[selectedAccountId] || 'Selected Account' : 'All Accounts',
+        typeFilterLabel,
+        categoriesFilterLabel: catLabel,
+        searchQuery: searchQuery.trim() || undefined,
+        transactions: filteredTransactions,
+        accountMap,
+      });
+
+      if (!result.success && result.error) {
+        Alert.alert('Export Notice', result.error);
+      }
+    } catch (err: any) {
+      Alert.alert('Export Error', err?.message || 'Failed to download statement');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   return (
     <View style={[styles.safeArea, { paddingTop: insets.top, backgroundColor: colors.background }]}>
       {/* 1. Header Bar */}
@@ -398,16 +438,35 @@ export const TransactionsScreen = () => {
           </View>
         </View>
 
-        {activeFiltersCount > 0 && (
+        <View style={styles.headerRightActions}>
+          {activeFiltersCount > 0 && (
+            <TouchableOpacity
+              onPress={resetFilters}
+              style={styles.clearAllHeaderBtn}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name="refresh-outline" size={14} color={accent.hex} />
+              <Text style={[styles.clearAllHeaderText, { color: accent.hex }]}>Reset</Text>
+            </TouchableOpacity>
+          )}
+
           <TouchableOpacity
-            onPress={resetFilters}
-            style={styles.clearAllHeaderBtn}
+            onPress={handleDownloadStatement}
+            style={[
+              styles.downloadHeaderBtn,
+              { backgroundColor: colors.surfaceLight, borderColor: colors.border },
+            ]}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            disabled={isExporting}
+            accessibilityLabel="Download Statement"
           >
-            <Ionicons name="refresh-outline" size={14} color={accent.hex} />
-            <Text style={[styles.clearAllHeaderText, { color: accent.hex }]}>Reset</Text>
+            {isExporting ? (
+              <ActivityIndicator size="small" color={accent.hex} />
+            ) : (
+              <Ionicons name="download-outline" size={16} color={colors.textPrimary} />
+            )}
           </TouchableOpacity>
-        )}
+        </View>
       </View>
 
       {/* 2. Unified Search & Filter Command Bar */}
@@ -483,14 +542,12 @@ export const TransactionsScreen = () => {
               style={[
                 styles.typeSegmentTab,
                 active && styles.typeSegmentTabActive,
-                active && !isAll && { borderColor: (item as any).color + '60' },
               ]}
             >
               <Text
                 style={[
                   styles.typeSegmentText,
                   active && styles.typeSegmentTextActive,
-                  active && !isAll && { color: (item as any).color },
                 ]}
               >
                 {item.label}
@@ -565,45 +622,6 @@ export const TransactionsScreen = () => {
             {selectedAccountId ? (
               <TouchableOpacity
                 onPress={() => setSelectedAccountId(null)}
-                hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-              >
-                <Ionicons name="close-circle" size={13} color={accent.hex} />
-              </TouchableOpacity>
-            ) : (
-              <Ionicons name="chevron-down" size={11} color={colors.textMuted} />
-            )}
-          </TouchableOpacity>
-
-          {/* Transaction Type Filter Pill */}
-          <TouchableOpacity
-            onPress={() => setFilterModalSection('type')}
-            style={[
-              styles.quickPill,
-              selectedTypes.length > 0 && {
-                borderColor: accent.hex,
-                backgroundColor: accent.hex + '18',
-              },
-            ]}
-          >
-            <Ionicons
-              name="swap-horizontal-outline"
-              size={13}
-              color={selectedTypes.length > 0 ? accent.hex : colors.textSecondary}
-            />
-            <Text
-              style={[
-                styles.quickPillText,
-                selectedTypes.length > 0 && { color: accent.hex, fontWeight: '700' },
-              ]}
-            >
-              {typeFilterLabel}
-            </Text>
-            {selectedTypes.length > 0 ? (
-              <TouchableOpacity
-                onPress={() => {
-                  setSelectedTypes([]);
-                  setCategoryTypeTab('all');
-                }}
                 hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
               >
                 <Ionicons name="close-circle" size={13} color={accent.hex} />
@@ -1262,6 +1280,19 @@ function getStyles(colors: ThemeColors) {
     clearAllHeaderText: {
       fontSize: 12,
       fontWeight: '700',
+    },
+    headerRightActions: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    downloadHeaderBtn: {
+      width: 32,
+      height: 32,
+      borderRadius: 8,
+      borderWidth: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     searchRow: {
       flexDirection: 'row',
