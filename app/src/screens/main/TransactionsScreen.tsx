@@ -48,9 +48,14 @@ const formatLocalDate = (d: Date) => {
   return `${year}-${month}-${day}`;
 };
 
-export const TransactionsScreen = () => {
+interface TransactionsScreenProps {
+  navigation?: any;
+}
+
+export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({ navigation: propNav }) => {
   const insets = useSafeAreaInsets();
-  const navigation = useNavigation<any>();
+  const hookNav = useNavigation<any>();
+  const navigation = propNav || hookNav;
   const { user } = useAuthStore();
   const { accent, colors } = useSettingsStore();
   const styles = useMemo(() => getStyles(colors), [colors]);
@@ -1259,6 +1264,8 @@ export const TransactionsScreen = () => {
         style={[styles.floatingAddBtn, { backgroundColor: accent.hex }]}
         activeOpacity={0.7}
         hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
+        accessibilityLabel="Add Transaction"
+        accessibilityRole="button"
       >
         <Ionicons name="add" size={30} color={colors.onPrimary} />
       </TouchableOpacity>
@@ -1790,7 +1797,7 @@ function getStyles(colors: ThemeColors) {
       justifyContent: 'center',
       elevation: 10,
       zIndex: 999,
-      shadowColor: '#000',
+      shadowColor: colors.shadow,
       shadowOffset: { width: 0, height: 4 },
       shadowOpacity: 0.4,
       shadowRadius: 6,

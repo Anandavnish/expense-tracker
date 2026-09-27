@@ -405,6 +405,11 @@ Foundational architecture build for a high-performance cross-platform personal f
 - [x] **Complete Hardcoded Hex Purge (`DashboardScreen.tsx`)**:
   - Purged all remaining hardcoded hex values in `DashboardScreen.tsx` (`#D97706` warning icons, `#000` card shadows, `#fff` active border, `#FEF3C7` / `#F59E0B` / `#92400E` sync pills).
   - Fully bound to dynamic design tokens (`colors.warning`, `colors.warningMuted`, `colors.shadow`, `colors.textPrimary`).
+- [x] **Transactions Screen Floating Plus Action Button (`TransactionsScreen.tsx`)**:
+  - Integrated the identical floating circular `+` button (FAB) from the Dashboard/Home screen into `TransactionsScreen.tsx` (`styles.floatingAddBtn`), pinned to the bottom-right corner (`bottom: 24`, `right: 20`, `elevation: 10`, `zIndex: 999`).
+  - Directly triggers `navigation.navigate('AddTransaction')` with tactile opacity response (`activeOpacity={0.7}`) and generous touch hitSlop (`16px`).
+  - Styled with dynamic accent background (`accent.hex`), high-contrast icon (`colors.onPrimary`), theme shadow token (`colors.shadow`), and screen-reader accessibility labels (`accessibilityLabel="Add Transaction"`, `accessibilityRole="button"`).
+  - Adjusted `listContent` bottom padding (`paddingBottom: 96`) so transactions list items scroll smoothly without being obstructed by the floating button.
 - [x] **Verification**:
   - Full TypeScript compilation passes with 0 errors (`npx tsc --noEmit`).
   - Expo lint passes with 0 errors and 0 warnings (`npx expo lint`).

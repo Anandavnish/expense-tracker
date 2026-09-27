@@ -140,6 +140,9 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
     return calculateNetWorth(accounts, borrows, transactions);
   }, [accounts, borrows, transactions]);
 
+  const parsedLimit = parseFloat(limitAmount);
+  const isExceedingNetWorth = !isNaN(parsedLimit) && parsedLimit > totalNetWorth;
+
 
   // Days remaining in the selected period
   const daysLeftInPeriod = useMemo(() => {
@@ -832,9 +835,19 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
 
             {/* Limit Input & Auto-Fetch Indicators */}
             <View style={styles.limitInputHeader}>
-              <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
-                MONTHLY LIMIT (₹)
-              </Text>
+              <View style={styles.limitLabelWithCap}>
+                <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
+                  MONTHLY LIMIT (₹)
+                </Text>
+                <Text
+                  style={[
+                    styles.netWorthCapText,
+                    { color: totalNetWorth <= 0 ? colors.alert : colors.textMuted },
+                  ]}
+                >
+                  Net Worth Cap: ₹{totalNetWorth.toLocaleString('en-IN')}
+                </Text>
+              </View>
 
               {/* Auto-Fetch Status Indicator */}
               {isFetchingLimit ? (
@@ -878,8 +891,8 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
               placeholderTextColor={colors.textMuted}
               keyboardType="decimal-pad"
               mode="outlined"
-              outlineColor={colors.border}
-              activeOutlineColor={accent.hex}
+              outlineColor={isExceedingNetWorth ? colors.alert : colors.border}
+              activeOutlineColor={isExceedingNetWorth ? colors.alert : accent.hex}
               textColor={colors.textPrimary}
               style={[
                 styles.limitInput,
@@ -888,7 +901,7 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
               left={
                 <TextInput.Affix
                   text="₹"
-                  textStyle={{ color: accent.hex, fontWeight: '700' }}
+                  textStyle={{ color: isExceedingNetWorth ? colors.alert : accent.hex, fontWeight: '700' }}
                 />
               }
               right={
@@ -905,6 +918,24 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
               }
             />
 
+            {/* Real-time Net Worth Rule Warning */}
+            {isExceedingNetWorth && (
+              <View
+                style={[
+                  styles.netWorthWarningBox,
+                  {
+                    backgroundColor: colors.alertMuted,
+                    borderColor: colors.alert,
+                  },
+                ]}
+              >
+                <Ionicons name="alert-circle" size={15} color={colors.alert} />
+                <Text style={[styles.netWorthWarningText, { color: colors.alert }]}>
+                  Limit cannot exceed your total net worth (₹{Math.max(0, totalNetWorth).toLocaleString('en-IN')})
+                </Text>
+              </View>
+            )}
+
             {/* Quick Amount Suggestion Chips */}
             <View style={styles.presetsWrapper}>
               <Text style={[styles.presetsLabel, { color: colors.textMuted }]}>
@@ -915,6 +946,40 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.presetsScroll}
               >
+                {totalNetWorth > 0 && (
+                  <TouchableOpacity
+                    onPress={() => handlePresetSelect(totalNetWorth)}
+                    style={[
+                      styles.presetChip,
+                      {
+                        backgroundColor:
+                          limitAmount === String(totalNetWorth)
+                            ? accent.muted
+                            : colors.surfaceLight,
+                        borderColor:
+                          limitAmount === String(totalNetWorth)
+                            ? accent.hex
+                            : colors.border,
+                      },
+                    ]}
+                    activeOpacity={0.7}
+                  >
+                    <Text
+                      style={[
+                        styles.presetChipText,
+                        {
+                          color:
+                            limitAmount === String(totalNetWorth)
+                              ? accent.hex
+                              : colors.textPrimary,
+                          fontWeight: '700',
+                        },
+                      ]}
+                    >
+                      Max Net Worth (₹{totalNetWorth.toLocaleString('en-IN')})
+                    </Text>
+                  </TouchableOpacity>
+                )}
                 {(selectedCategory === 'Overall Budget'
                   ? [10000, 20000, 30000, 50000]
                   : [1000, 2500, 5000, 10000]
