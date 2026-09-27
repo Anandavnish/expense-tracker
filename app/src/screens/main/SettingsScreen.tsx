@@ -1,14 +1,20 @@
-import React from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  Modal,
+  Platform,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useAuthStore } from '../../store/authStore';
+import { useFinanceStore } from '../../store/financeStore';
 import {
   useSettingsStore,
   isWallpaperThemeSupported,
@@ -19,6 +25,8 @@ import {
   ThemeStyleId,
   LOCKED_FINANCIAL_TOKENS,
 } from '../../theme/tokens';
+import { TransactionType } from '../../types/database';
+import { exportTransactionsCsv, filterTransactionsForCsv } from '../../services/csvExport';
 import { TactileButton } from '../../components/TactileButton';
 
 interface SettingsScreenProps {
@@ -36,6 +44,96 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) =>
     setThemeMode,
     setThemeStyle,
   } = useSettingsStore();
+
+  const { transactions, accounts, categories } = useFinanceStore();
+
+  // CSV Export Modal & Filter States
+  const [csvModalVisible, setCsvModalVisible] = useState(false);
+  const [csvDatePreset, setCsvDatePreset] = useState<'all' | 'this_month' | 'this_year' | 'last_30_days' | 'custom'>('all');
+  const [csvCustomFrom, setCsvCustomFrom] = useState('');
+  const [csvCustomTo, setCsvCustomTo] = useState('');
+  const [datePickerTarget, setDatePickerTarget] = useState<'from' | 'to' | null>(null);
+  const [csvSelectedAccountId, setCsvSelectedAccountId] = useState<string | null>(null);
+  const [csvSelectedTypes, setCsvSelectedTypes] = useState<TransactionType[]>([]);
+  const [csvSelectedCategories, setCsvSelectedCategories] = useState<string[]>([]);
+  const [isExportingCsv, setIsExportingCsv] = useState(false);
+
+  const accountMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    accounts.forEach((acc) => {
+      map[acc.id] = acc.name;
+    });
+    return map;
+  }, [accounts]);
+
+  const matchingCsvTransactions = useMemo(() => {
+    return filterTransactionsForCsv({
+      datePreset: csvDatePreset,
+      customFrom: csvCustomFrom || undefined,
+      customTo: csvCustomTo || undefined,
+      selectedAccountId: csvSelectedAccountId,
+      selectedTypes: csvSelectedTypes,
+      selectedCategories: csvSelectedCategories,
+      transactions,
+      accountMap,
+    });
+  }, [
+    csvDatePreset,
+    csvCustomFrom,
+    csvCustomTo,
+    csvSelectedAccountId,
+    csvSelectedTypes,
+    csvSelectedCategories,
+    transactions,
+    accountMap,
+  ]);
+
+  const handleDateChange = (event: DateTimePickerEvent, selectedDate?: Date) => {
+    if (Platform.OS === 'android') {
+      setDatePickerTarget(null);
+    }
+    if (event.type === 'set' && selectedDate) {
+      const year = selectedDate.getFullYear();
+      const month = String(selectedDate.getMonth() + 1).padStart(2, '0');
+      const day = String(selectedDate.getDate()).padStart(2, '0');
+      const formatted = `${year}-${month}-${day}`;
+      if (datePickerTarget === 'from') {
+        setCsvCustomFrom(formatted);
+      } else if (datePickerTarget === 'to') {
+        setCsvCustomTo(formatted);
+      }
+    }
+  };
+
+  const handleExportCsv = async () => {
+    if (matchingCsvTransactions.length === 0) {
+      Alert.alert('No Data', 'No transactions match your selected filter criteria.');
+      return;
+    }
+    try {
+      setIsExportingCsv(true);
+      const res = await exportTransactionsCsv({
+        datePreset: csvDatePreset,
+        customFrom: csvCustomFrom || undefined,
+        customTo: csvCustomTo || undefined,
+        selectedAccountId: csvSelectedAccountId,
+        selectedTypes: csvSelectedTypes,
+        selectedCategories: csvSelectedCategories,
+        transactions,
+        accountMap,
+      });
+
+      if (!res.success && res.error) {
+        Alert.alert('Export Error', res.error);
+      } else if (res.success) {
+        setCsvModalVisible(false);
+      }
+    } catch (err: any) {
+      Alert.alert('Export Error', err?.message || 'Failed to export CSV');
+    } finally {
+      setIsExportingCsv(false);
+    }
+  };
 
   const isDynamicSupported = isWallpaperThemeSupported();
 
@@ -284,12 +382,13 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) =>
           </View>
         </View>
 
-        {/* Future Features Placeholders */}
+        {/* Features & Integrations */}
         <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>FEATURES & INTEGRATIONS</Text>
 
+          {/* AI Overview (BYOK) */}
           <View style={styles.placeholderRow}>
-            <View>
+            <View style={styles.placeholderTextCol}>
               <Text style={[styles.placeholderTitle, { color: colors.textPrimary }]}>AI Overview (BYOK)</Text>
               <Text style={[styles.placeholderSub, { color: colors.textMuted }]}>
                 Bring Your Own Key for Gemini financial summaries
@@ -302,33 +401,54 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) =>
 
           <View style={[styles.divider, { backgroundColor: colors.border }]} />
 
-          <View style={styles.placeholderRow}>
-            <View>
-              <Text style={[styles.placeholderTitle, { color: colors.textPrimary }]}>Export Data (CSV)</Text>
+          {/* Export Data (CSV) - LIVE with Filter Modal */}
+          <TouchableOpacity
+            onPress={() => setCsvModalVisible(true)}
+            style={styles.placeholderRow}
+            activeOpacity={0.7}
+          >
+            <View style={styles.placeholderTextCol}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Text style={[styles.placeholderTitle, { color: colors.textPrimary }]}>Export Data (CSV)</Text>
+                <Ionicons name="document-text-outline" size={14} color={colors.primary} />
+              </View>
               <Text style={[styles.placeholderSub, { color: colors.textMuted }]}>
-                Export transaction and budget history
+                Custom date range (any month/year), accounts, types & categories
               </Text>
             </View>
-            <View style={[styles.soonBadge, { backgroundColor: colors.surfaceVariant, borderColor: colors.border }]}>
-              <Text style={[styles.soonBadgeText, { color: colors.textMuted }]}>COMING SOON</Text>
+            <View style={[styles.actionBadge, { backgroundColor: colors.primaryContainer, borderColor: colors.primary }]}>
+              <Ionicons name="download-outline" size={12} color={colors.primary} style={{ marginRight: 3 }} />
+              <Text style={[styles.actionBadgeText, { color: colors.primary }]}>EXPORT</Text>
             </View>
-          </View>
+          </TouchableOpacity>
 
           <View style={[styles.divider, { backgroundColor: colors.border }]} />
 
-          <View style={styles.placeholderRow}>
-            <View>
-              <Text style={[styles.placeholderTitle, { color: colors.textPrimary }]}>Manage Categories</Text>
+          {/* Manage Categories - Direct Navigation */}
+          <TouchableOpacity
+            onPress={() =>
+              navigation.navigate('MainTabs', {
+                screen: 'Dashboard',
+                params: { openManageCategories: true },
+              })
+            }
+            style={styles.placeholderRow}
+            activeOpacity={0.7}
+          >
+            <View style={styles.placeholderTextCol}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Text style={[styles.placeholderTitle, { color: colors.textPrimary }]}>Manage Categories</Text>
+                <Ionicons name="pricetags-outline" size={14} color={colors.primary} />
+              </View>
               <Text style={[styles.placeholderSub, { color: colors.textMuted }]}>
-                Custom categories available via Dashboard settings
+                Custom categories, icons, and drag-and-drop ordering
               </Text>
             </View>
-            <View style={[styles.soonBadge, { backgroundColor: colors.primaryContainer, borderColor: colors.border }]}>
-              <Text style={[styles.soonBadgeText, { color: colors.primary }]}>
-                AVAILABLE
-              </Text>
+            <View style={[styles.actionBadge, { backgroundColor: colors.surfaceVariant, borderColor: colors.border }]}>
+              <Text style={[styles.actionBadgeText, { color: colors.textSecondary }]}>MANAGE</Text>
+              <Ionicons name="chevron-forward" size={12} color={colors.textSecondary} style={{ marginLeft: 2 }} />
             </View>
-          </View>
+          </TouchableOpacity>
         </View>
 
         {/* Sign Out Button */}
@@ -343,6 +463,278 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) =>
           Finance Tracker v1.0.0 • Material Design 3 Architecture
         </Text>
       </ScrollView>
+
+      {/* CSV Filter & Export Modal */}
+      <Modal
+        visible={csvModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setCsvModalVisible(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.modalCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            {/* Modal Header */}
+            <View style={[styles.modalHeaderRow, { borderBottomColor: colors.border }]}>
+              <View>
+                <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>Export Transactions (CSV)</Text>
+                <Text style={[styles.modalSubtitle, { color: colors.textMuted }]}>
+                  {matchingCsvTransactions.length} transaction{matchingCsvTransactions.length === 1 ? '' : 's'} matching filter
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setCsvModalVisible(false)}
+                style={[styles.modalCloseBtn, { backgroundColor: colors.surfaceVariant }]}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Ionicons name="close" size={18} color={colors.textPrimary} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView contentContainerStyle={styles.modalScrollContent} showsVerticalScrollIndicator={false}>
+              {/* 1. Date Range Filter */}
+              <View style={styles.filterSection}>
+                <Text style={[styles.filterSectionTitle, { color: colors.textSecondary }]}>DATE RANGE</Text>
+                <View style={styles.chipsRow}>
+                  {[
+                    { key: 'all', label: 'All Time' },
+                    { key: 'this_month', label: 'This Month' },
+                    { key: 'this_year', label: 'This Year' },
+                    { key: 'last_30_days', label: 'Last 30 Days' },
+                    { key: 'custom', label: 'Custom Range' },
+                  ].map((p) => {
+                    const active = csvDatePreset === p.key;
+                    return (
+                      <TouchableOpacity
+                        key={p.key}
+                        onPress={() => setCsvDatePreset(p.key as any)}
+                        style={[
+                          styles.filterChip,
+                          { backgroundColor: colors.surfaceVariant, borderColor: colors.border },
+                          active && { backgroundColor: colors.primary, borderColor: colors.primary },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.filterChipText,
+                            { color: colors.textSecondary },
+                            active && { color: colors.onPrimary, fontWeight: '700' },
+                          ]}
+                        >
+                          {p.label}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                {/* Custom Date Pickers without month restriction */}
+                {csvDatePreset === 'custom' && (
+                  <View style={styles.customDateRow}>
+                    <TouchableOpacity
+                      onPress={() => setDatePickerTarget('from')}
+                      style={[styles.customDateCard, { backgroundColor: colors.surfaceVariant, borderColor: colors.border }]}
+                    >
+                      <Ionicons name="calendar-outline" size={14} color={colors.primary} />
+                      <View style={{ marginLeft: 6 }}>
+                        <Text style={[styles.customDateLabel, { color: colors.textMuted }]}>FROM</Text>
+                        <Text style={[styles.customDateValue, { color: colors.textPrimary }]}>
+                          {csvCustomFrom || 'Select start date'}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      onPress={() => setDatePickerTarget('to')}
+                      style={[styles.customDateCard, { backgroundColor: colors.surfaceVariant, borderColor: colors.border }]}
+                    >
+                      <Ionicons name="calendar-outline" size={14} color={colors.primary} />
+                      <View style={{ marginLeft: 6 }}>
+                        <Text style={[styles.customDateLabel, { color: colors.textMuted }]}>TO</Text>
+                        <Text style={[styles.customDateValue, { color: colors.textPrimary }]}>
+                          {csvCustomTo || 'Select end date'}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
+
+              {/* 2. Money Source Account Filter */}
+              <View style={styles.filterSection}>
+                <Text style={[styles.filterSectionTitle, { color: colors.textSecondary }]}>MONEY SOURCE / ACCOUNT</Text>
+                <View style={styles.chipsRow}>
+                  <TouchableOpacity
+                    onPress={() => setCsvSelectedAccountId(null)}
+                    style={[
+                      styles.filterChip,
+                      { backgroundColor: colors.surfaceVariant, borderColor: colors.border },
+                      csvSelectedAccountId === null && { backgroundColor: colors.primary, borderColor: colors.primary },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.filterChipText,
+                        { color: colors.textSecondary },
+                        csvSelectedAccountId === null && { color: colors.onPrimary, fontWeight: '700' },
+                      ]}
+                    >
+                      All Accounts
+                    </Text>
+                  </TouchableOpacity>
+
+                  {accounts.map((acc) => {
+                    const active = csvSelectedAccountId === acc.id;
+                    return (
+                      <TouchableOpacity
+                        key={acc.id}
+                        onPress={() => setCsvSelectedAccountId(active ? null : acc.id)}
+                        style={[
+                          styles.filterChip,
+                          { backgroundColor: colors.surfaceVariant, borderColor: colors.border },
+                          active && { backgroundColor: colors.primary, borderColor: colors.primary },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.filterChipText,
+                            { color: colors.textSecondary },
+                            active && { color: colors.onPrimary, fontWeight: '700' },
+                          ]}
+                        >
+                          {acc.name}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+
+              {/* 3. Transaction Types Filter */}
+              <View style={styles.filterSection}>
+                <Text style={[styles.filterSectionTitle, { color: colors.textSecondary }]}>TRANSACTION TYPE</Text>
+                <View style={styles.chipsRow}>
+                  {[
+                    { key: 'expense', label: 'Expenses' },
+                    { key: 'income', label: 'Income' },
+                    { key: 'borrow_given', label: 'Lent' },
+                    { key: 'borrow_taken', label: 'Borrowed' },
+                  ].map((t) => {
+                    const active = csvSelectedTypes.includes(t.key as TransactionType);
+                    return (
+                      <TouchableOpacity
+                        key={t.key}
+                        onPress={() => {
+                          if (active) {
+                            setCsvSelectedTypes(csvSelectedTypes.filter((x) => x !== t.key));
+                          } else {
+                            setCsvSelectedTypes([...csvSelectedTypes, t.key as TransactionType]);
+                          }
+                        }}
+                        style={[
+                          styles.filterChip,
+                          { backgroundColor: colors.surfaceVariant, borderColor: colors.border },
+                          active && { backgroundColor: colors.primary, borderColor: colors.primary },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.filterChipText,
+                            { color: colors.textSecondary },
+                            active && { color: colors.onPrimary, fontWeight: '700' },
+                          ]}
+                        >
+                          {t.label}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+
+              {/* 4. Categories Filter */}
+              {categories.length > 0 && (
+                <View style={styles.filterSection}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text style={[styles.filterSectionTitle, { color: colors.textSecondary }]}>CATEGORIES</Text>
+                    {csvSelectedCategories.length > 0 && (
+                      <TouchableOpacity onPress={() => setCsvSelectedCategories([])}>
+                        <Text style={{ fontSize: 11, color: colors.primary, fontWeight: '600' }}>Clear all</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                  <View style={styles.chipsRow}>
+                    {categories.map((cat) => {
+                      const active = csvSelectedCategories.includes(cat);
+                      return (
+                        <TouchableOpacity
+                          key={cat}
+                          onPress={() => {
+                            if (active) {
+                              setCsvSelectedCategories(csvSelectedCategories.filter((c) => c !== cat));
+                            } else {
+                              setCsvSelectedCategories([...csvSelectedCategories, cat]);
+                            }
+                          }}
+                          style={[
+                            styles.filterChip,
+                            { backgroundColor: colors.surfaceVariant, borderColor: colors.border },
+                            active && { backgroundColor: colors.primary, borderColor: colors.primary },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.filterChipText,
+                              { color: colors.textSecondary },
+                              active && { color: colors.onPrimary, fontWeight: '700' },
+                            ]}
+                          >
+                            {cat}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </View>
+              )}
+            </ScrollView>
+
+            {/* Modal Bottom Action Bar */}
+            <View style={[styles.modalFooter, { borderTopColor: colors.border }]}>
+              <TactileButton
+                onPress={handleExportCsv}
+                disabled={isExportingCsv || matchingCsvTransactions.length === 0}
+                style={[
+                  styles.exportBtn,
+                  {
+                    backgroundColor: matchingCsvTransactions.length === 0 ? colors.surfaceVariant : colors.primary,
+                  },
+                ]}
+              >
+                {isExportingCsv ? (
+                  <ActivityIndicator size="small" color={colors.onPrimary} />
+                ) : (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Ionicons name="download-outline" size={16} color={colors.onPrimary} />
+                    <Text style={[styles.exportBtnText, { color: colors.onPrimary }]}>
+                      Export {matchingCsvTransactions.length} Record{matchingCsvTransactions.length === 1 ? '' : 's'}
+                    </Text>
+                  </View>
+                )}
+              </TactileButton>
+            </View>
+          </View>
+        </View>
+
+        {/* Date Picker Component */}
+        {datePickerTarget && (
+          <DateTimePicker
+            value={new Date()}
+            mode="date"
+            display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+            onChange={handleDateChange}
+          />
+        )}
+      </Modal>
     </View>
   );
 };
@@ -558,23 +950,149 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingVertical: SPACING.sm,
+    gap: SPACING.sm,
+  },
+  placeholderTextCol: {
+    flex: 1,
+    marginRight: SPACING.xs,
   },
   placeholderTitle: {
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   placeholderSub: {
     fontSize: 11,
     marginTop: 2,
+    lineHeight: 16,
   },
   soonBadge: {
     paddingHorizontal: SPACING.sm,
-    paddingVertical: 3,
-    borderRadius: 4,
+    paddingVertical: 4,
+    borderRadius: 6,
     borderWidth: 1,
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   soonBadgeText: {
     fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  actionBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+    borderWidth: 1,
+    flexShrink: 0,
+  },
+  actionBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    justifyContent: 'flex-end',
+  },
+  modalCard: {
+    maxHeight: '88%',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    borderWidth: 1,
+    borderBottomWidth: 0,
+    overflow: 'hidden',
+  },
+  modalHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: SPACING.lg,
+    paddingTop: SPACING.md,
+    paddingBottom: SPACING.sm,
+    borderBottomWidth: 1,
+  },
+  modalTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  modalSubtitle: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  modalCloseBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalScrollContent: {
+    padding: SPACING.lg,
+    gap: SPACING.lg,
+    paddingBottom: SPACING.xl,
+  },
+  filterSection: {
+    gap: SPACING.xs,
+  },
+  filterSectionTitle: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+  },
+  chipsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 4,
+  },
+  filterChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  filterChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  customDateRow: {
+    flexDirection: 'row',
+    gap: SPACING.sm,
+    marginTop: SPACING.xs,
+  },
+  customDateCard: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: SPACING.sm,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  customDateLabel: {
+    fontSize: 9,
+    fontWeight: '700',
+  },
+  customDateValue: {
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 1,
+  },
+  modalFooter: {
+    padding: SPACING.lg,
+    borderTopWidth: 1,
+  },
+  exportBtn: {
+    paddingVertical: SPACING.md,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  exportBtnText: {
+    fontSize: 14,
     fontWeight: '700',
   },
   divider: {

@@ -23,13 +23,14 @@ Foundational architecture build for a high-performance cross-platform personal f
     ├── test_e2e.mjs       # Automated E2E verification test suite
     ├── assets/
     └── src/
-        ├── theme/         # Strict tokens (4/8/12/16/24px spacing, deep slate, dynamic accents)
+        ├── theme/         # Strict MD3 tokens, multi-style palettes, useAppTheme
         ├── types/         # TypeScript database, view models, and bank presets
-        ├── services/      # Supabase client with AsyncStorage session persistence
+        ├── utils/         # Category icon mappings and color tokens
+        ├── services/      # Supabase client, statement PDF export engine
         ├── store/         # Zustand stores (authStore, financeStore, settingsStore)
-        ├── components/    # ReanimatedNumber, TactileButton, TransactionRow, InlineError
+        ├── components/    # ReanimatedNumber, TactileButton, TransactionRow, YouTubeStyleDraggableList, InlineError
         ├── navigation/    # RootNavigator, AuthStack, MainTabs
-        └── screens/       # Login, SignUp, Dashboard, Transactions, AddTransaction, Budgets, Borrows, Settings
+        └── screens/       # Auth (Login, SignUp), Main (Dashboard, Transactions, TransactionDetail, Budgets, Borrows, AddTransaction, AccountDetail, Settings)
 ```
 
 ---
@@ -85,10 +86,12 @@ Foundational architecture build for a high-performance cross-platform personal f
   - *Real-time Financial Summary Strip*: Compact inline bar displaying live totals for filtered results: `Total Spent: ₹X`, `Total Income: ₹Y`, `Net Lent: ₹Z`, and total matching records.
   - *Comprehensive Filter Sheet Modal*: Bottom sheet modal supporting Date Range presets, custom date pickers with `@react-native-community/datetimepicker`, Money Source account selection, and multi-select Category pills with icons from `categoryIcons.ts`.
   - *Statement PDF Export Engine (`statementExport.ts`)*: Added download header icon button invoking cross-platform PDF generation (`expo-print`) and native share/save sheet (`expo-sharing`). Generates a fintech-grade A4 statement containing user account info (email, user ID), active filter tags, detailed indexed transaction ledger with timestamp and category badges, export datetime, and comprehensive financial breakdown totals at the end.
-- [x] **SettingsScreen Added**:
+- [x] **SettingsScreen Added & Enhanced**:
   - *Theme Selector*: Dark / Light / System mode switcher persisted to AsyncStorage via `settingsStore`.
-  - *Accent Palette Picker*: 6 swatches (Emerald `#00D09C`, Cyan `#06B6D4`, Amber `#F59E0B`, Rose `#F43F5E`, Blue `#3B82F6`, Violet `#8B5CF6`).
-  - *Placeholders*: AI BYOK (Gemini API key), CSV Data Export, and Custom Category Manager.
+  - *Multi-Style Theme Engine*: Precision Obsidian, Warm Executive, Swiss Minimal, and dynamic Android 12+ Material You wallpaper integration.
+  - *Fixed Badge Boundary Layout*: Prevented badge overflow by wrapping row texts in a flex-constrained column (`placeholderTextCol` with `flex: 1`) and adding `flexShrink: 0` to badges.
+  - *Live CSV Data Export (`csvExport.ts`)*: Interactive modal allowing custom date range filters without month bounds (All Time, This Month, This Year, Last 30 Days, Custom Range with calendar pickers), account filters, transaction type filters, and category filters. Generates RFC 4180 standard CSV and shares via native system share/save sheet (`expo-sharing` via sandboxed `FileSystem.cacheDirectory`).
+  - *Direct Manage Categories Navigation*: Integrated 1-tap navigation to the Dashboard's full Category Manager modal (`openManageCategories: true`), supporting custom category creation, icons, and drag-and-drop ordering.
   - *Account Info & Sign Out*: User email display and secure session termination.
 - [x] **AddTransactionScreen Updated (Wrapping Grid & Current-Month Calendar Picker)**:
   - *Money Sources (Multi-Line Wrapping Grid)*: Eliminated the horizontal scroll row. Money sources now wrap naturally onto the next line in a responsive 2-column grid (`moneySourcesGrid`, `sourceCard`), displaying account icon badge, account name, balance/due, and active checkmark.
@@ -410,10 +413,82 @@ Foundational architecture build for a high-performance cross-platform personal f
   - Directly triggers `navigation.navigate('AddTransaction')` with tactile opacity response (`activeOpacity={0.7}`) and generous touch hitSlop (`16px`).
   - Styled with dynamic accent background (`accent.hex`), high-contrast icon (`colors.onPrimary`), theme shadow token (`colors.shadow`), and screen-reader accessibility labels (`accessibilityLabel="Add Transaction"`, `accessibilityRole="button"`).
   - Adjusted `listContent` bottom padding (`paddingBottom: 96`) so transactions list items scroll smoothly without being obstructed by the floating button.
+- [x] **Credit Card Expense Action Button Duplicate Plus Fix (`DashboardScreen.tsx` & `AccountDetailScreen.tsx`)**:
+  - Removed redundant `+` text prefix from the expense action button (`styles.cardExpenseActionPillText`), eliminating the duplicate `+ + Expense` rendering caused by combining `<Ionicons name="add" />` with `+ Expense` label text.
+  - Cleaned up matching empty-state `+ Add Credit Card` and `AccountDetailScreen.tsx` quick action button for credit cards.
 - [x] **Verification**:
   - Full TypeScript compilation passes with 0 errors (`npx tsc --noEmit`).
   - Expo lint passes with 0 errors and 0 warnings (`npx expo lint`).
   - Automated E2E verification test suite (`node test_e2e.mjs`) passes 100%.
+
+### 14. Net Worth Budget Ceiling & Financial Discipline Rule
+- [x] **Net Worth Ceiling Enforcement (`BudgetsScreen.tsx`)**:
+  - Implemented strict financial discipline rule: monthly budget limits cannot exceed total calculated Net Worth ($$\text{Net Worth} = \text{Cash \& Bank} + \text{Lent} - \text{Borrow} - \text{Credit Card Dues}$$).
+  - Synchronously evaluates `calculateNetWorth(accounts, borrows, transactions)` to dynamically compute `totalNetWorth` and `isExceedingNetWorth = !isNaN(parsedLimit) && parsedLimit > totalNetWorth`.
+  - Added dynamic `"Net Worth Cap: ₹X"` status label directly in the limit input header, colored in alert crimson (`colors.alert`) when Net Worth is non-positive or warning/muted otherwise.
+  - Real-time inline warning box with `Ionicons` alert icon: `"Limit cannot exceed your total net worth (₹X)"` displayed immediately when the typed limit exceeds total net worth.
+  - Visual validation cues: Currency text input outline (`outlineColor`, `activeOutlineColor`) and currency prefix affix (`textStyle`) dynamically switch to `colors.alert` when the net worth ceiling is violated.
+  - **"Max Net Worth (₹X)" Quick Suggestion Chip**: Added an intelligent 1-tap preset chip to the horizontal suggestions scroll list, allowing users to instantly set the budget limit to their exact current net worth.
+  - Cleaned up unused local state variables and redundant hooks in `BudgetsScreen.tsx`.
+- [x] **Budget Deletion & Clear Filled Data System (`BudgetsScreen.tsx`, `DashboardScreen.tsx`, `financeStore.ts`)**:
+  - Implemented `deleteBudgetOptimistic` in `financeStore.ts` with instant 0ms optimistic cache removal, rollback protection, and PostgreSQL delete query.
+  - Added dedicated **Delete / Clear** action button directly on the Overall Monthly Budget card and Category cards (`styles.cardDeletePill`) alongside the Edit pill in `BudgetsScreen.tsx`.
+  - Added dynamic **Delete Budget** (when editing existing) or **Clear Data** (when filling new budget) in the form actions row.
+  - Added quick **Delete** trash icon to the Dashboard's Monthly Budget card header for 1-tap budget clearance.
+  - Designed high-contrast theme-adaptive confirmation dialogs with tactile haptic feedback (`Haptics.notificationAsync`) across all deletion entry points.
+- [x] **Verification**:
+  - Full TypeScript compilation passes with 0 errors (`npx tsc --noEmit`).
+  - Expo lint passes with 0 errors and 0 warnings (`npx expo lint`).
+  - Automated E2E verification test suite (`node test_e2e.mjs`) passes 100%.
+
+### 15. Ledger Balance Calibration & Offline Sync System
+- [x] **Balance Calibration Flow (`financeStore.ts`, `AccountDetailScreen.tsx`, `DashboardScreen.tsx`)**:
+  - Replaced ambiguous balance overrides with a strict dual-choice calibration protocol:
+    1. **"Calibrate & Log Transaction" (Ledger-Preserving)**: Computes the exact signed difference between old and new balance ($$\Delta = \text{Balance}_{\text{new}} - \text{Balance}_{\text{old}}$$). Automatically posts an Adjustment transaction (`income` if positive, `expense` if negative) categorized as `'Adjustment'` (`"Balance calibration (+/-₹X)"`), fully preserving double-entry accounting integrity and the database balance trigger.
+    2. **"Update Balance Only (Sets Sync Required)"**: Directly sets the account balance in PostgreSQL while registering a `PendingCalibration` record in Zustand and `AsyncStorage` (`@finance_pending_calibrations_v1`), signaling an unlogged disparity.
+  - Dedicated **Calibrate Balance Modal** in `AccountDetailScreen.tsx` and `DashboardScreen.tsx` (Manage Money Sources):
+    - Real-time calculated difference preview showing signed variance (`+₹X` / `−₹X`) with dynamic color coding (accent / alert).
+    - Clear explanatory helper text educating the user on ledger implications.
+  - **Sync Required Indicators & Interactive Resolution**:
+    - Account cards and manager rows display prominent amber warning badges (`"Sync Required"` / `"⚠️ Sync"`) when pending unlogged calibrations exist.
+    - One-tap "Log Tx" action button on warning banners to retroactively resolve pending calibrations into balancing transactions (`resolvePendingCalibrationAsTransaction`), safely compensating for the database trigger.
+    - Dismissable sync warnings if the user deliberately wants to keep the direct balance override without a ledger entry.
+- [x] **Verification**:
+  - Full TypeScript compilation passes with 0 errors (`npx tsc --noEmit`).
+  - Expo lint passes with 0 errors and 0 warnings (`npx expo lint`).
+  - Automated E2E verification test suite (`node test_e2e.mjs`) passes 100%.
+
+### 16. Fintech Statement Export & Scoped Storage PDF Sharing
+- [x] **Cross-Platform Scoped Storage PDF Export (`statementExport.ts`)**:
+  - Fixed Android & Expo Go scoped storage permission barrier (`"Not allowed to read file under given URL"`) when sharing generated PDF files.
+  - Integrated `expo-file-system/legacy` to generate the PDF with base64 encoding and safely write it into the application's scoped sandbox directory (`FileSystem.cacheDirectory + 'Statement_YYYY-MM-DD.pdf'`) before passing the URI to `expo-sharing`.
+  - Implemented multi-tier fallback pipeline (`options.method: 'save' | 'share' | 'auto'`):
+    - Primary: Native share dialog via `Sharing.shareAsync` with UTI `com.adobe.pdf`.
+    - Fallback: System Print & "Save as PDF" dialog via `Print.printAsync({ html })` if sharing is unavailable or cancelled.
+  - Complete statement metadata header, indexed ledger table, active filter badges, and aggregated financial summary totals.
+- [x] **Verification**:
+  - Full TypeScript compilation passes with 0 errors (`npx tsc --noEmit`).
+  - Expo lint passes with 0 errors and 0 warnings (`npx expo lint`).
+
+### 17. Cross-Platform Keyboard Avoidance & Fluid Auto-Scroll Architecture
+- [x] **Root Cause Diagnosis**:
+  - `behavior={Platform.OS === 'android' ? undefined : 'padding'}` disabled `KeyboardAvoidingView` on Android.
+  - Android translucent status bar / edge-to-edge modals prevent system `adjustResize` from working properly on nested scrollviews and modals.
+  - Standard `ScrollView` lacked dynamic `paddingBottom` expansion when the software keyboard was deployed, physically preventing users from scrolling bottom fields (notes, names, buttons) above the keyboard.
+- [x] **Custom Keyboard System (`useKeyboard.ts` & `KeyboardAwareScrollView.tsx`)**:
+  - Developed pure JavaScript cross-platform hook `useKeyboard()` listening to `keyboardWillShow`/`keyboardDidShow` and `keyboardWillHide`/`keyboardDidHide`. Fully compatible with Expo Go without requiring native modules or crashing custom turbo runtimes.
+  - Developed `KeyboardAwareScrollView` component forward-ref enabled with dynamic `contentContainerStyle.paddingBottom` expansion: expands bottom scroll boundary by `keyboardHeight + extraScrollHeight` when the keyboard is active, with `keyboardShouldPersistTaps="handled"`.
+- [x] **Screens & Modals Upgraded**:
+  - `AddTransactionScreen.tsx`: Replaced fixed `KeyboardAvoidingView` with `KeyboardAwareScrollView`; added `onFocus` auto-scrolling for Person Name and Note inputs.
+  - `BorrowsScreen.tsx`: Replaced `ScrollView` with `KeyboardAwareScrollView`; added `onFocus` auto-scrolling for person name and amount inputs.
+  - `BudgetsScreen.tsx`: Replaced root `ScrollView` with `KeyboardAwareScrollView`; added `onFocus` auto-scrolling for monthly budget limit amount.
+  - `DashboardScreen.tsx`: Integrated `KeyboardAwareScrollView` into both the Add/Edit Money Source Modal and Manage Categories Modal with auto-scroll for all text inputs.
+  - `AccountDetailScreen.tsx`: Dynamic keyboard offset calculation on modal sheets (`Math.min(keyboardHeight * 0.75, 200)`) + `KeyboardAwareScrollView` in Edit Account and Pay Card Bill modals.
+  - `TransactionDetailScreen.tsx`: Replaced outer `ScrollView` with `KeyboardAwareScrollView`, replaced nested `KeyboardAvoidingView` with a responsive layout, and added auto-scrolling on Amount, Date, and Note fields.
+  - `LoginScreen.tsx` & `SignUpScreen.tsx`: Replaced non-responsive `KeyboardAvoidingView` with `KeyboardAwareScrollView` and auto-scrolling focus handlers.
+- [x] **Verification**:
+  - Full TypeScript compilation passes with 0 errors (`npx tsc --noEmit`).
+  - Expo lint passes with 0 errors and 0 warnings (`npm run lint`).
 
 ---
 

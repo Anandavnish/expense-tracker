@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { ProgressBar, TextInput } from 'react-native-paper';
+import * as Haptics from 'expo-haptics';
 import { useAuthStore } from '../../store/authStore';
 import { useFinanceStore, parseBorrowDetails, calculateNetWorth } from '../../store/financeStore';
 import { useSettingsStore } from '../../store/settingsStore';
@@ -30,10 +31,12 @@ import { getCategoryIcon } from '../../utils/categoryIcons';
 import { TactileButton } from '../../components/TactileButton';
 import { InlineError } from '../../components/InlineError';
 import { YouTubeStyleDraggableList } from '../../components/YouTubeStyleDraggableList';
+import { KeyboardAwareScrollView } from '../../components/KeyboardAwareScrollView';
 import { Account, AccountType, BankPresetCode, CreditCardIssuerCode } from '../../types/database';
 
 interface DashboardScreenProps {
   navigation: any;
+  route?: any;
 }
 
 interface BankPresetItem {
@@ -93,11 +96,15 @@ export const getCategoryIconProps = (category: string): { name: keyof typeof Ion
   };
 };
 
-export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
+export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, route }) => {
   const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
   const { accent, colors } = useSettingsStore();
   const styles = useMemo(() => getStyles(colors), [colors]);
+
+  const sourceModalScrollRef = useRef<ScrollView>(null);
+  const categoryModalScrollRef = useRef<ScrollView>(null);
+
   const {
     accounts,
     transactions,
@@ -116,6 +123,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
     resolvePendingCalibrationAsTransaction,
     clearPendingCalibration,
     payCreditCardBill,
+    deleteBudgetOptimistic,
     addCategory,
     updateCategory,
     removeCategory,
@@ -125,6 +133,24 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
   } = useFinanceStore();
 
   const [refreshing, setRefreshing] = useState(false);
+
+  // Monthly Budget Deletion State
+  const [deleteBudgetModalVisible, setDeleteBudgetModalVisible] = useState(false);
+  const [isDeletingBudget, setIsDeletingBudget] = useState(false);
+
+  const handleConfirmDeleteBudget = async () => {
+    if (!user) return;
+    setIsDeletingBudget(true);
+    const overall = budgetSummaries.find(
+      (b) => b.category === null && b.month === selectedMonth
+    );
+    if (overall) {
+      await deleteBudgetOptimistic(overall.budget_id, null, selectedMonth, user.id);
+    }
+    setIsDeletingBudget(false);
+    setDeleteBudgetModalVisible(false);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+  };
 
   // Manage Money Sources State
   const [sourcesManageVisible, setSourcesManageVisible] = useState(false);
@@ -164,6 +190,13 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
   const [categoryInputValue, setCategoryInputValue] = useState('');
   const [showAddCategoryInput, setShowAddCategoryInput] = useState(false);
   const [categoryDeleteTarget, setCategoryDeleteTarget] = useState<string | null>(null);
+
+  // Auto-handle openManageCategories route param during render (React 19 prop-to-state pattern)
+  const [prevOpenCategoriesParam, setPrevOpenCategoriesParam] = useState(route?.params?.openManageCategories);
+  if (route?.params?.openManageCategories && route.params.openManageCategories !== prevOpenCategoriesParam) {
+    setPrevOpenCategoriesParam(route.params.openManageCategories);
+    setCategoriesManageVisible(true);
+  }
 
   // Reorder Drag State (locks scroll while dragging)
   const [isSourcesDragging, setIsSourcesDragging] = useState(false);
@@ -791,18 +824,41 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
         <View style={styles.card}>
           <View style={styles.cardHeaderWithAction}>
             <Text style={styles.cardHeaderLabel}>Monthly Budget</Text>
-            <TouchableOpacity
-              onPress={() =>
-                navigation.navigate('Budgets', {
-                  editCategory: 'Overall Budget',
-                  currentLimit: budgetLimit > 0 ? String(budgetLimit) : '',
-                })
-              }
-            >
-              <Text style={[styles.cardHeaderAction, { color: accent.hex }]}>
-                {budgetLimit > 0 ? 'Edit' : '+ Set'}
-              </Text>
-            </TouchableOpacity>
+            {budgetLimit > 0 ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <TouchableOpacity
+                  onPress={() =>
+                    navigation.navigate('Budgets', {
+                      editCategory: 'Overall Budget',
+                      currentLimit: String(budgetLimit),
+                    })
+                  }
+                  hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+                >
+                  <Text style={[styles.cardHeaderAction, { color: accent.hex }]}>Edit</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+                    setDeleteBudgetModalVisible(true);
+                  }}
+                  hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
+                >
+                  <Ionicons name="trash-outline" size={14} color={colors.alert} />
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity
+                onPress={() =>
+                  navigation.navigate('Budgets', {
+                    editCategory: 'Overall Budget',
+                    currentLimit: '',
+                  })
+                }
+              >
+                <Text style={[styles.cardHeaderAction, { color: accent.hex }]}>+ Set</Text>
+              </TouchableOpacity>
+            )}
           </View>
 
           {budgetLimit > 0 ? (
@@ -956,7 +1012,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
               >
                 <Ionicons name="add-circle-outline" size={16} color={accent.hex} />
                 <Text style={[styles.addCreditCardBtnText, { color: accent.hex }]}>
-                  + Add Credit Card
+                  Add Credit Card
                 </Text>
               </TouchableOpacity>
             ) : (
@@ -1036,7 +1092,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                         }
                       >
                         <Ionicons name="add" size={13} color={colors.textSecondary} />
-                        <Text style={styles.cardExpenseActionPillText}>+ Expense</Text>
+                        <Text style={styles.cardExpenseActionPillText}>Expense</Text>
                       </TouchableOpacity>
                     </View>
                   </View>
@@ -1521,12 +1577,14 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
           {editingAccount || isAddingNewSource ? (
             /* ADD / EDIT VIEW */
             <KeyboardAvoidingView
-              behavior={Platform.OS === 'android' ? undefined : 'padding'}
+              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
               style={{ flex: 1 }}
             >
-              <ScrollView
+              <KeyboardAwareScrollView
+                ref={sourceModalScrollRef}
                 style={styles.fullScreenModalScroll}
-                contentContainerStyle={{ paddingBottom: 100 }}
+                contentContainerStyle={{ paddingBottom: 140 }}
+                extraScrollHeight={80}
                 showsVerticalScrollIndicator={false}
               >
                 {/* 1. Account Type Selection (3 Fluid Types) */}
@@ -1774,6 +1832,11 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                 <TextInput
                   value={editName}
                   onChangeText={setEditName}
+                  onFocus={() => {
+                    setTimeout(() => {
+                      sourceModalScrollRef.current?.scrollTo({ y: 380, animated: true });
+                    }, 100);
+                  }}
                   placeholder={
                     editType === 'bank'
                       ? 'e.g. Salary A/c or •••• 4821'
@@ -1795,6 +1858,11 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                     <TextInput
                       value={editCreditLimit}
                       onChangeText={setEditCreditLimit}
+                      onFocus={() => {
+                        setTimeout(() => {
+                          sourceModalScrollRef.current?.scrollTo({ y: 500, animated: true });
+                        }, 100);
+                      }}
                       placeholder="e.g. 50000"
                       keyboardType="decimal-pad"
                       mode="outlined"
@@ -1814,6 +1882,11 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                       <TextInput
                         value={editBalance}
                         onChangeText={setEditBalance}
+                        onFocus={() => {
+                          setTimeout(() => {
+                            sourceModalScrollRef.current?.scrollToEnd({ animated: true });
+                          }, 100);
+                        }}
                         placeholder="0.00"
                         keyboardType="decimal-pad"
                         mode="outlined"
@@ -1839,6 +1912,11 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                       <TextInput
                         value={editBalance}
                         onChangeText={setEditBalance}
+                        onFocus={() => {
+                          setTimeout(() => {
+                            sourceModalScrollRef.current?.scrollToEnd({ animated: true });
+                          }, 100);
+                        }}
                         placeholder="0.00"
                         keyboardType="decimal-pad"
                         mode="outlined"
@@ -1851,7 +1929,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                     </>
                   )
                 )}
-              </ScrollView>
+              </KeyboardAwareScrollView>
 
               {/* Fixed Bottom Action Bar (Add/Edit) */}
               <View style={styles.fullScreenModalBottomBar}>
@@ -2134,9 +2212,11 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
           </View>
 
           <View style={{ flex: 1 }}>
-            <ScrollView
+            <KeyboardAwareScrollView
+              ref={categoryModalScrollRef}
               style={styles.managerScroll}
               contentContainerStyle={styles.managerScrollContent}
+              extraScrollHeight={80}
               showsVerticalScrollIndicator={false}
               scrollEnabled={!isCategoriesDragging}
             >
@@ -2252,7 +2332,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                   )}
                 />
               )}
-            </ScrollView>
+            </KeyboardAwareScrollView>
 
             {/* Fixed Bottom Action Bar */}
             {!showAddCategoryInput && (
@@ -2304,6 +2384,49 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
 
               <TouchableOpacity
                 onPress={() => setCategoryDeleteTarget(null)}
+                style={styles.modalSecondaryBtn}
+              >
+                <Text style={styles.modalSecondaryBtnText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* DELETE MONTHLY BUDGET CONFIRMATION MODAL */}
+      <Modal
+        visible={deleteBudgetModalVisible}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={() => !isDeletingBudget && setDeleteBudgetModalVisible(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.deleteConfirmModalCard}>
+            <View style={styles.deleteModalIconBadge}>
+              <Ionicons name="trash-outline" size={28} color={colors.alert} />
+            </View>
+
+            <Text style={styles.modalTitle}>Delete Monthly Budget?</Text>
+
+            <Text style={styles.deleteModalExplanation}>
+              Are you sure you want to clear your overall monthly budget for {selectedMonth}? The spending limit will be removed from your dashboard.
+            </Text>
+
+            <View style={styles.deleteModalActionList}>
+              <TactileButton
+                onPress={handleConfirmDeleteBudget}
+                disabled={isDeletingBudget}
+                style={[styles.modalPrimaryBtn, { backgroundColor: colors.alert, paddingVertical: 12 }]}
+              >
+                <Text style={styles.modalPrimaryBtnText}>
+                  {isDeletingBudget ? 'Deleting...' : 'Delete Budget'}
+                </Text>
+              </TactileButton>
+
+              <TouchableOpacity
+                onPress={() => setDeleteBudgetModalVisible(false)}
+                disabled={isDeletingBudget}
                 style={styles.modalSecondaryBtn}
               >
                 <Text style={styles.modalSecondaryBtnText}>Cancel</Text>
