@@ -1,6 +1,6 @@
 {
   "name": "app",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "main": "index.ts",
   "dependencies": {
     "@expo/vector-icons": "^15.0.2",
@@ -13,6 +13,7 @@
     "@supabase/supabase-js": "^2.117.1",
     "babel-preset-expo": "~57.0.0",
     "expo": "~57.0.25",
+    "expo-auth-session": "~57.0.13",
     "expo-clipboard": "~57.0.2",
     "expo-constants": "~57.0.19",
     "expo-dev-client": "~57.0.19",
@@ -26,6 +27,7 @@
     "expo-sharing": "~57.0.22",
     "expo-status-bar": "~57.0.1",
     "expo-system-ui": "~57.0.4",
+    "expo-web-browser": "~57.0.3",
     "react": "19.2.3",
     "react-native": "0.86.3",
     "react-native-gesture-handler": "~2.32.0",

@@ -32,7 +32,8 @@ import {
   LOCKED_FINANCIAL_TOKENS,
 } from '../../theme/tokens';
 import { TransactionType } from '../../types/database';
-import { exportTransactionsCsv, filterTransactionsForCsv } from '../../services/csvExport';
+import { filterTransactionsForCsv } from '../../services/csvExport';
+import { exportTransactionsStatement } from '../../services/statementExport';
 import { TactileButton } from '../../components/TactileButton';
 import { BankLogo } from '../../components/BankLogo';
 import { useKeyboard } from '../../hooks/useKeyboard';
@@ -231,7 +232,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) =>
   const [csvSelectedAccountId, setCsvSelectedAccountId] = useState<string | null>(null);
   const [csvSelectedTypes, setCsvSelectedTypes] = useState<TransactionType[]>([]);
   const [csvSelectedCategories, setCsvSelectedCategories] = useState<string[]>([]);
-  const [isExportingCsv, setIsExportingCsv] = useState(false);
+  const [isExportingStatement, setIsExportingStatement] = useState(false);
 
   const accountMap = useMemo(() => {
     const map: Record<string, string> = {};
@@ -280,37 +281,90 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) =>
     }
   };
 
-  const handleExportCsv = async () => {
+  const performStatementExport = async (method: 'save' | 'share') => {
     if (matchingCsvTransactions.length === 0) {
       Alert.alert('No Data', 'No transactions match your selected filter criteria.');
       return;
     }
     try {
-      setIsExportingCsv(true);
-      const res = await exportTransactionsCsv({
-        datePreset: csvDatePreset,
-        customFrom: csvCustomFrom || undefined,
-        customTo: csvCustomTo || undefined,
-        selectedAccountId: csvSelectedAccountId,
-        selectedTypes: csvSelectedTypes,
-        selectedCategories: csvSelectedCategories,
-        transactions,
+      setIsExportingStatement(true);
+
+      const dateFilterLabel =
+        csvDatePreset === 'custom' && csvCustomFrom && csvCustomTo
+          ? `${csvCustomFrom} to ${csvCustomTo}`
+          : csvDatePreset === 'all'
+          ? 'All Time'
+          : csvDatePreset === 'this_month'
+          ? 'This Month'
+          : csvDatePreset === 'this_year'
+          ? 'This Year'
+          : csvDatePreset === 'last_30_days'
+          ? 'Last 30 Days'
+          : 'Filtered Range';
+
+      const accountFilterLabel = csvSelectedAccountId
+        ? accountMap[csvSelectedAccountId] || 'Selected Account'
+        : 'All Accounts';
+
+      const typeFilterLabel =
+        csvSelectedTypes.length === 0 || csvSelectedTypes.length === 4
+          ? 'All Types'
+          : csvSelectedTypes.map((t) => t.toUpperCase()).join(', ');
+
+      const catLabel =
+        csvSelectedCategories.length === 0
+          ? 'All Categories'
+          : csvSelectedCategories.length === 1
+          ? csvSelectedCategories[0]
+          : `${csvSelectedCategories.length} Categories`;
+
+      const result = await exportTransactionsStatement({
+        userEmail: user?.email || 'Account Holder',
+        userId: user?.id,
+        dateFilterLabel,
+        accountFilterLabel,
+        typeFilterLabel,
+        categoriesFilterLabel: catLabel,
+        transactions: matchingCsvTransactions,
         accountMap,
+        method,
       });
 
-      if (!res.success && res.error) {
-        Alert.alert('Export Error', res.error);
-      } else if (res.success) {
+      if (!result.success && result.error) {
+        Alert.alert('Export Error', result.error);
+      } else if (result.success) {
         setCsvModalVisible(false);
-        if (res.copiedToClipboard) {
-          Alert.alert('CSV Copied', `${res.count} transaction records copied to your clipboard.`);
-        }
       }
     } catch (err: any) {
-      Alert.alert('Export Error', err?.message || 'Failed to export CSV');
+      Alert.alert('Export Error', err?.message || 'Failed to generate PDF statement');
     } finally {
-      setIsExportingCsv(false);
+      setIsExportingStatement(false);
     }
+  };
+
+  const handleDownloadStatement = () => {
+    if (matchingCsvTransactions.length === 0) {
+      Alert.alert('No Data', 'No transactions match your selected filter criteria.');
+      return;
+    }
+    Alert.alert(
+      'Export Statement',
+      `Export ${matchingCsvTransactions.length} filtered transaction${matchingCsvTransactions.length === 1 ? '' : 's'} as PDF:`,
+      [
+        {
+          text: 'Save as PDF (Direct)',
+          onPress: () => performStatementExport('save'),
+        },
+        {
+          text: 'Share via Apps',
+          onPress: () => performStatementExport('share'),
+        },
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+      ]
+    );
   };
 
   const isDynamicSupported = isWallpaperThemeSupported();
@@ -648,7 +702,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) =>
 
           <View style={[styles.divider, { backgroundColor: colors.border }]} />
 
-          {/* Export Data (CSV) - LIVE with Filter Modal */}
+          {/* Download Statement (PDF) - LIVE with Custom Range Filter Modal */}
           <TouchableOpacity
             onPress={() => setCsvModalVisible(true)}
             style={styles.placeholderRow}
@@ -656,7 +710,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) =>
           >
             <View style={styles.placeholderTextCol}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <Text style={[styles.placeholderTitle, { color: colors.textPrimary }]}>Export Data (CSV)</Text>
+                <Text style={[styles.placeholderTitle, { color: colors.textPrimary }]}>Download Statement (PDF)</Text>
                 <Ionicons name="document-text-outline" size={14} color={colors.primary} />
               </View>
               <Text style={[styles.placeholderSub, { color: colors.textMuted }]}>
@@ -665,7 +719,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) =>
             </View>
             <View style={[styles.actionBadge, { backgroundColor: colors.primaryContainer, borderColor: colors.primary }]}>
               <Ionicons name="download-outline" size={12} color={colors.primary} style={{ marginRight: 3 }} />
-              <Text style={[styles.actionBadgeText, { color: colors.primary }]}>EXPORT</Text>
+              <Text style={[styles.actionBadgeText, { color: colors.primary }]}>STATEMENT</Text>
             </View>
           </TouchableOpacity>
 
@@ -784,7 +838,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) =>
             {/* Modal Header */}
             <View style={[styles.modalHeaderRow, { borderBottomColor: colors.border }]}>
               <View>
-                <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>Export Transactions (CSV)</Text>
+                <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>Download Statement (PDF)</Text>
                 <Text style={[styles.modalSubtitle, { color: colors.textMuted }]}>
                   {matchingCsvTransactions.length} transaction{matchingCsvTransactions.length === 1 ? '' : 's'} matching filter
                 </Text>
@@ -1010,8 +1064,8 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) =>
             {/* Modal Bottom Action Bar */}
             <View style={[styles.modalFooter, { borderTopColor: colors.border }]}>
               <TactileButton
-                onPress={handleExportCsv}
-                disabled={isExportingCsv || matchingCsvTransactions.length === 0}
+                onPress={handleDownloadStatement}
+                disabled={isExportingStatement || matchingCsvTransactions.length === 0}
                 style={[
                   styles.exportBtn,
                   {
@@ -1019,13 +1073,13 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) =>
                   },
                 ]}
               >
-                {isExportingCsv ? (
+                {isExportingStatement ? (
                   <ActivityIndicator size="small" color={colors.onPrimary} />
                 ) : (
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                     <Ionicons name="download-outline" size={16} color={colors.onPrimary} />
                     <Text style={[styles.exportBtnText, { color: colors.onPrimary }]}>
-                      Export {matchingCsvTransactions.length} Record{matchingCsvTransactions.length === 1 ? '' : 's'}
+                      Download Statement ({matchingCsvTransactions.length} Record{matchingCsvTransactions.length === 1 ? '' : 's'})
                     </Text>
                   </View>
                 )}

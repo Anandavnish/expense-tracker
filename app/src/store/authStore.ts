@@ -1,12 +1,15 @@
-// src/store/authStore.ts
 import { create } from 'zustand';
 import { Session, User } from '@supabase/supabase-js';
-import { Linking } from 'react-native';
+import { Linking, Platform } from 'react-native';
+import * as WebBrowser from 'expo-web-browser';
+import { makeRedirectUri } from 'expo-auth-session';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../services/supabase';
 import { useSettingsStore } from './settingsStore';
 import { useFinanceStore } from './financeStore';
 import { useMerchantRulesStore } from './merchantRulesStore';
+
+WebBrowser.maybeCompleteAuthSession();
 
 const GUEST_STORAGE_KEY = '@auth_is_guest_mode_v1';
 
@@ -45,50 +48,95 @@ interface AuthState {
   clearError: () => void;
 }
 
+const extractParams = (url: string) => {
+  const params = new URLSearchParams();
+  const queryIndex = url.indexOf('?');
+  const hashIndex = url.indexOf('#');
+
+  if (queryIndex !== -1) {
+    const end = hashIndex !== -1 && hashIndex > queryIndex ? hashIndex : url.length;
+    const queryStr = url.substring(queryIndex + 1, end);
+    new URLSearchParams(queryStr).forEach((val, key) => params.set(key, val));
+  }
+  if (hashIndex !== -1) {
+    const hashStr = url.substring(hashIndex + 1);
+    new URLSearchParams(hashStr).forEach((val, key) => params.set(key, val));
+  }
+  return params;
+};
+
 const handleAuthUrl = async (url: string) => {
   try {
     if (!url) return;
-    if (url.includes('access_token=') || url.includes('#access_token=') || url.includes('code=')) {
-      const hashIndex = url.indexOf('#');
-      const queryIndex = url.indexOf('?');
-      let paramsString = '';
-      if (hashIndex !== -1) {
-        paramsString = url.substring(hashIndex + 1);
-      } else if (queryIndex !== -1) {
-        paramsString = url.substring(queryIndex + 1);
-      }
-      const params = new URLSearchParams(paramsString);
-      const accessToken = params.get('access_token');
-      const refreshToken = params.get('refresh_token');
-      const code = params.get('code');
+    const params = extractParams(url);
 
-      if (accessToken && refreshToken) {
-        const { data, error } = await supabase.auth.setSession({
-          access_token: accessToken,
-          refresh_token: refreshToken,
+    const authError = params.get('error_description') || params.get('error');
+    if (authError) {
+      useAuthStore.setState({ isLoading: false, error: authError });
+      return;
+    }
+
+    const accessToken = params.get('access_token');
+    const refreshToken = params.get('refresh_token');
+    const code = params.get('code');
+
+    if (accessToken && refreshToken) {
+      useAuthStore.setState({ isLoading: true });
+      const { data, error } = await supabase.auth.setSession({
+        access_token: accessToken,
+        refresh_token: refreshToken,
+      });
+      if (error) {
+        useAuthStore.setState({ isLoading: false, error: error.message });
+        return;
+      }
+      if (data.session) {
+        const wasGuest = useAuthStore.getState().isGuest;
+        await AsyncStorage.removeItem(GUEST_STORAGE_KEY);
+        useAuthStore.setState({
+          session: data.session,
+          user: data.session.user,
+          isGuest: false,
+          isLoading: false,
+          error: null,
         });
-        if (!error && data.session) {
-          const wasGuest = useAuthStore.getState().isGuest;
-          await AsyncStorage.removeItem(GUEST_STORAGE_KEY);
-          useAuthStore.setState({ session: data.session, user: data.session.user, isGuest: false });
-          if (wasGuest && data.session.user) {
+        if (data.session.user) {
+          useSettingsStore.getState().fetchGeminiApiKey(data.session.user.id).catch(() => {});
+          useMerchantRulesStore.getState().loadRules(data.session.user.id).catch(() => {});
+          if (wasGuest) {
             useFinanceStore.getState().migrateLocalDataToCloud(data.session.user.id).catch(() => {});
           }
         }
-      } else if (code) {
-        const { data, error } = await supabase.auth.exchangeCodeForSession(code);
-        if (!error && data.session) {
-          const wasGuest = useAuthStore.getState().isGuest;
-          await AsyncStorage.removeItem(GUEST_STORAGE_KEY);
-          useAuthStore.setState({ session: data.session, user: data.session.user, isGuest: false });
-          if (wasGuest && data.session.user) {
+      }
+    } else if (code) {
+      useAuthStore.setState({ isLoading: true });
+      const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+      if (error) {
+        useAuthStore.setState({ isLoading: false, error: error.message });
+        return;
+      }
+      if (data.session) {
+        const wasGuest = useAuthStore.getState().isGuest;
+        await AsyncStorage.removeItem(GUEST_STORAGE_KEY);
+        useAuthStore.setState({
+          session: data.session,
+          user: data.session.user,
+          isGuest: false,
+          isLoading: false,
+          error: null,
+        });
+        if (data.session.user) {
+          useSettingsStore.getState().fetchGeminiApiKey(data.session.user.id).catch(() => {});
+          useMerchantRulesStore.getState().loadRules(data.session.user.id).catch(() => {});
+          if (wasGuest) {
             useFinanceStore.getState().migrateLocalDataToCloud(data.session.user.id).catch(() => {});
           }
         }
       }
     }
-  } catch (err) {
+  } catch (err: any) {
     console.warn('[authStore] Error handling auth deep link:', err);
+    useAuthStore.setState({ isLoading: false, error: err?.message || 'Authentication failed' });
   }
 };
 
@@ -207,10 +255,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   signInWithGoogle: async () => {
     set({ isLoading: true, error: null });
     try {
+      const redirectUrl = makeRedirectUri({
+        scheme: 'expensetracker',
+        path: 'auth/callback',
+      });
+
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: 'expensetracker://auth/callback',
+          redirectTo: redirectUrl,
+          skipBrowserRedirect: Platform.OS !== 'web',
           queryParams: {
             access_type: 'offline',
             prompt: 'consent',
@@ -224,13 +278,26 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       }
 
       if (data?.url) {
-        await Linking.openURL(data.url);
+        if (Platform.OS === 'web') {
+          if (typeof window !== 'undefined') {
+            window.location.href = data.url;
+          }
+        } else {
+          const authResult = await WebBrowser.openAuthSessionAsync(data.url, redirectUrl);
+          if (authResult.type === 'success' && authResult.url) {
+            await handleAuthUrl(authResult.url);
+          } else {
+            // Cancelled or dismissed
+            set({ isLoading: false });
+          }
+        }
+      } else {
+        set({ isLoading: false });
       }
 
-      set({ isLoading: false });
       return { error: null };
     } catch (err: any) {
-      set({ isLoading: false, error: err.message });
+      set({ isLoading: false, error: err?.message || 'Google sign in failed' });
       return { error: err };
     }
   },

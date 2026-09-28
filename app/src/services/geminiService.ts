@@ -607,15 +607,13 @@ export const SPENDING_OVERVIEW_SYSTEM_PROMPT = `You are a spending-pattern obser
 STRICT RULES:
 - Every claim must be directly derivable from the JSON provided. Never invent a number, merchant, date, or month-over-month comparison that isn't explicitly present in the input.
 - Never recommend specific financial products, investments, loans, insurance, or debt actions. You observe spending behavior only — never prescribe financial decisions.
-- If the input data doesn't support a section below, OMIT it entirely — do not fabricate content to fill the template.
 - If this period is marked as a historical/closed period, use past tense and frame as a finalized retrospective summary, not in-progress pace advice.
 - If no budget is present in the data, do NOT comment on budget adherence, budget tracking, or "staying within budget".
-
-OUTPUT EXACTLY THIS STRUCTURE, under 120 words total:
-1. SNAPSHOT — one factual line restating the core numbers exactly as given (e.g. "You spent ₹X of ₹Y budgeted, saving Z% of income this month.") — the user should be able to verify this instantly against their own screen.
-2. PATTERN — one specific behavioral observation from the category data only (e.g. "Food and Travel made up 62% of spending.")
-3. FLAG (optional — omit if nothing crosses a real threshold) — only include if credit utilization > 30%, a category spiked meaningfully vs. prior data given, or spending is outpacing days remaining in the month.
-4. NEXT STEP — one concrete, specific-to-these-numbers behavioral suggestion (adjust a category budget, review a specific recurring charge) — never generic ("save more") and never financial-product advice.`;
+- Do NOT output section headers, labels, bullets, numbered lists, or prefixes (do NOT write 'SNAPSHOT:', 'PATTERN:', 'FLAG:', or 'NEXT STEP:').
+- Write a clean, natural, cohesive 2-3 sentence financial summary (strictly under 100 words total) in plain language:
+  1. Factually synthesize the core spending and saving/budget performance from the data.
+  2. Highlight the most prominent spending pattern or top category behavior.
+  3. (Optional) Provide one concrete behavioral observation or relevant takeaway based strictly on these numbers.`;
 
 /**
  * Enforces the ~120-word cap on AI overview output
@@ -711,16 +709,14 @@ ${JSON.stringify(summary, null, 2)}
       let text = String(directRes.data).trim();
       const words = text.split(/\s+/).filter(Boolean);
 
-      // Check if wildly over length (> 135 words) or missing essential sections
-      const isWildlyOver = words.length > 135;
-      const missingStructure =
-        !/SNAPSHOT/i.test(text) || !/PATTERN/i.test(text) || !/NEXT\s*STEP/i.test(text);
+      // Check if wildly over length (> 125 words)
+      const isWildlyOver = words.length > 125;
 
-      if (isWildlyOver || missingStructure) {
+      if (isWildlyOver) {
         const retryRes = await callGeminiDirect(
           apiKey,
           buildPrompt(
-            `Your previous response was ${words.length} words and did not strictly follow the structure. Re-generate strictly under 120 words total adhering to SNAPSHOT, PATTERN, FLAG (if threshold met), NEXT STEP.`
+            `Your previous response was ${words.length} words. Re-generate strictly under 100 words in 2-3 natural sentences without any headings or labels.`
           ),
           undefined,
           false

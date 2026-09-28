@@ -111,53 +111,26 @@ export const getCategoryIconProps = (category: string): { name: keyof typeof Ion
 };
 
 /**
- * Formats structured AI Overview sections (SNAPSHOT, PATTERN, FLAG, NEXT STEP)
+ * Renders AI Overview cleanly as natural flowing sentences/paragraphs without artificial subheadings
  */
-const renderFormattedOverview = (text: string, styles: any, colors: any, accent: any) => {
-  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+const renderFormattedOverview = (text: string, styles: any, colors: any, _accent: any) => {
+  const lines = text
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((line) => {
+      // Strip any artificial section labels (e.g., "1. SNAPSHOT:", "PATTERN -", "FLAG:", "NEXT STEP:")
+      return line.replace(/^(\d+\.?\s*)?(SNAPSHOT|PATTERN|FLAG|NEXT\s*STEP)\s*[:—–-]\s*/i, '').trim();
+    })
+    .filter(Boolean);
 
   return (
     <View style={{ gap: 8 }}>
-      {lines.map((line, idx) => {
-        const match = line.match(/^(\d+\.?\s*)?(SNAPSHOT|PATTERN|FLAG|NEXT\s*STEP)\s*[:—–-]\s*(.*)$/i);
-        if (match) {
-          const sectionKey = match[2].toUpperCase().replace(/\s+/g, ' ');
-          const content = match[3];
-          const isFlag = sectionKey === 'FLAG';
-          const isNextStep = sectionKey === 'NEXT STEP';
-          const isSnapshot = sectionKey === 'SNAPSHOT';
-
-          return (
-            <View key={idx} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6 }}>
-              <Text
-                style={[
-                  styles.aiSectionLabel,
-                  {
-                    color: isFlag
-                      ? colors.warning
-                      : isNextStep
-                      ? accent.hex
-                      : isSnapshot
-                      ? colors.primary
-                      : colors.textSecondary,
-                  },
-                ]}
-              >
-                {sectionKey}:
-              </Text>
-              <Text style={[styles.aiSectionBody, { color: colors.textPrimary, flex: 1 }]}>
-                {content}
-              </Text>
-            </View>
-          );
-        }
-
-        return (
-          <Text key={idx} style={[styles.aiOverviewParagraph, { color: colors.textPrimary }]}>
-            {line}
-          </Text>
-        );
-      })}
+      {lines.map((line, idx) => (
+        <Text key={idx} style={[styles.aiOverviewParagraph, { color: colors.textPrimary }]}>
+          {line}
+        </Text>
+      ))}
     </View>
   );
 };
