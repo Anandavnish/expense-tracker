@@ -716,15 +716,34 @@ Foundational architecture build for a high-performance cross-platform personal f
     - Renders official brand mark inside a rounded tile (`borderRadius: size * 0.28`) with proportional 4-6px padding (`size * 0.12`) over `logoTileBackground`.
     - Automatic fallback for custom accounts or unmapped presets to a bold initials avatar (1-2 letters) tinted with the brand/custom color (`brandColor + '1E'`).
     - Handled `onError` to guarantee an empty or broken image is never rendered.
-  - **Universal Screen Integration**:
-    - Eliminated all duplicate per-screen icon logic (deleted `getAccountIconProps`).
-    - **Dashboard Money Sources**: Bank & cash accounts and credit cards render `<BankLogo />`.
-    - **Account Detail Screen**: Hero identity card, Edit modal bank preset chips, and Pay Credit Card Bill source list all render `<BankLogo />`.
-    - **Add Transaction Source Grid**: Deduction source selector renders `<BankLogo />`.
-    - **Transaction Row Source Pill**: Embedded account badges inside `<TransactionRow />` render `<BankLogo />` alongside the institution name.
-    - **Both Manage Modals**:
-      - Manage & Reorder list view (`YouTubeStyleDraggableList`) uses `<BankLogo />`.
-      - Add / Edit Money Source modal (both Bank Preset Grid and Card Issuer Grid) uses `<BankLogo />`.
+  - **Universal Screen & Component Rollout**:
+    - Eliminated all remaining generic Ionicons (`wallet-outline`, `business-outline`, `card-outline`, `cash-outline`) for money source institutions across every screen and modal in the application:
+    - **Dashboard**:
+      - Money Sources cards (Bank Accounts, Cash, Credit Cards).
+      - Reorder list view (`YouTubeStyleDraggableList`) and Preset Selection Grid in the Add/Edit Account modal.
+      - Pending Balance Sync Sheet item cards.
+      - Month Balance Calibration modal pay-source list.
+    - **Transaction Detail Screen**:
+      - Money Source breakdown row in view mode.
+      - Payment Account selector chips in edit mode.
+    - **Transactions Screen**:
+      - Top active account quick filter pill.
+      - Account Filter Sheet modal option list (with active checkmark overlay).
+      - Embedded source badges inside `TransactionRow`.
+    - **Account Detail Screen**:
+      - Hero identity card.
+      - Preset selector chips for editing bank and card accounts.
+      - Pay Credit Card Bill eligible liquid source list.
+    - **Add Transaction Screen**:
+      - Deduction source account grid.
+    - **Borrows Screen**:
+      - Borrow card connected account badge.
+      - Add / Edit Borrow deduction/destination account selector pills.
+      - Settle Borrow modal eligible liquid account list.
+    - **Settings Screen**:
+      - CSV Statement Export account filter chips with responsive horizontal layout.
+  - **Text-Based Preset Inference (`inferPresetFromText`)**:
+    - Added smart text inference in `BankLogo.tsx` that inspects account names or arbitrary strings (e.g., `"SBI • Salary"`, `"Kotak 811"`, `"HDFC Bank"`, `"OneCard Visa"`) to resolve brand logos even when only an account name or string is available.
   - **Verification**:
     - `npx tsc --noEmit`: 0 errors.
     - `npm run lint`: 0 errors, 0 warnings.

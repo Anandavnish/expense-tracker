@@ -1881,6 +1881,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
 
                   return (
                     <View key={item.accountId} style={styles.syncItemCard}>
+                      <BankLogo account={targetAcc} name={accName} size={36} style={{ marginRight: SPACING.md }} />
                       <View style={styles.syncItemInfoCol}>
                         <Text style={styles.syncItemAccountName}>{accName}</Text>
                         <Text style={[styles.syncItemDiffText, { color: isPositive ? accent.hex : colors.alert }]}>
@@ -2133,10 +2134,10 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                         ]}
                       >
                         <View style={styles.paySourceItemLeft}>
-                          <Ionicons
-                            name={acc.type === 'cash' ? 'cash-outline' : 'business-outline'}
-                            size={16}
-                            color={isSelected ? accent.hex : colors.textSecondary}
+                          <BankLogo
+                            account={acc}
+                            size={22}
+                            style={{ marginRight: 8 }}
                           />
                           <Text
                             style={[

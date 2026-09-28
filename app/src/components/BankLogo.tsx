@@ -65,6 +65,44 @@ export function getInitials(name?: string | null, presetId?: string | null): str
 }
 
 /**
+ * Infers a known bank or card preset ID from freeform text / account names.
+ */
+export function inferPresetFromText(text?: string | null): string | null {
+  if (!text) return null;
+  const clean = text.trim();
+  if (!clean) return null;
+
+  // If text contains '•', check the parts first
+  if (clean.includes('•')) {
+    const parts = clean.split('•').map((s) => s.trim());
+    for (const part of parts) {
+      const match = inferPresetFromText(part);
+      if (match) return match;
+    }
+  }
+
+  const lower = clean.toLowerCase();
+
+  // Distinct card brands & multi-word presets
+  if (lower.includes('sbi card') || lower.includes('sbicard')) return 'SBI Card';
+  if (lower.includes('onecard') || lower.includes('one card')) return 'OneCard';
+  if (lower.includes('india post') || lower.includes('ippb') || lower.includes('post office')) return 'India Post';
+  if (lower.includes('bank of baroda') || lower.includes('bob')) return 'BOB';
+  if (lower.includes('punjab national') || lower.includes('pnb')) return 'PNB';
+  if (lower.includes('state bank') || lower.includes('sbi')) return 'SBI';
+
+  // Bank & Card single names
+  if (lower.includes('hdfc')) return 'HDFC';
+  if (lower.includes('icici')) return 'ICICI';
+  if (lower.includes('axis')) return 'Axis';
+  if (lower.includes('kotak')) return 'Kotak';
+  if (lower.includes('canara')) return 'Canara';
+  if (lower.includes('slice')) return 'Slice';
+
+  return null;
+}
+
+/**
  * Extracts preset code from an Account if present or inferred from name.
  */
 export function resolveAccountPreset(acc?: Account | null): string | null {
@@ -75,11 +113,10 @@ export function resolveAccountPreset(acc?: Account | null): string | null {
   if (acc.type === 'credit_card') {
     if (acc.card_issuer && acc.card_issuer !== 'Custom') return acc.card_issuer;
   }
-  // Check name if formatted as "Preset • CustomName"
-  const raw = acc.name?.trim() || '';
-  if (raw.includes('•')) {
-    const parts = raw.split('•').map((s) => s.trim());
-    return parts[0];
+  // Check name if formatted as "Preset • CustomName" or containing brand keywords
+  if (acc.name) {
+    const inferred = inferPresetFromText(acc.name);
+    if (inferred) return inferred;
   }
   return acc.bank_preset || acc.card_issuer || null;
 }
@@ -95,7 +132,7 @@ export function resolveAccountBrandColor(
   if (acc?.custom_color) return acc.custom_color;
   if (acc?.type === 'cash') return '#10B981';
 
-  const effectivePreset = presetId || resolveAccountPreset(acc);
+  const effectivePreset = presetId || resolveAccountPreset(acc) || inferPresetFromText(acc?.name);
   if (effectivePreset) {
     const norm = normalizePresetId(effectivePreset).replace(/\s+/g, '');
     if (norm === 'sbi') return BANK_BRAND_COLORS.sbi;
@@ -128,7 +165,11 @@ export const BankLogo: React.FC<BankLogoProps> = ({
   const { colors } = useSettingsStore();
   const [hasImageError, setHasImageError] = useState(false);
 
-  const effectivePreset = presetId ?? resolveAccountPreset(account);
+  const effectivePreset =
+    presetId ??
+    resolveAccountPreset(account) ??
+    inferPresetFromText(account?.name) ??
+    inferPresetFromText(name);
   const effectiveName = name ?? account?.name;
   const effectiveBrandColor =
     brandColor ??

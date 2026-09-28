@@ -15,15 +15,18 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { TextInput } from 'react-native-paper';
+import { LinearGradient } from 'expo-linear-gradient';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useAuthStore } from '../../store/authStore';
-import { useFinanceStore } from '../../store/financeStore';
+import { useFinanceStore, getCurrentMonthString } from '../../store/financeStore';
 import { useSettingsStore } from '../../store/settingsStore';
 import { exportTransactionsStatement } from '../../services/statementExport';
 import { SPACING, TYPOGRAPHY, ThemeColors } from '../../theme/tokens';
 import { Transaction, TransactionType } from '../../types/database';
 import { TransactionRow } from '../../components/TransactionRow';
 import { TactileButton } from '../../components/TactileButton';
+import { MonthUnlockModal } from '../../components/MonthUnlockModal';
+import { BankLogo } from '../../components/BankLogo';
 import {
   getCategoryIcon,
   DEFAULT_INCOME_CATEGORIES,
@@ -59,7 +62,54 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({ navigati
   const { user } = useAuthStore();
   const { accent, colors } = useSettingsStore();
   const styles = useMemo(() => getStyles(colors), [colors]);
-  const { transactions, accounts, categories, selectedMonth } = useFinanceStore();
+  const {
+    transactions,
+    accounts,
+    categories,
+    selectedMonth,
+    isMonthLocked,
+  } = useFinanceStore();
+
+  // Month lock & unlock state
+  const [unlockModalVisible, setUnlockModalVisible] = useState(false);
+  const currentMonthStr = useMemo(() => getCurrentMonthString(), []);
+  const isPastMonth = selectedMonth < currentMonthStr;
+  const isFutureMonth = selectedMonth > currentMonthStr;
+  const isLocked = isPastMonth && isMonthLocked(selectedMonth);
+
+  const formattedMonthLabel = useMemo(() => {
+    try {
+      const [yearStr, monthStr] = selectedMonth.split('-');
+      const date = new Date(parseInt(yearStr, 10), parseInt(monthStr, 10) - 1, 1);
+      return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+    } catch {
+      return selectedMonth;
+    }
+  }, [selectedMonth]);
+
+  const handleOpenAddTransaction = () => {
+    if (dateFilter === 'this_month' && isFutureMonth) {
+      Alert.alert(
+        'Upcoming Month',
+        `${formattedMonthLabel} has not begun yet. Transactions cannot be logged in future months.`
+      );
+      return;
+    }
+    if (dateFilter === 'this_month' && isPastMonth && isLocked) {
+      Alert.alert(
+        'Month Locked',
+        `${formattedMonthLabel} is locked to protect historical records. Unlock this month to log or edit transactions.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Unlock Month', onPress: () => setUnlockModalVisible(true) },
+        ]
+      );
+      return;
+    }
+    navigation.navigate('AddTransaction', {
+      initialMonth: dateFilter === 'this_month' && isPastMonth ? selectedMonth : undefined,
+    });
+  };
 
   // Export State
   const [isExporting, setIsExporting] = useState(false);
@@ -311,15 +361,6 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({ navigati
     [accountMap]
   );
 
-  const formattedMonthLabel = useMemo(() => {
-    try {
-      const [yearStr, monthStr] = selectedMonth.split('-');
-      const date = new Date(parseInt(yearStr, 10), parseInt(monthStr, 10) - 1, 1);
-      return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
-    } catch {
-      return selectedMonth;
-    }
-  }, [selectedMonth]);
 
   const dateFilterLabel = useMemo(() => {
     if (dateFilter === 'this_month') return formattedMonthLabel;
@@ -635,11 +676,20 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({ navigati
               },
             ]}
           >
-            <Ionicons
-              name="wallet-outline"
-              size={13}
-              color={selectedAccountId ? accent.hex : colors.textSecondary}
-            />
+            {selectedAccountId ? (
+              <BankLogo
+                account={accounts.find((a) => a.id === selectedAccountId)}
+                name={accountMap[selectedAccountId]}
+                size={16}
+                style={{ marginRight: 5 }}
+              />
+            ) : (
+              <Ionicons
+                name="wallet-outline"
+                size={13}
+                color={colors.textSecondary}
+              />
+            )}
             <Text
               style={[
                 styles.quickPillText,
@@ -759,35 +809,42 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({ navigati
       </View>
 
       {/* 6. TRANSACTIONS LIST */}
-      <FlatList
-        data={filteredTransactions}
-        keyExtractor={(item) => item.id}
-        renderItem={renderItem}
-        contentContainerStyle={styles.listContent}
-        showsVerticalScrollIndicator={false}
-        initialNumToRender={12}
-        maxToRenderPerBatch={10}
-        windowSize={5}
-        removeClippedSubviews={Platform.OS === 'android'}
-        ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <View style={styles.emptyIconBadge}>
-              <Ionicons name="search-outline" size={32} color={colors.textMuted} />
+      <View style={styles.listWrapper}>
+        <LinearGradient
+          colors={[colors.background, 'transparent']}
+          style={styles.topFadeGradient}
+          pointerEvents="none"
+        />
+        <FlatList
+          data={filteredTransactions}
+          keyExtractor={(item) => item.id}
+          renderItem={renderItem}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+          initialNumToRender={12}
+          maxToRenderPerBatch={10}
+          windowSize={5}
+          removeClippedSubviews={Platform.OS === 'android'}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <View style={styles.emptyIconBadge}>
+                <Ionicons name="search-outline" size={32} color={colors.textMuted} />
+              </View>
+              <Text style={styles.emptyTitle}>No transactions found</Text>
+              <Text style={styles.emptySubtitle}>
+                {searchQuery
+                  ? `No records matching "${searchQuery}".`
+                  : 'No records match the current filter criteria.'}
+              </Text>
+              {activeFiltersCount > 0 && (
+                <TouchableOpacity onPress={resetFilters} style={styles.resetBtn}>
+                  <Text style={[styles.resetBtnText, { color: accent.hex }]}>Reset All Filters</Text>
+                </TouchableOpacity>
+              )}
             </View>
-            <Text style={styles.emptyTitle}>No transactions found</Text>
-            <Text style={styles.emptySubtitle}>
-              {searchQuery
-                ? `No records matching "${searchQuery}".`
-                : 'No records match the current filter criteria.'}
-            </Text>
-            {activeFiltersCount > 0 && (
-              <TouchableOpacity onPress={resetFilters} style={styles.resetBtn}>
-                <Text style={[styles.resetBtnText, { color: accent.hex }]}>Reset All Filters</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        }
-      />
+          }
+        />
+      </View>
 
       {/* 7. Comprehensive Filter Modal */}
       <Modal
@@ -1018,18 +1075,10 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({ navigati
                             },
                           ]}
                         >
-                          <Ionicons
-                            name={
-                              active
-                                ? 'checkmark-circle'
-                                : acc.type === 'credit_card'
-                                ? 'card-outline'
-                                : acc.type === 'cash'
-                                ? 'cash-outline'
-                                : 'business-outline'
-                            }
-                            size={14}
-                            color={active ? accent.hex : colors.textMuted}
+                          <BankLogo
+                            account={acc}
+                            size={18}
+                            style={{ marginRight: 8 }}
                           />
                           <Text
                             style={[
@@ -1040,6 +1089,14 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({ navigati
                           >
                             {acc.name}
                           </Text>
+                          {active && (
+                            <Ionicons
+                              name="checkmark"
+                              size={14}
+                              color={accent.hex}
+                              style={{ marginLeft: 6 }}
+                            />
+                          )}
                         </TouchableOpacity>
                       );
                     })}
@@ -1258,17 +1315,58 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({ navigati
         />
       )}
 
-      {/* Floating Circular "+" Button (Identical to Dashboard) */}
+      {/* Floating Circular "+" Button (Guarded by month lock) */}
       <TouchableOpacity
-        onPress={() => navigation.navigate('AddTransaction')}
-        style={[styles.floatingAddBtn, { backgroundColor: accent.hex }]}
+        onPress={handleOpenAddTransaction}
+        style={[
+          styles.floatingAddBtn,
+          {
+            backgroundColor:
+              dateFilter === 'this_month' && (isFutureMonth || (isPastMonth && isLocked))
+                ? colors.surfaceLight
+                : accent.hex,
+          },
+          dateFilter === 'this_month' &&
+            (isFutureMonth || (isPastMonth && isLocked)) && {
+              borderColor: colors.border,
+              borderWidth: 1,
+            },
+        ]}
         activeOpacity={0.7}
         hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
         accessibilityLabel="Add Transaction"
         accessibilityRole="button"
       >
-        <Ionicons name="add" size={30} color={colors.onPrimary} />
+        <Ionicons
+          name={
+            dateFilter === 'this_month' && isFutureMonth
+              ? 'time-outline'
+              : dateFilter === 'this_month' && isPastMonth && isLocked
+              ? 'lock-closed'
+              : 'add'
+          }
+          size={
+            dateFilter === 'this_month' && (isFutureMonth || (isPastMonth && isLocked)) ? 20 : 30
+          }
+          color={
+            dateFilter === 'this_month' && (isFutureMonth || (isPastMonth && isLocked))
+              ? colors.textMuted
+              : colors.onPrimary
+          }
+        />
       </TouchableOpacity>
+
+      {/* Month Unlock Modal */}
+      <MonthUnlockModal
+        visible={unlockModalVisible}
+        month={selectedMonth}
+        onClose={() => setUnlockModalVisible(false)}
+        onUnlockSuccess={() => {
+          navigation.navigate('AddTransaction', {
+            initialMonth: selectedMonth,
+          });
+        }}
+      />
     </View>
   );
 };
@@ -1471,13 +1569,31 @@ function getStyles(colors: ThemeColors) {
       alignItems: 'center',
       justifyContent: 'space-around',
       marginHorizontal: SPACING.lg,
-      marginBottom: SPACING.sm,
-      paddingVertical: 8,
-      paddingHorizontal: 12,
+      marginBottom: SPACING.xs,
+      paddingVertical: 10,
+      paddingHorizontal: SPACING.md,
       backgroundColor: colors.surface,
       borderColor: colors.border,
       borderWidth: 1,
-      borderRadius: 8,
+      borderRadius: 22,
+      shadowColor: colors.shadow,
+      shadowOffset: { width: 0, height: 3 },
+      shadowOpacity: 0.35,
+      shadowRadius: 6,
+      elevation: 5,
+      zIndex: 20,
+    },
+    listWrapper: {
+      flex: 1,
+      position: 'relative',
+    },
+    topFadeGradient: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      height: 24,
+      zIndex: 10,
     },
     metricItem: {
       alignItems: 'center',
@@ -1501,6 +1617,7 @@ function getStyles(colors: ThemeColors) {
     },
     listContent: {
       paddingHorizontal: SPACING.lg,
+      paddingTop: 8,
       paddingBottom: 96,
       gap: SPACING.xs,
     },

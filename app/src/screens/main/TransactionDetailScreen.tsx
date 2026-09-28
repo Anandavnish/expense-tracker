@@ -1,5 +1,5 @@
 // src/screens/main/TransactionDetailScreen.tsx
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -7,8 +7,6 @@ import {
   ScrollView,
   TouchableOpacity,
   Modal,
-  KeyboardAvoidingView,
-  Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,7 +17,10 @@ import { useSettingsStore } from '../../store/settingsStore';
 import { COLORS, SPACING, TYPOGRAPHY } from '../../theme/tokens';
 import { TactileButton } from '../../components/TactileButton';
 import { InlineError } from '../../components/InlineError';
+import { KeyboardAwareScrollView } from '../../components/KeyboardAwareScrollView';
 import { TransactionType } from '../../types/database';
+import { MonthUnlockModal } from '../../components/MonthUnlockModal';
+import { BankLogo } from '../../components/BankLogo';
 import {
   getCategoryIcon,
   getCategoryColor,
@@ -42,12 +43,34 @@ export const TransactionDetailScreen = () => {
     borrows,
     updateTransactionOptimistic,
     deleteTransactionOptimistic,
+    isMonthLocked,
   } = useFinanceStore();
 
   const transaction = useMemo(
     () => transactions.find((t) => t.id === transactionId),
     [transactions, transactionId]
   );
+
+  const txMonth = useMemo(
+    () => (transaction ? transaction.date.substring(0, 7) : ''),
+    [transaction]
+  );
+  const isLocked = useMemo(
+    () => (txMonth ? isMonthLocked(txMonth) : false),
+    [txMonth, isMonthLocked]
+  );
+  const [unlockModalVisible, setUnlockModalVisible] = useState(false);
+
+  const formattedMonthLabel = useMemo(() => {
+    if (!txMonth) return '';
+    try {
+      const [yearStr, monthStr] = txMonth.split('-');
+      const d = new Date(parseInt(yearStr, 10), parseInt(monthStr, 10) - 1, 1);
+      return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    } catch {
+      return txMonth;
+    }
+  }, [txMonth]);
 
   const account = useMemo(
     () => accounts.find((a) => a.id === transaction?.account_id),
@@ -65,6 +88,8 @@ export const TransactionDetailScreen = () => {
   const [isDeleting, setIsDeleting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const detailScrollRef = useRef<ScrollView>(null);
 
   // Edit Form State
   const [editAmount, setEditAmount] = useState(() => (transaction ? String(transaction.amount) : ''));
@@ -271,30 +296,44 @@ export const TransactionDetailScreen = () => {
 
         <View style={styles.topBarActions}>
           {!isEditing && (
-            <>
+            isLocked ? (
               <TouchableOpacity
-                style={styles.topActionIconBtn}
-                onPress={startEditing}
+                style={styles.lockedHeaderBadge}
+                onPress={() => setUnlockModalVisible(true)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 activeOpacity={0.7}
               >
-                <Ionicons name="create-outline" size={20} color={accent.hex} />
+                <Ionicons name="lock-closed" size={13} color={COLORS.textMuted} />
+                <Text style={styles.lockedHeaderBadgeText}>Locked</Text>
               </TouchableOpacity>
+            ) : (
+              <>
+                <TouchableOpacity
+                  style={styles.topActionIconBtn}
+                  onPress={startEditing}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="create-outline" size={20} color={accent.hex} />
+                </TouchableOpacity>
 
-              <TouchableOpacity
-                style={styles.topActionIconBtn}
-                onPress={() => setDeleteModalVisible(true)}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="trash-outline" size={20} color={COLORS.alert} />
-              </TouchableOpacity>
-            </>
+                <TouchableOpacity
+                  style={styles.topActionIconBtn}
+                  onPress={() => setDeleteModalVisible(true)}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="trash-outline" size={20} color={COLORS.alert} />
+                </TouchableOpacity>
+              </>
+            )
           )}
         </View>
       </View>
 
       <InlineError message={errorMessage} onDismiss={() => setErrorMessage(null)} />
 
-      <ScrollView
+      <KeyboardAwareScrollView
+        ref={detailScrollRef}
+        extraScrollHeight={80}
         style={styles.scrollView}
         contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + SPACING.xl }]}
         showsVerticalScrollIndicator={false}
@@ -349,26 +388,50 @@ export const TransactionDetailScreen = () => {
               ) : null}
             </View>
 
-            {/* Quick Action Buttons (Edit & Delete) */}
-            <View style={styles.quickActionsContainer}>
-              <TouchableOpacity
-                style={[styles.quickActionButton, { borderColor: accent.hex }]}
-                onPress={startEditing}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="create-outline" size={18} color={accent.hex} />
-                <Text style={[styles.quickActionText, { color: accent.hex }]}>Edit Details</Text>
-              </TouchableOpacity>
+            {/* Quick Action Buttons (Edit & Delete) or Locked Notice Card */}
+            {isLocked ? (
+              <View style={styles.lockedNoticeCard}>
+                <View style={styles.lockedNoticeIconBadge}>
+                  <Ionicons name="lock-closed" size={20} color={COLORS.warning} />
+                </View>
+                <View style={styles.lockedNoticeContent}>
+                  <Text style={styles.lockedNoticeTitle}>Month Locked (View Only)</Text>
+                  <Text style={styles.lockedNoticeDesc}>
+                    This entry belongs to {formattedMonthLabel} which is locked against modifications. Unlock this month to edit or delete it.
+                  </Text>
+                  <TouchableOpacity
+                    style={[styles.unlockEntryBtn, { borderColor: accent.hex }]}
+                    onPress={() => setUnlockModalVisible(true)}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="lock-open-outline" size={14} color={accent.hex} />
+                    <Text style={[styles.unlockEntryBtnText, { color: accent.hex }]}>
+                      Unlock {formattedMonthLabel}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : (
+              <View style={styles.quickActionsContainer}>
+                <TouchableOpacity
+                  style={[styles.quickActionButton, { borderColor: accent.hex }]}
+                  onPress={startEditing}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="create-outline" size={18} color={accent.hex} />
+                  <Text style={[styles.quickActionText, { color: accent.hex }]}>Edit Details</Text>
+                </TouchableOpacity>
 
-              <TouchableOpacity
-                style={[styles.quickActionButton, { borderColor: COLORS.alert }]}
-                onPress={() => setDeleteModalVisible(true)}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="trash-outline" size={18} color={COLORS.alert} />
-                <Text style={[styles.quickActionText, { color: COLORS.alert }]}>Delete Entry</Text>
-              </TouchableOpacity>
-            </View>
+                <TouchableOpacity
+                  style={[styles.quickActionButton, { borderColor: COLORS.alert }]}
+                  onPress={() => setDeleteModalVisible(true)}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="trash-outline" size={18} color={COLORS.alert} />
+                  <Text style={[styles.quickActionText, { color: COLORS.alert }]}>Delete Entry</Text>
+                </TouchableOpacity>
+              </View>
+            )}
 
             {/* Structured Details Breakdown */}
             <View style={styles.sectionCard}>
@@ -377,7 +440,11 @@ export const TransactionDetailScreen = () => {
               {/* Payment Account */}
               <View style={styles.infoRow}>
                 <View style={styles.infoLabelGroup}>
-                  <Ionicons name="wallet-outline" size={18} color={COLORS.textSecondary} />
+                  {account ? (
+                    <BankLogo account={account} name={account.name} size={18} />
+                  ) : (
+                    <Ionicons name="wallet-outline" size={18} color={COLORS.textSecondary} />
+                  )}
                   <Text style={styles.infoLabel}>Money Source</Text>
                 </View>
                 <View style={styles.infoValueRight}>
@@ -515,28 +582,32 @@ export const TransactionDetailScreen = () => {
               </View>
             )}
 
-            {/* Prominent Delete Button at Bottom */}
-            <TouchableOpacity
-              style={styles.bottomDeleteBtn}
-              onPress={() => setDeleteModalVisible(true)}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="trash-outline" size={18} color={COLORS.alert} />
-              <Text style={styles.bottomDeleteBtnText}>Delete This Transaction</Text>
-            </TouchableOpacity>
+            {/* Prominent Delete Button at Bottom (Only if not locked) */}
+            {!isLocked && (
+              <TouchableOpacity
+                style={styles.bottomDeleteBtn}
+                onPress={() => setDeleteModalVisible(true)}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="trash-outline" size={18} color={COLORS.alert} />
+                <Text style={styles.bottomDeleteBtnText}>Delete This Transaction</Text>
+              </TouchableOpacity>
+            )}
           </>
         ) : (
           // ================= EDIT MODE =================
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            style={styles.editFormContainer}
-          >
+          <View style={styles.editFormContainer}>
             {/* Amount Input */}
             <View style={styles.formField}>
               <Text style={styles.formFieldLabel}>AMOUNT (₹)</Text>
               <TextInput
                 value={editAmount}
                 onChangeText={setEditAmount}
+                onFocus={() => {
+                  setTimeout(() => {
+                    detailScrollRef.current?.scrollTo({ y: 50, animated: true });
+                  }, 150);
+                }}
                 keyboardType="decimal-pad"
                 mode="outlined"
                 outlineColor={COLORS.border}
@@ -604,12 +675,7 @@ export const TransactionDetailScreen = () => {
                         },
                       ]}
                     >
-                      <Ionicons
-                        name="wallet-outline"
-                        size={14}
-                        color={active ? accent.hex : COLORS.textMuted}
-                        style={{ marginRight: 6 }}
-                      />
+                      <BankLogo account={acc} size={16} style={{ marginRight: 6 }} />
                       <Text
                         style={[
                           styles.chipPillText,
@@ -662,6 +728,11 @@ export const TransactionDetailScreen = () => {
               <TextInput
                 value={editDate}
                 onChangeText={setEditDate}
+                onFocus={() => {
+                  setTimeout(() => {
+                    detailScrollRef.current?.scrollTo({ y: 350, animated: true });
+                  }, 150);
+                }}
                 mode="outlined"
                 outlineColor={COLORS.border}
                 activeOutlineColor={accent.hex}
@@ -677,6 +748,11 @@ export const TransactionDetailScreen = () => {
               <TextInput
                 value={editNote}
                 onChangeText={setEditNote}
+                onFocus={() => {
+                  setTimeout(() => {
+                    detailScrollRef.current?.scrollToEnd({ animated: true });
+                  }, 150);
+                }}
                 mode="outlined"
                 outlineColor={COLORS.border}
                 activeOutlineColor={accent.hex}
@@ -708,9 +784,9 @@ export const TransactionDetailScreen = () => {
                 </Text>
               </TactileButton>
             </View>
-          </KeyboardAvoidingView>
+          </View>
         )}
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
       {/* Delete Confirmation Modal */}
       <Modal
@@ -756,6 +832,16 @@ export const TransactionDetailScreen = () => {
           </View>
         </View>
       </Modal>
+
+      {/* MONTH UNLOCK MODAL */}
+      <MonthUnlockModal
+        visible={unlockModalVisible}
+        month={txMonth}
+        onClose={() => setUnlockModalVisible(false)}
+        onUnlockSuccess={() => {
+          startEditing();
+        }}
+      />
     </View>
   );
 };
@@ -852,6 +938,70 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
     textAlign: 'center',
     marginTop: 4,
+  },
+  lockedHeaderBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    backgroundColor: COLORS.surfaceLight,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  lockedHeaderBadgeText: {
+    color: COLORS.textMuted,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  lockedNoticeCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    backgroundColor: COLORS.surface,
+    borderColor: COLORS.border,
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: SPACING.md,
+    marginBottom: SPACING.lg,
+  },
+  lockedNoticeIconBadge: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: COLORS.warning + '18',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  lockedNoticeContent: {
+    flex: 1,
+  },
+  lockedNoticeTitle: {
+    color: COLORS.textPrimary,
+    fontSize: 13,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  lockedNoticeDesc: {
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    lineHeight: 16,
+    marginBottom: 10,
+  },
+  unlockEntryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    alignSelf: 'flex-start',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    borderWidth: 1,
+  },
+  unlockEntryBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
   },
   quickActionsContainer: {
     flexDirection: 'row',
