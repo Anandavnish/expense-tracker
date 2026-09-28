@@ -302,6 +302,9 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) =>
         Alert.alert('Export Error', res.error);
       } else if (res.success) {
         setCsvModalVisible(false);
+        if (res.copiedToClipboard) {
+          Alert.alert('CSV Copied', `${res.count} transaction records copied to your clipboard.`);
+        }
       }
     } catch (err: any) {
       Alert.alert('Export Error', err?.message || 'Failed to export CSV');

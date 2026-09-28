@@ -475,30 +475,66 @@ export async function exportTransactionsStatement(options: StatementExportOption
   try {
     const html = generateStatementHtml(options);
 
+    // 1. Web Platform: Print window with iframe fallback
     if (Platform.OS === 'web') {
-      const printWindow = window.open('', '_blank');
-      if (printWindow) {
-        printWindow.document.write(html);
-        printWindow.document.close();
-        printWindow.focus();
-        printWindow.print();
-        return { success: true };
+      try {
+        if (typeof window !== 'undefined') {
+          const printWindow = window.open('', '_blank');
+          if (printWindow) {
+            printWindow.document.write(html);
+            printWindow.document.close();
+            printWindow.focus();
+            printWindow.print();
+            return { success: true };
+          }
+        }
+      } catch (e) {
+        console.warn('window.open blocked, falling back to hidden iframe:', e);
       }
-      return { success: false, error: 'Popup blocked by browser' };
+
+      // Hidden iframe fallback if popup blocker prevented window.open
+      try {
+        if (typeof document !== 'undefined') {
+          const iframe = document.createElement('iframe');
+          iframe.style.position = 'fixed';
+          iframe.style.right = '0';
+          iframe.style.bottom = '0';
+          iframe.style.width = '0';
+          iframe.style.height = '0';
+          iframe.style.border = '0';
+          document.body.appendChild(iframe);
+          const doc = iframe.contentWindow?.document;
+          if (doc) {
+            doc.open();
+            doc.write(html);
+            doc.close();
+            iframe.contentWindow?.focus();
+            iframe.contentWindow?.print();
+            setTimeout(() => {
+              if (document.body.contains(iframe)) {
+                document.body.removeChild(iframe);
+              }
+            }, 2000);
+            return { success: true };
+          }
+        }
+      } catch (iframeErr) {
+        console.warn('Iframe print preview failed:', iframeErr);
+      }
+      return { success: false, error: 'Popup blocked by browser. Please allow popups to print statement.' };
     }
 
     const { method = 'auto' } = options;
 
-    // 1. Direct Save as PDF / System Print Dialog (Android OS Save-as-PDF & physical print)
+    // 2. Direct Save as PDF / System Print Dialog (Android OS Save-as-PDF & physical print)
     if (method === 'save') {
       await Print.printAsync({ html });
       return { success: true };
     }
 
-    // 2. Share PDF flow
+    // 3. Share PDF flow
     let shareSuccessful = false;
     try {
-      // Generate with base64 so we can write into the app's scoped sandbox directory
       const { base64, uri } = await Print.printToFileAsync({
         html,
         base64: true,
@@ -506,19 +542,24 @@ export async function exportTransactionsStatement(options: StatementExportOption
 
       let shareUri = uri;
 
-      // On Android / Expo Go, sharing files from outside the app sandbox triggers:
-      // "Not allowed to read file under given URL". Writing to FileSystem.cacheDirectory
-      // places the PDF into the permitted scoped storage.
-      if (base64 && FileSystem.cacheDirectory) {
-        const cleanName = `Statement_${new Date().toISOString().slice(0, 10)}.pdf`;
-        const localPath = `${FileSystem.cacheDirectory}${cleanName}`;
-        await FileSystem.writeAsStringAsync(localPath, base64, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
-        shareUri = localPath;
+      if (base64) {
+        const cacheDir = FileSystem.cacheDirectory || FileSystem.documentDirectory;
+        if (cacheDir) {
+          try {
+            const cleanName = `Statement_${new Date().toISOString().slice(0, 10)}.pdf`;
+            const dir = cacheDir.endsWith('/') ? cacheDir : `${cacheDir}/`;
+            const localPath = `${dir}${cleanName}`;
+            await FileSystem.writeAsStringAsync(localPath, base64, {
+              encoding: FileSystem.EncodingType.Base64,
+            });
+            shareUri = localPath;
+          } catch (writeErr) {
+            console.warn('Failed to write statement to cache directory, using default print URI:', writeErr);
+          }
+        }
       }
 
-      if (await Sharing.isAvailableAsync()) {
+      if (await Sharing.isAvailableAsync().catch(() => false)) {
         await Sharing.shareAsync(shareUri, {
           mimeType: 'application/pdf',
           dialogTitle: 'Share Transaction Statement',
@@ -531,7 +572,7 @@ export async function exportTransactionsStatement(options: StatementExportOption
       console.warn('Native share failed, falling back to system print/save dialog:', shareErr);
     }
 
-    // 3. Fallback to system print & "Save as PDF" dialog if sharing failed or was unavailable
+    // 4. Fallback to system print & "Save as PDF" dialog if sharing failed or was unavailable
     if (!shareSuccessful) {
       await Print.printAsync({ html });
       return { success: true };

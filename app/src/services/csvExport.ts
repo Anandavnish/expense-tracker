@@ -1,7 +1,9 @@
 // src/services/csvExport.ts
 // RFC 4180 compliant CSV export engine for transaction data with custom filters and native sharing
+import { Platform } from 'react-native';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system/legacy';
+import * as Clipboard from 'expo-clipboard';
 import { Transaction, TransactionType } from '../types/database';
 
 export interface CsvExportFilterOptions {
@@ -121,7 +123,7 @@ export function generateCsvContent(transactions: Transaction[], accountMap: Reco
   return [headers.join(','), ...rows].join('\r\n');
 }
 
-export async function exportTransactionsCsv(options: CsvExportFilterOptions): Promise<{ success: boolean; count: number; error?: string }> {
+export async function exportTransactionsCsv(options: CsvExportFilterOptions): Promise<{ success: boolean; count: number; copiedToClipboard?: boolean; error?: string }> {
   try {
     const filtered = filterTransactionsForCsv(options);
     if (filtered.length === 0) {
@@ -130,25 +132,71 @@ export async function exportTransactionsCsv(options: CsvExportFilterOptions): Pr
 
     const csvContent = generateCsvContent(filtered, options.accountMap);
 
-    // Save to sandboxed cache directory (safe for expo-sharing on Android & iOS)
     const now = new Date();
     const dateStamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
     const filename = `ExpenseTracker_Export_${dateStamp}.csv`;
-    const localUri = `${FileSystem.cacheDirectory}${filename}`;
 
-    await FileSystem.writeAsStringAsync(localUri, csvContent, {
-      encoding: FileSystem.EncodingType.UTF8,
-    });
+    // 1. Web Platform: Native browser blob download
+    if (Platform.OS === 'web') {
+      try {
+        if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+          const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+          const url = window.URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.setAttribute('href', url);
+          link.setAttribute('download', filename);
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          window.URL.revokeObjectURL(url);
+          return { success: true, count: filtered.length };
+        }
+      } catch (webErr: any) {
+        console.warn('Web CSV download failed, falling back to clipboard:', webErr);
+      }
+      // Web clipboard fallback
+      try {
+        await Clipboard.setStringAsync(csvContent);
+        return { success: true, count: filtered.length, copiedToClipboard: true };
+      } catch {
+        return { success: false, count: 0, error: 'Failed to download or copy CSV on web.' };
+      }
+    }
 
-    if (await Sharing.isAvailableAsync()) {
-      await Sharing.shareAsync(localUri, {
-        mimeType: 'text/csv',
-        dialogTitle: 'Export Transactions CSV',
-        UTI: 'public.comma-separated-values-text',
-      });
-      return { success: true, count: filtered.length };
-    } else {
-      return { success: false, count: filtered.length, error: 'Sharing is not available on this device' };
+    // 2. Native Mobile: Write to sandboxed cache/document directory and open system share dialog
+    let localUri: string | null = null;
+    const cacheDir = FileSystem.cacheDirectory || FileSystem.documentDirectory;
+
+    if (cacheDir) {
+      try {
+        const dir = cacheDir.endsWith('/') ? cacheDir : `${cacheDir}/`;
+        localUri = `${dir}${filename}`;
+        await FileSystem.writeAsStringAsync(localUri, csvContent, {
+          encoding: FileSystem.EncodingType.UTF8,
+        });
+      } catch (writeErr) {
+        console.warn('Failed to write CSV file to native cache:', writeErr);
+      }
+    }
+
+    if (localUri) {
+      const canShare = await Sharing.isAvailableAsync().catch(() => false);
+      if (canShare) {
+        await Sharing.shareAsync(localUri, {
+          mimeType: 'text/csv',
+          dialogTitle: 'Export Transactions CSV',
+          UTI: 'public.comma-separated-values-text',
+        });
+        return { success: true, count: filtered.length };
+      }
+    }
+
+    // 3. Fallback: If sharing is unavailable or file write was prevented, copy CSV to clipboard
+    try {
+      await Clipboard.setStringAsync(csvContent);
+      return { success: true, count: filtered.length, copiedToClipboard: true };
+    } catch {
+      return { success: false, count: filtered.length, error: 'Unable to share or save CSV file on this device.' };
     }
   } catch (err: any) {
     return { success: false, count: 0, error: err?.message || 'Failed to export CSV' };
