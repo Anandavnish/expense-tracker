@@ -1247,6 +1247,7 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
                 <Text
                   style={[
                     styles.pctBadgeText,
+                    TYPOGRAPHY.tabularText,
                     {
                       color: getStatusColor(
                         Number(overallSummary.spent_percentage)
@@ -1254,7 +1255,7 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
                     },
                   ]}
                 >
-                  {Math.round(Number(overallSummary.spent_percentage))}% spent
+                  {Math.round(Number(overallSummary.spent_percentage))}%
                 </Text>
                 <View style={styles.cardActionsCluster}>
                   <View
