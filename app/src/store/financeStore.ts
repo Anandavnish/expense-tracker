@@ -5,24 +5,55 @@ import { supabase } from '../services/supabase';
 import {
   Account,
   Transaction,
+  TransactionType,
   Borrow,
+  BorrowStatus,
   Budget,
   BudgetSummary,
 } from '../types/database';
 import { RealtimeChannel } from '@supabase/supabase-js';
 
-const STORAGE_KEY = '@finance_store_cache_v2';
-const CATEGORIES_STORAGE_KEY = '@finance_categories_v1';
-const ACCOUNT_ORDER_STORAGE_KEY = '@finance_account_order_v1';
-const PENDING_CALIBRATIONS_STORAGE_KEY = '@finance_pending_calibrations_v1';
+export const getStorageKey = (userId?: string | null) => {
+  const effective = userId && userId !== 'guest_local_user' ? userId : 'guest';
+  return `@finance_store_cache_${effective}_v3`;
+};
 
-export interface PendingCalibration {
-  accountId: string;
-  difference: number;
-  oldBalance: number;
-  newBalance: number;
-  date: string;
-}
+export const getCategoriesKey = (userId?: string | null) => {
+  const effective = userId && userId !== 'guest_local_user' ? userId : 'guest';
+  return `@finance_categories_${effective}_v1`;
+};
+
+export const getAccountOrderKey = (userId?: string | null) => {
+  const effective = userId && userId !== 'guest_local_user' ? userId : 'guest';
+  return `@finance_account_order_${effective}_v1`;
+};
+
+const persistFinanceCache = (
+  state: {
+    accounts: Account[];
+    transactions: Transaction[];
+    borrows: Borrow[];
+    budgets: Budget[];
+    budgetSummaries: BudgetSummary[];
+    currentUserId?: string | null;
+  }
+) => {
+  const key = getStorageKey(state.currentUserId);
+  AsyncStorage.setItem(
+    key,
+    JSON.stringify({
+      accounts: state.accounts,
+      transactions: state.transactions,
+      borrows: state.borrows,
+      budgets: state.budgets,
+      budgetSummaries: state.budgetSummaries,
+    })
+  ).catch(() => {});
+};
+
+const isGuestUser = (userId?: string | null): boolean => {
+  return userId === 'guest_local_user';
+};
 
 export const DEFAULT_STUDENT_CATEGORIES = [
   'Food',
@@ -111,6 +142,129 @@ export const calculateNetWorth = (
   return liquidTotal + totalLent - totalBorrowed - totalCreditDebt;
 };
 
+export const getCurrentMonthString = (): string => {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  return `${year}-${month}`;
+};
+
+export const getHistoricalAccountBalances = (
+  accounts: Account[],
+  transactions: Transaction[],
+  month: string
+): Account[] => {
+  const currentMonth = getCurrentMonthString();
+  if (month > currentMonth) {
+    return accounts.map((acc) => ({ ...acc, current_balance: 0 }));
+  }
+  if (month === currentMonth) {
+    return accounts;
+  }
+
+  const [yearStr, monthStr] = month.split('-');
+  const y = parseInt(yearStr, 10);
+  const m = parseInt(monthStr, 10);
+  const lastDay = new Date(y, m, 0).getDate();
+  const lastDateStr = `${month}-${String(lastDay).padStart(2, '0')}`;
+
+  const futureTransactions = transactions.filter((t) => {
+    const txDate = (t.date || t.created_at || '').slice(0, 10);
+    return txDate > lastDateStr;
+  });
+
+  const deltasByAccount: Record<string, number> = {};
+  futureTransactions.forEach((tx) => {
+    let delta = 0;
+    if (tx.type === 'income' || tx.type === 'borrow_taken') {
+      delta = Number(tx.amount || 0);
+    } else if (tx.type === 'expense' || tx.type === 'borrow_given') {
+      delta = -Number(tx.amount || 0);
+    }
+    deltasByAccount[tx.account_id] = (deltasByAccount[tx.account_id] || 0) + delta;
+  });
+
+  return accounts.map((acc) => {
+    // If account was created AFTER this month, it did not exist in this month
+    if (acc.created_at && acc.created_at.slice(0, 7) > month) {
+      return {
+        ...acc,
+        current_balance: 0,
+      };
+    }
+
+    const futureDelta = deltasByAccount[acc.id] || 0;
+    const closingBalance = Number(acc.current_balance || 0) - futureDelta;
+    return {
+      ...acc,
+      current_balance: closingBalance,
+    };
+  });
+};
+
+export const getHistoricalBorrows = (
+  borrows: Borrow[],
+  transactions: Transaction[],
+  month: string
+): Borrow[] => {
+  const currentMonth = getCurrentMonthString();
+  if (month > currentMonth) {
+    return [];
+  }
+  if (month === currentMonth) {
+    return borrows.filter((b) => b.status === 'pending');
+  }
+
+  const [yearStr, monthStr] = month.split('-');
+  const y = parseInt(yearStr, 10);
+  const m = parseInt(monthStr, 10);
+  const lastDay = new Date(y, m, 0).getDate();
+  const lastDateStr = `${month}-${String(lastDay).padStart(2, '0')}`;
+
+  return borrows.filter((b) => {
+    const bDate = (b.date || b.created_at || '').slice(0, 10);
+    // If borrow date did not exist yet or is after this month ended, it did not exist in this snapshot
+    if (!bDate || bDate > lastDateStr) return false;
+
+    const bCreated = (b.created_at || '').slice(0, 10);
+    if (bCreated && bCreated > lastDateStr) return false;
+
+    // If it is still pending today, it was pending at that month end
+    if (b.status === 'pending') return true;
+
+    // If it was settled, did the settlement occur AFTER this month ended?
+    if (b.linked_transaction_id && transactions) {
+      const linkedTx = transactions.find((t) => t.id === b.linked_transaction_id);
+      if (linkedTx) {
+        const txDate = (linkedTx.date || linkedTx.created_at || '').slice(0, 10);
+        if (txDate > lastDateStr) {
+          return true;
+        }
+      }
+    }
+    return false;
+  });
+};
+
+export const calculateHistoricalNetWorth = (
+  accounts: Account[],
+  borrows: Borrow[],
+  transactions: Transaction[],
+  month: string
+): number => {
+  const currentMonth = getCurrentMonthString();
+  if (month > currentMonth) {
+    return 0;
+  }
+  if (month === currentMonth) {
+    return calculateNetWorth(accounts, borrows, transactions);
+  }
+
+  const historicalAccounts = getHistoricalAccountBalances(accounts, transactions, month);
+  const activeBorrows = getHistoricalBorrows(borrows, transactions, month);
+  return calculateNetWorth(historicalAccounts, activeBorrows, transactions);
+};
+
 const sortAccountsByOrder = (accounts: Account[], orderIds: string[] | null): Account[] => {
   if (!orderIds || orderIds.length === 0) return accounts;
   const orderMap = new Map<string, number>();
@@ -142,17 +296,24 @@ interface FinanceState {
   budgetSummaries: BudgetSummary[];
   selectedMonth: string; // 'YYYY-MM'
   categories: string[];
+  currentUserId: string | null;
   isInitialLoading: boolean;
   inlineError: string | null;
   activeChannel: RealtimeChannel | null;
+  lastSyncedAt: string | null;
+  syncStatus: 'idle' | 'syncing' | 'synced' | 'error';
 
   // Actions
   setInlineError: (error: string | null) => void;
   setSelectedMonth: (month: string, userId?: string) => Promise<void>;
-  loadCachedData: () => Promise<void>;
+  loadCachedData: (userId?: string) => Promise<void>;
   fetchInitialData: (userId: string) => Promise<void>;
   subscribeRealtime: (userId: string) => void;
   unsubscribeRealtime: () => void;
+  triggerCloudSync: () => Promise<{ success: boolean; error?: string }>;
+  migrateLocalDataToCloud: (userId: string) => Promise<{ success: boolean; error?: string }>;
+  clearAllLocalData: () => Promise<void>;
+  resetForSignOut: () => void;
 
   // Category management
   addCategory: (category: string) => void;
@@ -178,12 +339,45 @@ interface FinanceState {
     borrowId: string
   ) => Promise<{ success: boolean; error?: string }>;
 
+  settleBorrowWithTransactionOptimistic: (params: {
+    borrowId: string;
+    depositAccountId?: string | null;
+    date?: string;
+    note?: string | null;
+  }) => Promise<{ success: boolean; error?: string }>;
+
+  reopenBorrowOptimistic: (
+    borrowId: string
+  ) => Promise<{ success: boolean; error?: string }>;
+
+  deleteBorrowOptimistic: (
+    borrowId: string,
+    deleteLinkedTx?: boolean
+  ) => Promise<{ success: boolean; error?: string }>;
+
   addBorrowOptimistic: (
     borrowData: Omit<Borrow, 'id' | 'created_at' | 'updated_at'>
   ) => Promise<{ success: boolean; error?: string }>;
 
+  addBorrowWithTransactionOptimistic: (params: {
+    user_id: string;
+    person_name: string;
+    amount: number;
+    type: 'lent' | 'borrowed';
+    date: string;
+    account_id?: string | null;
+    note?: string | null;
+  }) => Promise<{ success: boolean; borrow?: Borrow; error?: string }>;
+
   setBudgetOptimistic: (
     budgetData: Omit<Budget, 'id' | 'created_at' | 'updated_at'>
+  ) => Promise<{ success: boolean; error?: string }>;
+
+  deleteBudgetOptimistic: (
+    budgetId: string,
+    category?: string | null,
+    month?: string,
+    userId?: string
   ) => Promise<{ success: boolean; error?: string }>;
 
   createAccountOptimistic: (
@@ -199,30 +393,9 @@ interface FinanceState {
     accountId: string
   ) => Promise<{ success: boolean; error?: string }>;
 
-  deleteAccountWithCalibration: (
-    accountId: string,
-    userId: string,
-    calibrateFirst: boolean
-  ) => Promise<{ success: boolean; error?: string }>;
-
   reorderAccounts: (
     newAccounts: Account[]
   ) => Promise<void>;
-
-  // Calibration flow
-  pendingCalibrations: Record<string, PendingCalibration>;
-  setPendingCalibration: (item: PendingCalibration) => Promise<void>;
-  clearPendingCalibration: (accountId: string) => Promise<void>;
-  resolvePendingCalibrationAsTransaction: (
-    accountId: string,
-    userId: string
-  ) => Promise<{ success: boolean; error?: string }>;
-  calibrateAccountBalance: (
-    accountId: string,
-    newBalance: number,
-    logAsTransaction: boolean,
-    userId: string
-  ) => Promise<{ success: boolean; error?: string }>;
 
   // Credit Card Bill Payment
   payCreditCardBill: (
@@ -233,6 +406,13 @@ interface FinanceState {
     date?: string,
     note?: string
   ) => Promise<{ success: boolean; error?: string }>;
+
+  // Month lock & unlock state
+  unlockedMonths: Record<string, number>;
+  unlockMonth: (month: string, durationMinutes?: number) => void;
+  lockMonth: (month: string) => void;
+  isMonthLocked: (month: string) => boolean;
+  getUnlockRemainingSeconds: (month: string) => number;
 }
 
 export const useFinanceStore = create<FinanceState>((set, get) => ({
@@ -243,10 +423,50 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
   budgetSummaries: [],
   selectedMonth: new Date().toISOString().substring(0, 7), // 'YYYY-MM'
   categories: DEFAULT_STUDENT_CATEGORIES,
-  pendingCalibrations: {},
+  currentUserId: null,
   isInitialLoading: true,
   inlineError: null,
   activeChannel: null,
+  lastSyncedAt: null,
+  syncStatus: 'idle',
+  unlockedMonths: {},
+
+  unlockMonth: (month: string, durationMinutes = 30) => {
+    const expiry = Date.now() + durationMinutes * 60 * 1000;
+    set((state) => ({
+      unlockedMonths: {
+        ...state.unlockedMonths,
+        [month]: expiry,
+      },
+    }));
+  },
+
+  lockMonth: (month: string) => {
+    set((state) => {
+      const next = { ...state.unlockedMonths };
+      delete next[month];
+      return { unlockedMonths: next };
+    });
+  },
+
+  isMonthLocked: (month: string) => {
+    const currentMonth = getCurrentMonthString();
+    if (month >= currentMonth) {
+      return false; // Current and future months are never locked
+    }
+    const expiry = get().unlockedMonths[month];
+    if (expiry && Date.now() < expiry) {
+      return false; // Still within active unlocked window
+    }
+    return true; // Past month is locked
+  },
+
+  getUnlockRemainingSeconds: (month: string) => {
+    const expiry = get().unlockedMonths[month];
+    if (!expiry) return 0;
+    const diff = Math.floor((expiry - Date.now()) / 1000);
+    return Math.max(0, diff);
+  },
 
   setInlineError: (error: string | null) => set({ inlineError: error }),
 
@@ -268,22 +488,66 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
           .eq('month', month),
       ]);
 
+      let loadedBudgets = (budgetsRes.data as Budget[]) || [];
+      let loadedSummaries = (summaryRes.data as BudgetSummary[]) || [];
+
+      // Auto-carry budget limits into current/new month if empty
+      if (loadedBudgets.length === 0 && month >= getCurrentMonthString()) {
+        const [curY, curM] = month.split('-').map(Number);
+        const prevMonthDate = new Date(curY, curM - 2, 1);
+        const prevMonthStr = `${prevMonthDate.getFullYear()}-${String(prevMonthDate.getMonth() + 1).padStart(2, '0')}`;
+
+        const { data: prevBudgets } = await supabase
+          .from('budgets')
+          .select('*')
+          .eq('user_id', userId)
+          .eq('month', prevMonthStr);
+
+        if (prevBudgets && prevBudgets.length > 0) {
+          const toInsert = prevBudgets.map((pb) => ({
+            user_id: userId,
+            category: pb.category,
+            monthly_limit: pb.monthly_limit,
+            month: month,
+          }));
+
+          const { data: inserted, error: insErr } = await supabase
+            .from('budgets')
+            .insert(toInsert)
+            .select();
+
+          if (!insErr && inserted) {
+            loadedBudgets = inserted as Budget[];
+            const { data: refSummary } = await supabase
+              .from('v_budget_summary')
+              .select('*')
+              .eq('user_id', userId)
+              .eq('month', month);
+            if (refSummary) {
+              loadedSummaries = refSummary as BudgetSummary[];
+            }
+          }
+        }
+      }
+
       set({
-        budgets: (budgetsRes.data as Budget[]) || [],
-        budgetSummaries: (summaryRes.data as BudgetSummary[]) || [],
+        budgets: loadedBudgets,
+        budgetSummaries: loadedSummaries,
       });
     } catch (err: any) {
       set({ inlineError: `Failed to load data for ${month}: ${err.message}` });
     }
   },
 
-  loadCachedData: async () => {
+  loadCachedData: async (targetUserId?: string) => {
     try {
-      const [cached, cachedCats, cachedOrder, cachedCalibrations] = await Promise.all([
-        AsyncStorage.getItem(STORAGE_KEY),
-        AsyncStorage.getItem(CATEGORIES_STORAGE_KEY),
-        AsyncStorage.getItem(ACCOUNT_ORDER_STORAGE_KEY),
-        AsyncStorage.getItem(PENDING_CALIBRATIONS_STORAGE_KEY),
+      const effectiveUserId = targetUserId || get().currentUserId || 'guest';
+      set({ currentUserId: effectiveUserId });
+
+      const [cached, cachedCats, cachedOrder] = await Promise.all([
+        AsyncStorage.getItem(getStorageKey(effectiveUserId)),
+        AsyncStorage.getItem(getCategoriesKey(effectiveUserId)),
+        AsyncStorage.getItem(getAccountOrderKey(effectiveUserId)),
       ]);
 
       let categories = DEFAULT_STUDENT_CATEGORIES;
@@ -303,13 +567,6 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
         } catch {}
       }
 
-      let pendingCalibrations: Record<string, PendingCalibration> = {};
-      if (cachedCalibrations) {
-        try {
-          pendingCalibrations = JSON.parse(cachedCalibrations) || {};
-        } catch {}
-      }
-
       if (cached) {
         const parsed = JSON.parse(cached);
         const rawAccounts = (parsed.accounts || []) as Account[];
@@ -322,11 +579,18 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
           budgets: parsed.budgets || [],
           budgetSummaries: parsed.budgetSummaries || [],
           categories,
-          pendingCalibrations,
           isInitialLoading: false,
         });
       } else {
-        set({ categories, pendingCalibrations, isInitialLoading: false });
+        set({
+          accounts: [],
+          transactions: [],
+          borrows: [],
+          budgets: [],
+          budgetSummaries: [],
+          categories,
+          isInitialLoading: false,
+        });
       }
     } catch {
       set({ isInitialLoading: false });
@@ -340,7 +604,7 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
     if (current.includes(trimmed)) return;
     const updated = [...current, trimmed];
     set({ categories: updated });
-    AsyncStorage.setItem(CATEGORIES_STORAGE_KEY, JSON.stringify(updated)).catch(() => {});
+    AsyncStorage.setItem(getCategoriesKey(get().currentUserId), JSON.stringify(updated)).catch(() => {});
   },
 
   updateCategory: (oldCategory: string, newCategory: string) => {
@@ -349,25 +613,32 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
     const current = get().categories;
     const updated = current.map((c) => (c === oldCategory ? trimmed : c));
     set({ categories: updated });
-    AsyncStorage.setItem(CATEGORIES_STORAGE_KEY, JSON.stringify(updated)).catch(() => {});
+    AsyncStorage.setItem(getCategoriesKey(get().currentUserId), JSON.stringify(updated)).catch(() => {});
   },
 
   reorderCategories: (categories: string[]) => {
     set({ categories });
-    AsyncStorage.setItem(CATEGORIES_STORAGE_KEY, JSON.stringify(categories)).catch(() => {});
+    AsyncStorage.setItem(getCategoriesKey(get().currentUserId), JSON.stringify(categories)).catch(() => {});
   },
 
   removeCategory: (category: string) => {
     const updated = get().categories.filter((c) => c !== category);
     set({ categories: updated });
-    AsyncStorage.setItem(CATEGORIES_STORAGE_KEY, JSON.stringify(updated)).catch(() => {});
+    AsyncStorage.setItem(getCategoriesKey(get().currentUserId), JSON.stringify(updated)).catch(() => {});
   },
 
   fetchInitialData: async (userId: string) => {
+    set({ currentUserId: userId });
+    if (isGuestUser(userId)) {
+      await get().loadCachedData(userId);
+      set({ isInitialLoading: false, syncStatus: 'synced', lastSyncedAt: new Date().toISOString() });
+      return;
+    }
+
     try {
       const month = get().selectedMonth;
 
-      const [accountsRes, txRes, borrowsRes, budgetsRes, summaryRes, cachedOrder, cachedCalibrations] = await Promise.all([
+      const [accountsRes, txRes, borrowsRes, budgetsRes, summaryRes, cachedOrder] = await Promise.all([
         supabase
           .from('accounts')
           .select('*')
@@ -395,8 +666,7 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
           .select('*')
           .eq('user_id', userId)
           .eq('month', month),
-        AsyncStorage.getItem(ACCOUNT_ORDER_STORAGE_KEY),
-        AsyncStorage.getItem(PENDING_CALIBRATIONS_STORAGE_KEY),
+        AsyncStorage.getItem(getAccountOrderKey(userId)),
       ]);
 
       let orderIds: string[] | null = null;
@@ -406,19 +676,51 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
         } catch {}
       }
 
-      let pendingCalibrations: Record<string, PendingCalibration> = {};
-      if (cachedCalibrations) {
-        try {
-          pendingCalibrations = JSON.parse(cachedCalibrations) || {};
-        } catch {}
-      }
-
       const rawAccounts = (accountsRes.data as Account[]) || [];
       const accounts = sortAccountsByOrder(deduplicateAccounts(rawAccounts), orderIds);
       const transactions = (txRes.data as Transaction[]) || [];
       const borrows = (borrowsRes.data as Borrow[]) || [];
-      const budgets = (budgetsRes.data as Budget[]) || [];
-      const budgetSummaries = (summaryRes.data as BudgetSummary[]) || [];
+      let budgets = (budgetsRes.data as Budget[]) || [];
+      let budgetSummaries = (summaryRes.data as BudgetSummary[]) || [];
+
+      // Auto-carry budget limits if current month budgets are empty
+      if (budgets.length === 0 && month >= getCurrentMonthString()) {
+        const [curY, curM] = month.split('-').map(Number);
+        const prevMonthDate = new Date(curY, curM - 2, 1);
+        const prevMonthStr = `${prevMonthDate.getFullYear()}-${String(prevMonthDate.getMonth() + 1).padStart(2, '0')}`;
+
+        const { data: prevBudgets } = await supabase
+          .from('budgets')
+          .select('*')
+          .eq('user_id', userId)
+          .eq('month', prevMonthStr);
+
+        if (prevBudgets && prevBudgets.length > 0) {
+          const toInsert = prevBudgets.map((pb) => ({
+            user_id: userId,
+            category: pb.category,
+            monthly_limit: pb.monthly_limit,
+            month: month,
+          }));
+
+          const { data: inserted, error: insErr } = await supabase
+            .from('budgets')
+            .insert(toInsert)
+            .select();
+
+          if (!insErr && inserted) {
+            budgets = inserted as Budget[];
+            const { data: refSummary } = await supabase
+              .from('v_budget_summary')
+              .select('*')
+              .eq('user_id', userId)
+              .eq('month', month);
+            if (refSummary) {
+              budgetSummaries = refSummary as BudgetSummary[];
+            }
+          }
+        }
+      }
 
       set({
         accounts,
@@ -426,23 +728,26 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
         borrows,
         budgets,
         budgetSummaries,
-        pendingCalibrations,
         isInitialLoading: false,
+        syncStatus: 'synced',
+        lastSyncedAt: new Date().toISOString(),
       });
 
       AsyncStorage.setItem(
-        STORAGE_KEY,
+        getStorageKey(userId),
         JSON.stringify({ accounts, transactions, borrows, budgets, budgetSummaries })
       ).catch(() => {});
     } catch (err: any) {
       set({
         isInitialLoading: false,
+        syncStatus: 'error',
         inlineError: `Network error loading data: ${err.message || 'Check connection'}`,
       });
     }
   },
 
   subscribeRealtime: (userId: string) => {
+    if (isGuestUser(userId)) return;
     const { activeChannel } = get();
     if (activeChannel) {
       supabase.removeChannel(activeChannel);
@@ -629,6 +934,11 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
       budgetSummaries: updatedSummaries,
       inlineError: null,
     });
+    persistFinanceCache(get());
+
+    if (isGuestUser(txData.user_id)) {
+      return { success: true };
+    }
 
     try {
       const { data, error } = await supabase
@@ -734,6 +1044,11 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
       budgetSummaries: updatedSummaries,
       inlineError: null,
     });
+    persistFinanceCache(get());
+
+    if (isGuestUser(oldTx.user_id)) {
+      return { success: true };
+    }
 
     try {
       const { data, error } = await supabase
@@ -748,6 +1063,7 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
         set((state) => ({
           transactions: state.transactions.map((t) => (t.id === transactionId ? (data as Transaction) : t)),
         }));
+        persistFinanceCache(get());
       }
       return { success: true };
     } catch (err: any) {
@@ -818,6 +1134,11 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
       borrows: updatedBorrows,
       inlineError: null,
     });
+    persistFinanceCache(get());
+
+    if (isGuestUser(targetTx.user_id)) {
+      return { success: true };
+    }
 
     try {
       const { error } = await supabase
@@ -850,6 +1171,11 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
       borrows: prevBorrows.map((b) => (b.id === borrowId ? { ...b, status: newStatus } : b)),
       inlineError: null,
     });
+    persistFinanceCache(get());
+
+    if (isGuestUser(targetBorrow.user_id)) {
+      return { success: true };
+    }
 
     try {
       const { error } = await supabase
@@ -890,6 +1216,11 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
       borrows: [optimisticBorrow, ...prevBorrows],
       inlineError: null,
     });
+    persistFinanceCache(get());
+
+    if (isGuestUser(borrowData.user_id)) {
+      return { success: true };
+    }
 
     try {
       const { data, error } = await supabase
@@ -921,6 +1252,361 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
       set({
         borrows: prevBorrows,
         inlineError: `Could not add borrow: ${err.message || 'Network error'}. Rolled back.`,
+      });
+      return { success: false, error: err.message };
+    }
+  },
+
+  settleBorrowWithTransactionOptimistic: async (params) => {
+    const prevBorrows = [...get().borrows];
+    const prevTransactions = [...get().transactions];
+    const prevAccounts = [...get().accounts];
+
+    const targetBorrow = prevBorrows.find((b) => b.id === params.borrowId);
+    if (!targetBorrow) return { success: false, error: 'Borrow entry not found' };
+
+    const { type, displayName } = parseBorrowDetails(targetBorrow, prevTransactions);
+    const settleDate = params.date || new Date().toISOString().substring(0, 10);
+
+    let optimisticTx: Transaction | null = null;
+    let tempTxId: string | null = null;
+    let updatedAccounts = prevAccounts;
+
+    if (params.depositAccountId) {
+      tempTxId = `temp_settle_tx_${Date.now()}`;
+      // If Lent: money was returned to me -> income (credit to account)
+      // If Borrowed: I repaid the debt -> expense (debit from account)
+      const txType: TransactionType = type === 'lent' ? 'income' : 'expense';
+      const txCategory = 'Repayment';
+      const txNote =
+        params.note?.trim() ||
+        (type === 'lent'
+          ? `Repayment received from ${displayName}`
+          : `Repayment paid to ${displayName}`);
+
+      optimisticTx = {
+        id: tempTxId,
+        user_id: targetBorrow.user_id,
+        account_id: params.depositAccountId,
+        type: txType,
+        amount: targetBorrow.amount,
+        category: txCategory,
+        note: txNote,
+        date: settleDate,
+        source: 'manual',
+        created_at: new Date().toISOString(),
+      };
+
+      updatedAccounts = prevAccounts.map((acc) => {
+        if (acc.id === params.depositAccountId) {
+          const delta = txType === 'income' ? targetBorrow.amount : -targetBorrow.amount;
+          return {
+            ...acc,
+            current_balance: Number(acc.current_balance) + delta,
+          };
+        }
+        return acc;
+      });
+    }
+
+    const updatedBorrows = prevBorrows.map((b) =>
+      b.id === params.borrowId
+        ? { ...b, status: 'settled' as BorrowStatus, updated_at: new Date().toISOString() }
+        : b
+    );
+
+    set({
+      borrows: updatedBorrows,
+      transactions: optimisticTx ? [optimisticTx, ...prevTransactions] : prevTransactions,
+      accounts: updatedAccounts,
+      inlineError: null,
+    });
+    persistFinanceCache(get());
+
+    if (isGuestUser(targetBorrow.user_id)) {
+      return { success: true };
+    }
+
+    try {
+      let realTx: Transaction | null = null;
+      if (params.depositAccountId && optimisticTx) {
+        const { data: txData, error: txError } = await supabase
+          .from('transactions')
+          .insert({
+            user_id: targetBorrow.user_id,
+            account_id: params.depositAccountId,
+            type: optimisticTx.type,
+            amount: optimisticTx.amount,
+            category: optimisticTx.category,
+            note: optimisticTx.note,
+            date: optimisticTx.date,
+            source: 'manual',
+          })
+          .select()
+          .single();
+
+        if (txError) throw txError;
+        realTx = txData as Transaction;
+      }
+
+      const { error: borrowError } = await supabase
+        .from('borrows')
+        .update({
+          status: 'settled',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', params.borrowId);
+
+      if (borrowError) throw borrowError;
+
+      if (realTx && tempTxId) {
+        set((state) => ({
+          transactions: state.transactions.map((t) => (t.id === tempTxId ? realTx! : t)),
+        }));
+      }
+
+      return { success: true };
+    } catch (err: any) {
+      set({
+        borrows: prevBorrows,
+        transactions: prevTransactions,
+        accounts: prevAccounts,
+        inlineError: `Failed to settle borrow: ${err.message || 'Network error'}. Reverted.`,
+      });
+      return { success: false, error: err.message };
+    }
+  },
+
+  reopenBorrowOptimistic: async (borrowId) => {
+    const prevBorrows = [...get().borrows];
+    const targetBorrow = prevBorrows.find((b) => b.id === borrowId);
+    if (!targetBorrow) return { success: false, error: 'Borrow entry not found' };
+
+    set({
+      borrows: prevBorrows.map((b) =>
+        b.id === borrowId ? { ...b, status: 'pending' as BorrowStatus } : b
+      ),
+      inlineError: null,
+    });
+    persistFinanceCache(get());
+
+    if (isGuestUser(targetBorrow.user_id)) {
+      return { success: true };
+    }
+
+    try {
+      const { error } = await supabase
+        .from('borrows')
+        .update({ status: 'pending', updated_at: new Date().toISOString() })
+        .eq('id', borrowId);
+
+      if (error) throw error;
+      return { success: true };
+    } catch (err: any) {
+      set({
+        borrows: prevBorrows,
+        inlineError: `Could not reopen borrow: ${err.message || 'Network error'}. Rolled back.`,
+      });
+      return { success: false, error: err.message };
+    }
+  },
+
+  deleteBorrowOptimistic: async (borrowId, deleteLinkedTx = false) => {
+    const prevBorrows = [...get().borrows];
+    const prevTransactions = [...get().transactions];
+    const prevAccounts = [...get().accounts];
+
+    const targetBorrow = prevBorrows.find((b) => b.id === borrowId);
+    if (!targetBorrow) return { success: false, error: 'Borrow not found' };
+
+    let updatedTransactions = prevTransactions;
+    let updatedAccounts = prevAccounts;
+
+    if (deleteLinkedTx && targetBorrow.linked_transaction_id) {
+      const linkedTx = prevTransactions.find((t) => t.id === targetBorrow.linked_transaction_id);
+      if (linkedTx) {
+        updatedTransactions = prevTransactions.filter((t) => t.id !== linkedTx.id);
+        updatedAccounts = prevAccounts.map((acc) => {
+          if (acc.id === linkedTx.account_id) {
+            let delta = 0;
+            if (linkedTx.type === 'income' || linkedTx.type === 'borrow_taken') {
+              delta = -Number(linkedTx.amount);
+            } else if (linkedTx.type === 'expense' || linkedTx.type === 'borrow_given') {
+              delta = Number(linkedTx.amount);
+            }
+            return {
+              ...acc,
+              current_balance: Number(acc.current_balance) + delta,
+            };
+          }
+          return acc;
+        });
+      }
+    }
+
+    set({
+      borrows: prevBorrows.filter((b) => b.id !== borrowId),
+      transactions: updatedTransactions,
+      accounts: updatedAccounts,
+      inlineError: null,
+    });
+    persistFinanceCache(get());
+
+    if (isGuestUser(targetBorrow.user_id)) {
+      return { success: true };
+    }
+
+    try {
+      if (deleteLinkedTx && targetBorrow.linked_transaction_id) {
+        await supabase.from('transactions').delete().eq('id', targetBorrow.linked_transaction_id);
+      }
+      const { error } = await supabase.from('borrows').delete().eq('id', borrowId);
+      if (error) throw error;
+      return { success: true };
+    } catch (err: any) {
+      set({
+        borrows: prevBorrows,
+        transactions: prevTransactions,
+        accounts: prevAccounts,
+        inlineError: `Could not delete borrow: ${err.message || 'Network error'}. Rolled back.`,
+      });
+      return { success: false, error: err.message };
+    }
+  },
+
+  addBorrowWithTransactionOptimistic: async (params) => {
+    const prevBorrows = [...get().borrows];
+    const prevTransactions = [...get().transactions];
+    const prevAccounts = [...get().accounts];
+
+    const tempBorrowId = `temp_borrow_${Date.now()}`;
+    const cleanName = params.person_name.replace(/^\[(BORROWED|LENT)\]\s*/i, '').trim();
+    const encodedPersonName =
+      params.type === 'borrowed' ? `[BORROWED] ${cleanName}` : `[LENT] ${cleanName}`;
+
+    let optimisticTx: Transaction | null = null;
+    let tempTxId: string | null = null;
+    let updatedAccounts = prevAccounts;
+
+    if (params.account_id) {
+      tempTxId = `temp_tx_${Date.now()}`;
+      const txType: TransactionType = params.type === 'borrowed' ? 'borrow_taken' : 'borrow_given';
+      const txNote =
+        params.note?.trim() ||
+        (params.type === 'borrowed'
+          ? `Borrowed from ${cleanName}`
+          : `Lent to ${cleanName}`);
+
+      optimisticTx = {
+        id: tempTxId,
+        user_id: params.user_id,
+        account_id: params.account_id,
+        type: txType,
+        amount: params.amount,
+        category: 'Personal Loan',
+        note: txNote,
+        date: params.date,
+        source: 'manual',
+        created_at: new Date().toISOString(),
+      };
+
+      updatedAccounts = prevAccounts.map((acc) => {
+        if (acc.id === params.account_id) {
+          const delta = txType === 'borrow_taken' ? params.amount : -params.amount;
+          return {
+            ...acc,
+            current_balance: Number(acc.current_balance) + delta,
+          };
+        }
+        return acc;
+      });
+    }
+
+    const optimisticBorrow: Borrow = {
+      id: tempBorrowId,
+      user_id: params.user_id,
+      person_name: encodedPersonName,
+      amount: params.amount,
+      status: 'pending',
+      type: params.type,
+      linked_transaction_id: tempTxId,
+      date: params.date,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    set({
+      borrows: [optimisticBorrow, ...prevBorrows],
+      transactions: optimisticTx ? [optimisticTx, ...prevTransactions] : prevTransactions,
+      accounts: updatedAccounts,
+      inlineError: null,
+    });
+    persistFinanceCache(get());
+
+    if (isGuestUser(params.user_id)) {
+      return { success: true, borrow: optimisticBorrow };
+    }
+
+    try {
+      let realTxId: string | null = null;
+      let realTx: Transaction | null = null;
+
+      if (params.account_id && optimisticTx) {
+        const { data: txData, error: txError } = await supabase
+          .from('transactions')
+          .insert({
+            user_id: params.user_id,
+            account_id: params.account_id,
+            type: optimisticTx.type,
+            amount: optimisticTx.amount,
+            category: optimisticTx.category,
+            note: optimisticTx.note,
+            date: optimisticTx.date,
+            source: 'manual',
+          })
+          .select()
+          .single();
+
+        if (txError) throw txError;
+        realTx = txData as Transaction;
+        realTxId = realTx.id;
+      }
+
+      const { data: borrowData, error: borrowError } = await supabase
+        .from('borrows')
+        .insert({
+          user_id: params.user_id,
+          person_name: encodedPersonName,
+          amount: params.amount,
+          status: 'pending',
+          linked_transaction_id: realTxId,
+          date: params.date,
+        })
+        .select()
+        .single();
+
+      if (borrowError) throw borrowError;
+
+      const savedBorrow: Borrow = {
+        ...(borrowData as Borrow),
+        type: params.type,
+      };
+
+      set((state) => ({
+        borrows: state.borrows.map((b) => (b.id === tempBorrowId ? savedBorrow : b)),
+        transactions:
+          realTx && tempTxId
+            ? state.transactions.map((t) => (t.id === tempTxId ? realTx! : t))
+            : state.transactions,
+      }));
+
+      return { success: true, borrow: savedBorrow };
+    } catch (err: any) {
+      set({
+        borrows: prevBorrows,
+        transactions: prevTransactions,
+        accounts: prevAccounts,
+        inlineError: `Could not save borrow entry: ${err.message || 'Network error'}. Rolled back.`,
       });
       return { success: false, error: err.message };
     }
@@ -995,6 +1681,11 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
       budgetSummaries: updatedSummaries,
       inlineError: null,
     });
+    persistFinanceCache(get());
+
+    if (isGuestUser(budgetData.user_id)) {
+      return { success: true };
+    }
 
     try {
       // Find existing budget record for this user, category, and month
@@ -1058,6 +1749,59 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
     }
   },
 
+  deleteBudgetOptimistic: async (budgetId, category, month, userId) => {
+    const prevBudgets = [...get().budgets];
+    const prevSummaries = [...get().budgetSummaries];
+
+    // Find the target budget / summary to know its category, month, and user_id
+    const targetBudget = prevBudgets.find((b) => b.id === budgetId);
+    const targetSummary = prevSummaries.find((s) => s.budget_id === budgetId);
+    const resolvedCat = category !== undefined ? category : targetBudget?.category ?? targetSummary?.category ?? null;
+    const resolvedMonth = month || targetBudget?.month || targetSummary?.month || get().selectedMonth;
+    const resolvedUserId = userId || targetBudget?.user_id || targetSummary?.user_id;
+
+    // Optimistically remove from state
+    set({
+      budgets: prevBudgets.filter(
+        (b) => b.id !== budgetId && !(b.category === resolvedCat && b.month === resolvedMonth)
+      ),
+      budgetSummaries: prevSummaries.filter(
+        (s) => s.budget_id !== budgetId && !(s.category === resolvedCat && s.month === resolvedMonth)
+      ),
+      inlineError: null,
+    });
+    persistFinanceCache(get());
+
+    if (isGuestUser(resolvedUserId)) {
+      return { success: true };
+    }
+
+    try {
+      let query = supabase.from('budgets').delete();
+      if (!budgetId.startsWith('temp_budget_')) {
+        query = query.eq('id', budgetId);
+      } else if (resolvedUserId) {
+        query = query.eq('user_id', resolvedUserId).eq('month', resolvedMonth);
+        if (resolvedCat === null) {
+          query = query.is('category', null);
+        } else {
+          query = query.eq('category', resolvedCat);
+        }
+      }
+
+      const { error } = await query;
+      if (error) throw error;
+      return { success: true };
+    } catch (err: any) {
+      set({
+        budgets: prevBudgets,
+        budgetSummaries: prevSummaries,
+        inlineError: `Could not delete budget: ${err.message || 'Network error'}. Rolled back.`,
+      });
+      return { success: false, error: err.message };
+    }
+  },
+
   createAccountOptimistic: async (accData) => {
     const tempId = `temp_acc_${Date.now()}`;
     const optimisticAcc: Account = {
@@ -1072,6 +1816,11 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
       accounts: deduplicateAccounts([...prevAccounts, optimisticAcc]),
       inlineError: null,
     });
+    persistFinanceCache(get());
+
+    if (isGuestUser(accData.user_id)) {
+      return { success: true, account: optimisticAcc };
+    }
 
     try {
       const dbPayload = {
@@ -1120,6 +1869,12 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
       ),
       inlineError: null,
     });
+    persistFinanceCache(get());
+
+    const targetAcc = prevAccounts.find((a) => a.id === accountId);
+    if (targetAcc && isGuestUser(targetAcc.user_id)) {
+      return { success: true };
+    }
 
     try {
       const validDbFields = ['name', 'type', 'current_balance', 'credit_limit'];
@@ -1148,14 +1903,16 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
 
   deleteAccountOptimistic: async (accountId) => {
     const prevAccounts = [...get().accounts];
-    const prevCalibrations = { ...get().pendingCalibrations };
-    delete prevCalibrations[accountId];
     set({
       accounts: prevAccounts.filter((a) => a.id !== accountId),
-      pendingCalibrations: prevCalibrations,
       inlineError: null,
     });
-    AsyncStorage.setItem(PENDING_CALIBRATIONS_STORAGE_KEY, JSON.stringify(prevCalibrations)).catch(() => {});
+    persistFinanceCache(get());
+
+    const targetAcc = prevAccounts.find((a) => a.id === accountId);
+    if (targetAcc && isGuestUser(targetAcc.user_id)) {
+      return { success: true };
+    }
 
     try {
       const { error } = await supabase.from('accounts').delete().eq('id', accountId);
@@ -1164,164 +1921,17 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
     } catch (err: any) {
       set({
         accounts: prevAccounts,
-        pendingCalibrations: get().pendingCalibrations,
         inlineError: `Could not delete account: ${err.message || 'Network error'}`,
       });
       return { success: false, error: err.message };
     }
   },
 
-  deleteAccountWithCalibration: async (accountId: string, userId: string, calibrateFirst: boolean) => {
-    const target = get().accounts.find((a) => a.id === accountId);
-    if (!target) return { success: false, error: 'Account not found' };
-
-    const balance = Number(target.current_balance || 0);
-
-    if (calibrateFirst && Math.abs(balance) > 0.01) {
-      const calRes = await get().calibrateAccountBalance(accountId, 0, true, userId);
-      if (!calRes.success) {
-        return calRes;
-      }
-    }
-
-    return await get().deleteAccountOptimistic(accountId);
-  },
-
   reorderAccounts: async (newAccounts: Account[]) => {
     const deduplicated = deduplicateAccounts(newAccounts);
     set({ accounts: deduplicated });
     const orderIds = deduplicated.map((a) => a.id);
-    await AsyncStorage.setItem(ACCOUNT_ORDER_STORAGE_KEY, JSON.stringify(orderIds)).catch(() => {});
-  },
-
-  setPendingCalibration: async (item: PendingCalibration) => {
-    const updated = {
-      ...get().pendingCalibrations,
-      [item.accountId]: item,
-    };
-    set({ pendingCalibrations: updated });
-    await AsyncStorage.setItem(PENDING_CALIBRATIONS_STORAGE_KEY, JSON.stringify(updated)).catch(() => {});
-  },
-
-  clearPendingCalibration: async (accountId: string) => {
-    const updated = { ...get().pendingCalibrations };
-    delete updated[accountId];
-    set({ pendingCalibrations: updated });
-    await AsyncStorage.setItem(PENDING_CALIBRATIONS_STORAGE_KEY, JSON.stringify(updated)).catch(() => {});
-  },
-
-  resolvePendingCalibrationAsTransaction: async (accountId: string, userId: string) => {
-    const pending = get().pendingCalibrations[accountId];
-    if (!pending) return { success: false, error: 'No pending calibration found for this account' };
-
-    const targetAccount = get().accounts.find((a) => a.id === accountId);
-    if (!targetAccount) {
-      await get().clearPendingCalibration(accountId);
-      return { success: false, error: 'Account not found' };
-    }
-
-    const diff = pending.difference;
-    const absAmount = Math.abs(diff);
-    const txType = diff > 0 ? 'income' : 'expense';
-
-    try {
-      // Revert current_balance by -diff in DB so trigger restores it to targetAccount.current_balance upon transaction insert
-      await supabase
-        .from('accounts')
-        .update({
-          current_balance: Number(targetAccount.current_balance) - diff,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', accountId);
-
-      const res = await get().addTransactionOptimistic({
-        user_id: userId,
-        account_id: accountId,
-        type: txType,
-        amount: absAmount,
-        category: 'Adjustment',
-        note: `Balance calibration (${diff > 0 ? '+' : '-'}₹${absAmount.toLocaleString('en-IN')})`,
-        date: new Date().toISOString().substring(0, 10),
-        source: 'manual',
-      });
-
-      if (res.success) {
-        await get().clearPendingCalibration(accountId);
-      }
-      return res;
-    } catch (err: any) {
-      return { success: false, error: err.message || 'Failed to resolve calibration' };
-    }
-  },
-
-  // Calibration Flow
-  calibrateAccountBalance: async (accountId, newBalance, logAsTransaction, userId) => {
-    const prevAccounts = [...get().accounts];
-    const targetAccount = prevAccounts.find((a) => a.id === accountId);
-    if (!targetAccount) return { success: false, error: 'Account not found' };
-
-    const oldBalance = Number(targetAccount.current_balance);
-    const diff = newBalance - oldBalance;
-
-    if (Math.abs(diff) < 0.01) return { success: true };
-
-    if (logAsTransaction) {
-      const txType = diff > 0 ? 'income' : 'expense';
-      const absAmount = Math.abs(diff);
-
-      const res = await get().addTransactionOptimistic({
-        user_id: userId,
-        account_id: accountId,
-        type: txType,
-        amount: absAmount,
-        category: 'Adjustment',
-        note: `Manual balance calibration (${diff > 0 ? '+' : '-'}₹${absAmount.toLocaleString('en-IN')})`,
-        date: new Date().toISOString().substring(0, 10),
-        source: 'manual',
-      });
-
-      if (res.success) {
-        await get().clearPendingCalibration(accountId);
-      }
-
-      return res;
-    } else {
-      // Just adjust silently
-      set({
-        accounts: prevAccounts.map((a) =>
-          a.id === accountId ? { ...a, current_balance: newBalance } : a
-        ),
-        inlineError: null,
-      });
-
-      try {
-        const { error } = await supabase
-          .from('accounts')
-          .update({
-            current_balance: newBalance,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', accountId);
-
-        if (error) throw error;
-
-        await get().setPendingCalibration({
-          accountId,
-          difference: diff,
-          oldBalance,
-          newBalance,
-          date: new Date().toISOString(),
-        });
-
-        return { success: true };
-      } catch (err: any) {
-        set({
-          accounts: prevAccounts,
-          inlineError: `Could not calibrate balance: ${err.message || 'Network error'}`,
-        });
-        return { success: false, error: err.message };
-      }
-    }
+    await AsyncStorage.setItem(getAccountOrderKey(get().currentUserId), JSON.stringify(orderIds)).catch(() => {});
   },
 
   // Credit Card Bill Payment
@@ -1387,6 +1997,11 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
       transactions: [bankTx, cardTx, ...prevTransactions],
       inlineError: null,
     });
+    persistFinanceCache(get());
+
+    if (isGuestUser(userId)) {
+      return { success: true };
+    }
 
     try {
       const { data: insertedBankTx, error: bankErr } = await supabase
@@ -1440,5 +2055,171 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
       });
       return { success: false, error: err.message };
     }
+  },
+
+  triggerCloudSync: async () => {
+    set({ syncStatus: 'syncing' });
+    try {
+      const isGuest =
+        get().accounts.some((a) => a.user_id === 'guest_local_user') ||
+        get().transactions.some((t) => t.user_id === 'guest_local_user');
+      if (isGuest) {
+        persistFinanceCache(get());
+        const now = new Date().toISOString();
+        set({ lastSyncedAt: now, syncStatus: 'synced' });
+        return { success: true };
+      }
+
+      const { data: sessionData } = await supabase.auth.getSession();
+      const userId = sessionData.session?.user?.id;
+      if (!userId) {
+        set({ syncStatus: 'error' });
+        return { success: false, error: 'User is not authenticated' };
+      }
+
+      await get().fetchInitialData(userId);
+      const now = new Date().toISOString();
+      set({ lastSyncedAt: now, syncStatus: 'synced' });
+      return { success: true };
+    } catch (err: any) {
+      set({ syncStatus: 'error' });
+      return { success: false, error: err.message || 'Sync failed' };
+    }
+  },
+
+  migrateLocalDataToCloud: async (userId: string) => {
+    set({ syncStatus: 'syncing' });
+    try {
+      const state = get();
+      const localAccounts = state.accounts.map((a) => ({
+        ...a,
+        user_id: userId,
+      }));
+      const localTransactions = state.transactions.map((t) => ({
+        ...t,
+        user_id: userId,
+      }));
+      const localBorrows = state.borrows.map((b) => ({
+        ...b,
+        user_id: userId,
+      }));
+      const localBudgets = state.budgets.map((bg) => ({
+        ...bg,
+        user_id: userId,
+      }));
+
+      // 1. Upsert accounts
+      if (localAccounts.length > 0) {
+        const { error: accErr } = await supabase.from('accounts').upsert(
+          localAccounts.map((a) => ({
+            id: a.id,
+            user_id: userId,
+            name: a.name,
+            type: a.type,
+            current_balance: a.current_balance,
+            credit_limit: a.credit_limit,
+          }))
+        );
+        if (accErr) console.warn('[financeStore] Account migration warning:', accErr.message);
+      }
+
+      // 2. Upsert transactions
+      if (localTransactions.length > 0) {
+        const { error: txErr } = await supabase.from('transactions').upsert(
+          localTransactions.map((t) => ({
+            id: t.id,
+            user_id: userId,
+            account_id: t.account_id,
+            type: t.type,
+            amount: t.amount,
+            category: t.category,
+            note: t.note,
+            date: t.date,
+            source: t.source || 'manual',
+          }))
+        );
+        if (txErr) console.warn('[financeStore] Transaction migration warning:', txErr.message);
+      }
+
+      // 3. Upsert borrows
+      if (localBorrows.length > 0) {
+        const { error: bErr } = await supabase.from('borrows').upsert(
+          localBorrows.map((b) => ({
+            id: b.id,
+            user_id: userId,
+            person_name: b.person_name,
+            amount: b.amount,
+            status: b.status,
+            type: b.type,
+            linked_transaction_id: b.linked_transaction_id,
+            date: b.date,
+          }))
+        );
+        if (bErr) console.warn('[financeStore] Borrow migration warning:', bErr.message);
+      }
+
+      // 4. Upsert budgets
+      if (localBudgets.length > 0) {
+        const { error: bgErr } = await supabase.from('budgets').upsert(
+          localBudgets.map((bg) => ({
+            id: bg.id,
+            user_id: userId,
+            category: bg.category,
+            monthly_limit: bg.monthly_limit,
+            month: bg.month,
+          }))
+        );
+        if (bgErr) console.warn('[financeStore] Budget migration warning:', bgErr.message);
+      }
+
+      // Refresh full dataset from Supabase
+      await get().fetchInitialData(userId);
+      set({ syncStatus: 'synced', lastSyncedAt: new Date().toISOString() });
+      return { success: true };
+    } catch (err: any) {
+      set({ syncStatus: 'error' });
+      return { success: false, error: err.message || 'Migration failed' };
+    }
+  },
+
+  clearAllLocalData: async () => {
+    const uid = get().currentUserId;
+    set({
+      accounts: [],
+      transactions: [],
+      borrows: [],
+      budgets: [],
+      budgetSummaries: [],
+      lastSyncedAt: null,
+      syncStatus: 'idle',
+    });
+    await Promise.allSettled([
+      AsyncStorage.removeItem(getStorageKey(uid)),
+      AsyncStorage.removeItem(getCategoriesKey(uid)),
+      AsyncStorage.removeItem(getAccountOrderKey(uid)),
+    ]);
+  },
+
+  resetForSignOut: () => {
+    const { activeChannel } = get();
+    if (activeChannel) {
+      try {
+        supabase.removeChannel(activeChannel);
+      } catch {}
+    }
+    set({
+      accounts: [],
+      transactions: [],
+      borrows: [],
+      budgets: [],
+      budgetSummaries: [],
+      categories: DEFAULT_STUDENT_CATEGORIES,
+      currentUserId: null,
+      activeChannel: null,
+      lastSyncedAt: null,
+      syncStatus: 'idle',
+      inlineError: null,
+      isInitialLoading: false,
+    });
   },
 }));

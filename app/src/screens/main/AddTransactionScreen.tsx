@@ -25,6 +25,7 @@ import { BankLogo } from '../../components/BankLogo';
 import { TransactionType, TransactionSource } from '../../types/database';
 import { parseReceiptWithGemini } from '../../services/geminiService';
 import { normalizeAndMatchCategory } from '../../services/smsParser';
+import { useMerchantRulesStore } from '../../store/merchantRulesStore';
 
 interface AddTransactionScreenProps {
   navigation: any;
@@ -156,6 +157,13 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
     return null;
   });
 
+  // User interaction tracking (prevents late Gemini AI results from overwriting what user is actively typing)
+  const [amountTouched, setAmountTouched] = useState(false);
+  const [noteTouched, setNoteTouched] = useState(false);
+  const [categoryTouched, setCategoryTouched] = useState(false);
+  const [typeTouched, setTypeTouched] = useState(false);
+  const [parsedMerchant, setParsedMerchant] = useState<string | undefined>(params?.parsedMerchant);
+
   // Automatically add newly detected category if it doesn't exist
   React.useEffect(() => {
     if (params?.prefillCategory) {
@@ -171,19 +179,23 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
   const [prevParams, setPrevParams] = useState(params);
   if (params && params !== prevParams) {
     setPrevParams(params);
-    if (params.prefillAmount !== undefined && params.prefillAmount !== null) {
+    if (params.parsedMerchant) {
+      setParsedMerchant(params.parsedMerchant);
+    }
+    // Only update fields the user has NOT actively touched
+    if (!amountTouched && params.prefillAmount !== undefined && params.prefillAmount !== null) {
       setAmount(String(params.prefillAmount));
     }
-    if (params.prefillNote !== undefined && params.prefillNote !== null) {
+    if (!noteTouched && params.prefillNote !== undefined && params.prefillNote !== null) {
       setNote(String(params.prefillNote));
     }
     if (params.prefillPersonName !== undefined && params.prefillPersonName !== null) {
       setPersonName(String(params.prefillPersonName));
     }
-    if (params.prefillType !== undefined && params.prefillType !== null) {
+    if (!typeTouched && params.prefillType !== undefined && params.prefillType !== null) {
       setType(params.prefillType);
     }
-    if (params.prefillCategory !== undefined && params.prefillCategory !== null) {
+    if (!categoryTouched && params.prefillCategory !== undefined && params.prefillCategory !== null) {
       const match = normalizeAndMatchCategory(params.prefillCategory, categories);
       if (match.isNew) {
         useFinanceStore.getState().addCategory(match.category);
@@ -469,6 +481,12 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
       });
     }
 
+    // 2b. Record learned rule ONLY if transaction originated from SMS or screenshot,
+    // and key the rule on parsedMerchant (NOT the user-edited free text note!)
+    if ((source === 'sms' || source === 'screenshot') && parsedMerchant) {
+      useMerchantRulesStore.getState().recordUserRule(parsedMerchant, category, type);
+    }
+
     // 3. Reset form and navigate back immediately (non-blocking)
     setAmount('');
     setNote('');
@@ -608,7 +626,10 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
               return (
                 <TouchableOpacity
                   key={item.key}
-                  onPress={() => handleTypeChange(item.key)}
+                  onPress={() => {
+                    handleTypeChange(item.key);
+                    setTypeTouched(true);
+                  }}
                   style={[styles.typeTab, active && styles.typeTabActive]}
                 >
                   <Text
@@ -634,6 +655,7 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
               onChangeText={(text) => {
                 setFormError(null);
                 setAmount(text.replace(/[^0-9.]/g, ''));
+                setAmountTouched(true);
               }}
               placeholder="0.00"
               placeholderTextColor={colors.textMuted}
@@ -747,7 +769,10 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
                 return (
                   <TouchableOpacity
                     key={cat}
-                    onPress={() => setCategory(cat)}
+                    onPress={() => {
+                      setCategory(cat);
+                      setCategoryTouched(true);
+                    }}
                     style={[
                       styles.categoryPill,
                       active && {
@@ -1006,7 +1031,10 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
             <Text style={styles.sectionLabel}>NOTE (OPTIONAL)</Text>
             <TextInput
               value={note}
-              onChangeText={setNote}
+              onChangeText={(val) => {
+                setNote(val);
+                setNoteTouched(true);
+              }}
               onFocus={() => {
                 setTimeout(() => {
                   scrollViewRef.current?.scrollToEnd({ animated: true });

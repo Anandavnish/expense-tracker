@@ -182,12 +182,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
     fetchInitialData,
     createAccountOptimistic,
     updateAccountOptimistic,
-    deleteAccountWithCalibration,
+    deleteAccountOptimistic,
     reorderAccounts,
-    calibrateAccountBalance,
-    pendingCalibrations,
-    resolvePendingCalibrationAsTransaction,
-    clearPendingCalibration,
     payCreditCardBill,
     deleteBudgetOptimistic,
     addCategory,
@@ -271,13 +267,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
   const [editCreditLimit, setEditCreditLimit] = useState('');
   const [isAddingNewSource, setIsAddingNewSource] = useState(false);
 
-  // Dedicated Calibration State in Dashboard
-  const [calibratingSource, setCalibratingSource] = useState<Account | null>(null);
-  const [calibrateBalanceInput, setCalibrateBalanceInput] = useState('0');
-  const [isSavingCalibration, setIsSavingCalibration] = useState(false);
-
-  // Quick Sync Sheet State (Home Screen Net Worth card)
-  const [syncSheetVisible, setSyncSheetVisible] = useState(false);
 
   // Delete Account Confirmation State
   const [deleteTargetAccount, setDeleteTargetAccount] = useState<Account | null>(null);
@@ -849,17 +838,15 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
     setDeleteTargetAccount(acc);
   };
 
-  const handleConfirmDeleteAccount = async (calibrateFirst: boolean) => {
-    if (!deleteTargetAccount || !user) return;
+  const handleConfirmDeleteAccount = async () => {
+    if (!deleteTargetAccount) return;
     setIsDeletingSource(true);
-    const res = await deleteAccountWithCalibration(deleteTargetAccount.id, user.id, calibrateFirst);
+    await deleteAccountOptimistic(deleteTargetAccount.id);
     setIsDeletingSource(false);
-    if (res.success) {
-      setDeleteTargetAccount(null);
-      if (editingAccount?.id === deleteTargetAccount.id) {
-        setEditingAccount(null);
-        setIsAddingNewSource(false);
-      }
+    setDeleteTargetAccount(null);
+    if (editingAccount?.id === deleteTargetAccount.id) {
+      setEditingAccount(null);
+      setIsAddingNewSource(false);
     }
   };
 
@@ -936,34 +923,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
       setEditingAccount(null);
       setIsAddingNewSource(false);
     }
-  };
-
-  const handleOpenCalibrateSource = (account: Account) => {
-    setCalibratingSource(account);
-    if (account.type === 'credit_card') {
-      const outstanding = Math.abs(Math.min(0, Number(account.current_balance || 0)));
-      setCalibrateBalanceInput(outstanding > 0 ? String(outstanding) : '0');
-    } else {
-      setCalibrateBalanceInput(String(account.current_balance ?? '0'));
-    }
-  };
-
-  const handleSaveCalibrateSource = async (logAsTransaction: boolean) => {
-    if (!user || !calibratingSource) return;
-    setIsSavingCalibration(true);
-
-    const rawVal = parseFloat(calibrateBalanceInput) || 0;
-    const parsedBalance = calibratingSource.type === 'credit_card' ? -Math.abs(rawVal) : rawVal;
-
-    await calibrateAccountBalance(
-      calibratingSource.id,
-      parsedBalance,
-      logAsTransaction,
-      user.id
-    );
-
-    setIsSavingCalibration(false);
-    setCalibratingSource(null);
   };
 
   return (
@@ -1123,20 +1082,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                 </View>
               )}
             </View>
-
-            {Object.keys(pendingCalibrations).length > 0 && (
-              <TouchableOpacity
-                style={styles.syncRequiredPill}
-                onPress={() => setSyncSheetVisible(true)}
-                activeOpacity={0.8}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              >
-                <Ionicons name="warning" size={13} color={colors.warning} />
-                <Text style={styles.syncRequiredPillText}>
-                  Sync Required ({Object.keys(pendingCalibrations).length})
-                </Text>
-              </TouchableOpacity>
-            )}
           </View>
 
           <View style={styles.netWorthDivider} />
@@ -1842,208 +1787,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
         />
       </TouchableOpacity>
 
-      {/* SYNC REQUIRED BOTTOM SHEET / MODAL */}
-      <Modal
-        visible={syncSheetVisible}
-        transparent
-        animationType="fade"
-        statusBarTranslucent
-        onRequestClose={() => setSyncSheetVisible(false)}
-      >
-        <View style={styles.modalBackdrop}>
-          <View style={[styles.modalCard, { maxHeight: '80%' }]}>
-            <View style={styles.syncSheetHeaderRow}>
-              <View style={styles.syncSheetHeaderLeft}>
-                <Ionicons name="warning" size={20} color={colors.warning} />
-                <Text style={styles.modalTitle}>Balance Sync Required</Text>
-              </View>
-              <TouchableOpacity
-                onPress={() => setSyncSheetVisible(false)}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              >
-                <Ionicons name="close" size={20} color={colors.textSecondary} />
-              </TouchableOpacity>
-            </View>
 
-            <Text style={styles.syncSheetDescription}>
-              The following money sources have balances adjusted directly without logging a transaction. Log an adjustment transaction to keep your ledger accurate, or dismiss the warning.
-            </Text>
-
-            <ScrollView showsVerticalScrollIndicator={false} style={{ marginVertical: SPACING.md }}>
-              {Object.values(pendingCalibrations).length === 0 ? (
-                <Text style={styles.syncSheetEmptyText}>All accounts are currently in sync!</Text>
-              ) : (
-                Object.values(pendingCalibrations).map((item) => {
-                  const targetAcc = accounts.find((a) => a.id === item.accountId);
-                  const accName = targetAcc?.name || 'Account';
-                  const isPositive = item.difference > 0;
-                  const diffText = `${isPositive ? '+' : '−'}₹${Math.abs(item.difference).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
-
-                  return (
-                    <View key={item.accountId} style={styles.syncItemCard}>
-                      <BankLogo account={targetAcc} name={accName} size={36} style={{ marginRight: SPACING.md }} />
-                      <View style={styles.syncItemInfoCol}>
-                        <Text style={styles.syncItemAccountName}>{accName}</Text>
-                        <Text style={[styles.syncItemDiffText, { color: isPositive ? accent.hex : colors.alert }]}>
-                          Unlogged: {diffText}
-                        </Text>
-                        <Text style={styles.syncItemDateText}>
-                          Adjusted on {new Date(item.date).toLocaleDateString()}
-                        </Text>
-                      </View>
-
-                      <View style={styles.syncItemActionsCol}>
-                        <TactileButton
-                          onPress={async () => {
-                            if (!user) return;
-                            await resolvePendingCalibrationAsTransaction(item.accountId, user.id);
-                            if (Object.keys(pendingCalibrations).length <= 1) {
-                              setSyncSheetVisible(false);
-                            }
-                          }}
-                          style={[styles.syncItemLogBtn, { backgroundColor: accent.hex }]}
-                        >
-                          <Text style={styles.syncItemLogBtnText}>Log Tx</Text>
-                        </TactileButton>
-
-                        <TouchableOpacity
-                          onPress={async () => {
-                            await clearPendingCalibration(item.accountId);
-                            if (Object.keys(pendingCalibrations).length <= 1) {
-                              setSyncSheetVisible(false);
-                            }
-                          }}
-                          style={styles.syncItemDismissBtn}
-                        >
-                          <Text style={styles.syncItemDismissBtnText}>Dismiss</Text>
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  );
-                })
-              )}
-            </ScrollView>
-
-            <TouchableOpacity
-              onPress={() => setSyncSheetVisible(false)}
-              style={styles.modalSecondaryBtn}
-            >
-              <Text style={styles.modalSecondaryBtnText}>Close</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      {/* DEDICATED CALIBRATE BALANCE MODAL */}
-      <Modal
-        visible={!!calibratingSource}
-        transparent
-        animationType="fade"
-        statusBarTranslucent
-        onRequestClose={() => setCalibratingSource(null)}
-      >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.modalBackdrop}
-        >
-          <View style={styles.modalCard}>
-            <View style={styles.syncSheetHeaderRow}>
-              <View>
-                <Text style={styles.modalTitle}>Calibrate Balance</Text>
-                <Text style={styles.modalAccountSubtitle}>{calibratingSource?.name}</Text>
-              </View>
-              <TouchableOpacity
-                onPress={() => setCalibratingSource(null)}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              >
-                <Ionicons name="close" size={20} color={colors.textSecondary} />
-              </TouchableOpacity>
-            </View>
-
-            {calibratingSource && (() => {
-              const isCard = calibratingSource.type === 'credit_card';
-              const spent = Math.abs(Math.min(0, Number(calibratingSource.current_balance || 0)));
-              const rawVal = parseFloat(calibrateBalanceInput) || 0;
-              const parsedNew = isCard ? -Math.abs(rawVal) : rawVal;
-              const oldBal = Number(calibratingSource.current_balance || 0);
-              const diff = parsedNew - oldBal;
-              const absDiff = Math.abs(diff);
-
-              return (
-                <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 380 }}>
-                  <View style={styles.calibrationInfoBox}>
-                    <Text style={styles.calibrationInfoLabel}>
-                      {isCard ? 'CURRENT OUTSTANDING DUE IN APP' : 'CURRENT APP BALANCE'}
-                    </Text>
-                    <Text style={[styles.calibrationCurrentBalance, TYPOGRAPHY.tabularText]}>
-                      ₹{isCard ? spent.toLocaleString('en-IN') : oldBal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                    </Text>
-                  </View>
-
-                  <Text style={styles.inputSectionLabel}>
-                    {isCard ? 'ACTUAL OUTSTANDING DUE (₹)' : 'ACTUAL REAL-WORLD BALANCE (₹)'}
-                  </Text>
-                  <TextInput
-                    value={calibrateBalanceInput}
-                    onChangeText={setCalibrateBalanceInput}
-                    placeholder="0.00"
-                    placeholderTextColor={colors.textMuted}
-                    keyboardType="decimal-pad"
-                    mode="outlined"
-                    outlineColor={colors.border}
-                    activeOutlineColor={accent.hex}
-                    textColor={colors.textPrimary}
-                    theme={{ colors: { background: colors.surfaceLight } }}
-                    style={styles.modalInput}
-                  />
-
-                  <View style={styles.diffPreviewBox}>
-                    <Text style={styles.diffPreviewLabel}>CALCULATED DIFFERENCE</Text>
-                    <Text
-                      style={[
-                        styles.diffPreviewAmount,
-                        TYPOGRAPHY.tabularText,
-                        { color: diff > 0 ? accent.hex : diff < 0 ? colors.alert : colors.textMuted },
-                      ]}
-                    >
-                      {diff > 0
-                        ? `+₹${absDiff.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
-                        : diff < 0
-                        ? `−₹${absDiff.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
-                        : '₹0.00 (No change)'}
-                    </Text>
-                    <Text style={styles.diffHelpText}>
-                      Log an Adjustment transaction to keep ledger in sync, or update directly (which flags 'Sync Required' on home card).
-                    </Text>
-                  </View>
-
-                  <View style={styles.calibrationActionsCol}>
-                    <TactileButton
-                      onPress={() => handleSaveCalibrateSource(true)}
-                      disabled={isSavingCalibration}
-                      style={[styles.modalPrimaryBtn, { backgroundColor: accent.hex }]}
-                    >
-                      <Text style={styles.modalPrimaryBtnText}>
-                        {isSavingCalibration ? 'Saving...' : 'Calibrate & Log Transaction'}
-                      </Text>
-                    </TactileButton>
-
-                    <TouchableOpacity
-                      onPress={() => handleSaveCalibrateSource(false)}
-                      disabled={isSavingCalibration}
-                      style={styles.modalSecondaryBtn}
-                    >
-                      <Text style={styles.modalSecondaryBtnText}>
-                        Update Balance Only (Sets Sync Required)
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                </ScrollView>
-              );
-            })()}
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
 
       {/* PAY CREDIT CARD BILL MODAL */}
       <Modal
@@ -2663,12 +2407,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                               <Text style={styles.managerItemName} numberOfLines={1}>
                                 {title}
                               </Text>
-                              {!!pendingCalibrations[acc.id] && (
-                                <View style={styles.managerSyncBadge}>
-                                  <Ionicons name="warning" size={10} color={colors.warning} />
-                                  <Text style={styles.managerSyncBadgeText}>Sync</Text>
-                                </View>
-                              )}
                             </View>
                             <View style={styles.managerItemMetaRow}>
                               <Text style={styles.managerItemType}>
@@ -2704,14 +2442,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                     }}
                     renderActions={(acc) => (
                       <View style={styles.managerItemActions}>
-                        <TouchableOpacity
-                          onPress={() => handleOpenCalibrateSource(acc)}
-                          style={[styles.managerCircleBtn, { borderColor: accent.hex + '50' }]}
-                          hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
-                        >
-                          <Ionicons name="scale-outline" size={14} color={accent.hex} />
-                        </TouchableOpacity>
-
                         <TouchableOpacity
                           onPress={() => handleOpenEditSource(acc)}
                           style={styles.managerCircleBtn}
@@ -2764,72 +2494,29 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
 
             <Text style={styles.modalTitle}>Delete Money Source?</Text>
 
-            {deleteTargetAccount && Math.abs(Number(deleteTargetAccount.current_balance || 0)) > 0.01 ? (
-              <>
-                <Text style={styles.deleteModalExplanation}>
-                  <Text style={{ fontWeight: '700', color: colors.textPrimary }}>{deleteTargetAccount.name}</Text> currently has an active balance of{' '}
-                  <Text style={{ fontWeight: '700', color: colors.alert }}>
-                    ₹{Math.abs(Number(deleteTargetAccount.current_balance || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                  </Text>.
-                  {'\n\n'}
-                  Deleting without calibrating will leave an untracked gap in your calculated net worth.
+            <Text style={styles.deleteModalExplanation}>
+              Are you sure you want to delete <Text style={{ fontWeight: '700', color: colors.textPrimary }}>{deleteTargetAccount?.name}</Text>? Past transaction history linked to this source will be preserved.
+            </Text>
+
+            <View style={styles.deleteModalActionList}>
+              <TactileButton
+                onPress={handleConfirmDeleteAccount}
+                disabled={isDeletingSource}
+                style={[styles.modalPrimaryBtn, { backgroundColor: colors.alert, paddingVertical: 12 }]}
+              >
+                <Text style={styles.modalPrimaryBtnText}>
+                  {isDeletingSource ? 'Deleting...' : 'Delete Money Source'}
                 </Text>
+              </TactileButton>
 
-                <View style={styles.deleteModalActionList}>
-                  <TactileButton
-                    onPress={() => handleConfirmDeleteAccount(true)}
-                    disabled={isDeletingSource}
-                    style={[styles.modalPrimaryBtn, { backgroundColor: accent.hex, paddingVertical: 12 }]}
-                  >
-                    <Text style={styles.modalPrimaryBtnText}>
-                      {isDeletingSource ? 'Calibrating & Deleting...' : 'Calibrate to ₹0 First (Recommended)'}
-                    </Text>
-                  </TactileButton>
-
-                  <TouchableOpacity
-                    onPress={() => handleConfirmDeleteAccount(false)}
-                    disabled={isDeletingSource}
-                    style={styles.forceDeleteSourceBtn}
-                  >
-                    <Text style={styles.forceDeleteSourceBtnText}>Delete Anyway (Leave Gap)</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    onPress={() => setDeleteTargetAccount(null)}
-                    disabled={isDeletingSource}
-                    style={styles.modalSecondaryBtn}
-                  >
-                    <Text style={styles.modalSecondaryBtnText}>Cancel</Text>
-                  </TouchableOpacity>
-                </View>
-              </>
-            ) : (
-              <>
-                <Text style={styles.deleteModalExplanation}>
-                  Are you sure you want to delete <Text style={{ fontWeight: '700', color: colors.textPrimary }}>{deleteTargetAccount?.name}</Text>? Past transaction history linked to this source will be preserved.
-                </Text>
-
-                <View style={styles.deleteModalActionList}>
-                  <TactileButton
-                    onPress={() => handleConfirmDeleteAccount(false)}
-                    disabled={isDeletingSource}
-                    style={[styles.modalPrimaryBtn, { backgroundColor: colors.alert, paddingVertical: 12 }]}
-                  >
-                    <Text style={styles.modalPrimaryBtnText}>
-                      {isDeletingSource ? 'Deleting...' : 'Delete Account'}
-                    </Text>
-                  </TactileButton>
-
-                  <TouchableOpacity
-                    onPress={() => setDeleteTargetAccount(null)}
-                    disabled={isDeletingSource}
-                    style={styles.modalSecondaryBtn}
-                  >
-                    <Text style={styles.modalSecondaryBtnText}>Cancel</Text>
-                  </TouchableOpacity>
-                </View>
-              </>
-            )}
+              <TouchableOpacity
+                onPress={() => setDeleteTargetAccount(null)}
+                disabled={isDeletingSource}
+                style={styles.modalSecondaryBtn}
+              >
+                <Text style={styles.modalSecondaryBtnText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>

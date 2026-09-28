@@ -22,7 +22,7 @@ export interface Account {
 }
 
 export type TransactionType = 'income' | 'expense' | 'borrow_given' | 'borrow_taken';
-export type TransactionSource = 'manual' | 'screenshot';
+export type TransactionSource = 'manual' | 'screenshot' | 'sms';
 
 export interface Transaction {
   id: string;
@@ -95,3 +95,19 @@ export interface AccountOverview {
   transaction_count: number;
   updated_at: string;
 }
+
+export type RuleSource = 'gemini' | 'user_manual';
+
+export interface LearnedMerchantRule {
+  id?: string;
+  user_id: string;
+  merchant_name: string; // Stored already normalized (lowercase, clean)
+  category: string;
+  transaction_type: TransactionType;
+  source: RuleSource;
+  confidence: number;
+  usage_count: number;
+  created_at?: string;
+  updated_at?: string;
+}
+

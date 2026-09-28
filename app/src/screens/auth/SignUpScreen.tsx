@@ -1,17 +1,17 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  KeyboardAvoidingView,
-  Platform,
   ScrollView,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TextInput, ActivityIndicator } from 'react-native-paper';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../store/authStore';
 import { COLORS, SPACING } from '../../theme/tokens';
 import { TactileButton } from '../../components/TactileButton';
+import { KeyboardAwareScrollView } from '../../components/KeyboardAwareScrollView';
 
 interface SignUpScreenProps {
   navigation: any;
@@ -19,11 +19,12 @@ interface SignUpScreenProps {
 
 export const SignUpScreen: React.FC<SignUpScreenProps> = ({ navigation }) => {
   const insets = useSafeAreaInsets();
+  const scrollRef = useRef<ScrollView>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [validationError, setValidationError] = useState<string | null>(null);
-  const { signUp, isLoading, error, clearError } = useAuthStore();
+  const { signUp, signInWithGoogle, signInAsGuest, isLoading, error, clearError } = useAuthStore();
 
   const handleSignUp = async () => {
     if (!email || !password) return;
@@ -43,14 +44,12 @@ export const SignUpScreen: React.FC<SignUpScreenProps> = ({ navigation }) => {
 
   return (
     <View style={[styles.safeArea, { paddingTop: insets.top }]}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'android' ? undefined : 'padding'}
-        style={styles.keyboardContainer}
+      <KeyboardAwareScrollView
+        ref={scrollRef}
+        extraScrollHeight={60}
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
       >
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          keyboardShouldPersistTaps="handled"
-        >
           <View style={styles.header}>
             <View style={styles.tag}>
               <Text style={styles.tagText}>NEW ACCOUNT</Text>
@@ -93,6 +92,11 @@ export const SignUpScreen: React.FC<SignUpScreenProps> = ({ navigation }) => {
                 setValidationError(null);
                 setPassword(text);
               }}
+              onFocus={() => {
+                setTimeout(() => {
+                  scrollRef.current?.scrollTo({ y: 120, animated: true });
+                }, 150);
+              }}
               secureTextEntry
               mode="outlined"
               outlineColor={COLORS.border}
@@ -108,6 +112,11 @@ export const SignUpScreen: React.FC<SignUpScreenProps> = ({ navigation }) => {
                 clearError();
                 setValidationError(null);
                 setConfirmPassword(text);
+              }}
+              onFocus={() => {
+                setTimeout(() => {
+                  scrollRef.current?.scrollToEnd({ animated: true });
+                }, 150);
               }}
               secureTextEntry
               mode="outlined"
@@ -140,9 +149,45 @@ export const SignUpScreen: React.FC<SignUpScreenProps> = ({ navigation }) => {
                 Already have an account? <Text style={styles.linkText}>Sign In</Text>
               </Text>
             </TactileButton>
+
+            {/* Divider */}
+            <View style={styles.dividerRow}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>OR CONTINUE WITH</Text>
+              <View style={styles.dividerLine} />
+            </View>
+
+            {/* Google Sign In Button */}
+            <TactileButton
+              onPress={() => {
+                clearError();
+                signInWithGoogle();
+              }}
+              disabled={isLoading}
+              style={styles.oauthBtn}
+            >
+              <View style={styles.btnRow}>
+                <Ionicons name="logo-google" size={17} color={COLORS.textPrimary} />
+                <Text style={styles.oauthBtnText}>Continue with Google</Text>
+              </View>
+            </TactileButton>
+
+            {/* Guest Mode Button */}
+            <TactileButton
+              onPress={() => {
+                clearError();
+                signInAsGuest();
+              }}
+              disabled={isLoading}
+              style={styles.guestBtn}
+            >
+              <View style={styles.btnRow}>
+                <Ionicons name="person-outline" size={17} color={COLORS.textSecondary} />
+                <Text style={styles.guestBtnText}>Continue as Guest (Local Only)</Text>
+              </View>
+            </TactileButton>
           </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardAwareScrollView>
     </View>
   );
 };
@@ -223,7 +268,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   secondaryBtn: {
-    paddingVertical: SPACING.md,
+    paddingVertical: SPACING.xs,
     alignItems: 'center',
   },
   secondaryBtnText: {
@@ -232,6 +277,57 @@ const styles = StyleSheet.create({
   },
   linkText: {
     color: COLORS.accent,
+    fontWeight: '600',
+  },
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: SPACING.xs,
+    gap: SPACING.sm,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: COLORS.border,
+  },
+  dividerText: {
+    fontSize: 11,
+    color: COLORS.textMuted,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+  },
+  btnRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  oauthBtn: {
+    backgroundColor: COLORS.surface,
+    borderColor: COLORS.border,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingVertical: SPACING.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  oauthBtnText: {
+    color: COLORS.textPrimary,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  guestBtn: {
+    backgroundColor: COLORS.surfaceLight,
+    borderColor: COLORS.border,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingVertical: SPACING.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  guestBtnText: {
+    color: COLORS.textSecondary,
+    fontSize: 14,
     fontWeight: '600',
   },
 });

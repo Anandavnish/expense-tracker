@@ -10,6 +10,7 @@ import {
   UIManager,
   LayoutAnimation,
   Modal,
+  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
@@ -64,7 +65,10 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
     deleteBudgetOptimistic,
     inlineError,
     setInlineError,
+    isMonthLocked,
   } = useFinanceStore();
+
+  const isLocked = isMonthLocked(selectedMonth);
 
   const scrollViewRef = useRef<ScrollView>(null);
   const draftLimits = useRef<Record<string, string>>({});
@@ -300,6 +304,13 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
   // Smooth form open
   const handleOpenForm = useCallback(
     (targetCat?: string) => {
+      if (isLocked) {
+        Alert.alert(
+          'Period Locked',
+          `The budget for ${selectedMonth} is locked (View Only). To adjust budgets for this period, unlock it from the Dashboard.`
+        );
+        return;
+      }
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       setShowForm(true);
       setFormError(null);
@@ -313,7 +324,7 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
         scrollViewRef.current?.scrollTo({ y: 0, animated: true });
       }, 60);
     },
-    [selectedCategory, fetchLimitForCategory]
+    [isLocked, selectedMonth, selectedCategory, fetchLimitForCategory]
   );
 
   // Smooth form close (Cancel / collapse)
@@ -521,37 +532,44 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
           </View>
         </View>
 
-        <TouchableOpacity
-          onPress={() => {
-            if (showForm) {
-              handleCloseForm();
-            } else {
-              handleOpenForm();
-            }
-          }}
-          style={[
-            styles.addBudgetBtn,
-            {
-              backgroundColor: showForm ? colors.surfaceLight : accent.muted,
-              borderColor: showForm ? colors.border : accent.hex,
-            },
-          ]}
-          activeOpacity={0.8}
-        >
-          <Ionicons
-            name={showForm ? 'close' : 'add'}
-            size={14}
-            color={showForm ? colors.textSecondary : accent.hex}
-          />
-          <Text
+        {isLocked ? (
+          <View style={styles.lockedHeaderBadge}>
+            <Ionicons name="lock-closed" size={13} color={colors.textMuted} />
+            <Text style={styles.lockedHeaderText}>LOCKED</Text>
+          </View>
+        ) : (
+          <TouchableOpacity
+            onPress={() => {
+              if (showForm) {
+                handleCloseForm();
+              } else {
+                handleOpenForm();
+              }
+            }}
             style={[
-              styles.addBudgetText,
-              { color: showForm ? colors.textSecondary : accent.hex },
+              styles.addBudgetBtn,
+              {
+                backgroundColor: showForm ? colors.surfaceLight : accent.muted,
+                borderColor: showForm ? colors.border : accent.hex,
+              },
             ]}
+            activeOpacity={0.8}
           >
-            {showForm ? 'Cancel' : 'Set Budget'}
-          </Text>
-        </TouchableOpacity>
+            <Ionicons
+              name={showForm ? 'close' : 'add'}
+              size={14}
+              color={showForm ? colors.textSecondary : accent.hex}
+            />
+            <Text
+              style={[
+                styles.addBudgetText,
+                { color: showForm ? colors.textSecondary : accent.hex },
+              ]}
+            >
+              {showForm ? 'Cancel' : 'Set Budget'}
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       <InlineError message={inlineError} onDismiss={() => setInlineError(null)} />
@@ -1640,6 +1658,23 @@ const styles = StyleSheet.create({
   addBudgetText: {
     fontSize: 12,
     fontWeight: '700',
+  },
+  lockedHeaderBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: COLORS.surfaceLight,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  lockedHeaderText: {
+    color: COLORS.textMuted,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.5,
   },
   scrollContent: {
     padding: SPACING.lg,

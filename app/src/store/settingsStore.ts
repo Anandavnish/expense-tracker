@@ -14,6 +14,7 @@ import {
   PRECISION_OBSIDIAN_LIGHT,
   buildThemeTokens,
 } from '../theme/tokens';
+import { supabase } from '../services/supabase';
 
 export type ThemeMode = 'dark' | 'light' | 'system';
 
@@ -33,6 +34,7 @@ export const ACCENT_PALETTE: AccentColor[] = [
 
 const THEME_MODE_STORAGE_KEY = '@finance_tracker_theme_mode';
 const THEME_STYLE_STORAGE_KEY = '@finance_tracker_theme_style';
+const SHOW_AI_OVERVIEW_STORAGE_KEY = '@finance_tracker_show_ai_overview';
 
 const getSystemScheme = (): 'dark' | 'light' => {
   const scheme = Appearance.getColorScheme();
@@ -105,12 +107,20 @@ interface SettingsState {
   colors: ThemeColors;
   accent: AccentColor;
   material3Theme: Material3Theme | null;
+  geminiApiKey: string | null;
+  hasGeminiApiKey: boolean;
+  isLoadingGeminiKey: boolean;
+  showAiOverviewOnDashboard: boolean;
 
   loadSettings: () => Promise<void>;
   setThemeMode: (mode: ThemeMode) => Promise<void>;
   setThemeStyle: (style: ThemeStyleId) => Promise<void>;
   setMaterial3Theme: (m3Theme: Material3Theme) => void;
   setAccent: (accent: AccentColor) => Promise<void>;
+  setShowAiOverviewOnDashboard: (show: boolean) => Promise<void>;
+  fetchGeminiApiKey: (userId?: string) => Promise<string | null>;
+  saveGeminiApiKey: (key: string, userId?: string) => Promise<{ success: boolean; error?: string }>;
+  removeGeminiApiKey: (userId?: string) => Promise<{ success: boolean; error?: string }>;
 }
 
 export const useSettingsStore = create<SettingsState>((set, get) => {
@@ -151,12 +161,17 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
       muted: initialColors.primaryContainer,
     },
     material3Theme: null,
+    geminiApiKey: null,
+    hasGeminiApiKey: false,
+    isLoadingGeminiKey: false,
+    showAiOverviewOnDashboard: true,
 
     loadSettings: async () => {
       try {
-        const [savedMode, savedStyle] = await Promise.all([
+        const [savedMode, savedStyle, savedShowAi] = await Promise.all([
           AsyncStorage.getItem(THEME_MODE_STORAGE_KEY),
           AsyncStorage.getItem(THEME_STYLE_STORAGE_KEY),
+          AsyncStorage.getItem(SHOW_AI_OVERVIEW_STORAGE_KEY),
         ]);
 
         let mode: ThemeMode = 'dark';
@@ -184,21 +199,32 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
           get().material3Theme
         );
 
+        const showAi = savedShowAi !== null ? savedShowAi === 'true' : true;
+
         set({
           themeMode: mode,
           themeStyle: style,
           effectiveTheme: effective,
           isDark: effective === 'dark',
           colors: resolvedColors,
+          showAiOverviewOnDashboard: showAi,
           accent: {
             name: THEME_STYLES[style]?.name || 'Theme',
             hex: resolvedColors.primary,
             muted: resolvedColors.primaryContainer,
           },
         });
+
+        // Fetch Gemini BYOK key in background
+        get().fetchGeminiApiKey().catch(() => {});
       } catch {
         // Fallback to defaults
       }
+    },
+
+    setShowAiOverviewOnDashboard: async (show: boolean) => {
+      set({ showAiOverviewOnDashboard: show });
+      await AsyncStorage.setItem(SHOW_AI_OVERVIEW_STORAGE_KEY, String(show)).catch(() => {});
     },
 
     setThemeMode: async (mode: ThemeMode) => {
@@ -267,6 +293,135 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
 
     setAccent: async (accent: AccentColor) => {
       set({ accent });
+    },
+
+    fetchGeminiApiKey: async (userId?: string) => {
+      try {
+        set({ isLoadingGeminiKey: true });
+        let uid = userId;
+        if (!uid) {
+          const { data } = await supabase.auth.getUser();
+          uid = data.user?.id;
+        }
+        if (!uid) {
+          set({ isLoadingGeminiKey: false, geminiApiKey: null, hasGeminiApiKey: false });
+          return null;
+        }
+
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('gemini_api_key')
+          .eq('id', uid)
+          .single();
+
+        if (error && error.code !== 'PGRST116') {
+          console.warn('[settingsStore] Error fetching gemini_api_key:', error.message);
+        }
+
+        const key = data?.gemini_api_key || null;
+        set({
+          geminiApiKey: key,
+          hasGeminiApiKey: !!(key && key.trim()),
+          isLoadingGeminiKey: false,
+        });
+        return key;
+      } catch {
+        set({ isLoadingGeminiKey: false });
+        return null;
+      }
+    },
+
+    saveGeminiApiKey: async (key: string, userId?: string) => {
+      try {
+        set({ isLoadingGeminiKey: true });
+        let uid = userId;
+        if (!uid) {
+          const { data } = await supabase.auth.getUser();
+          uid = data.user?.id;
+        }
+        if (!uid) {
+          set({ isLoadingGeminiKey: false });
+          return { success: false, error: 'User is not authenticated' };
+        }
+
+        const trimmed = key.trim();
+        const { data, error } = await supabase
+          .from('profiles')
+          .update({
+            gemini_api_key: trimmed,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', uid)
+          .select('id');
+
+        if (error) {
+          set({ isLoadingGeminiKey: false });
+          return { success: false, error: error.message };
+        }
+
+        // Fallback for rare case where profile row was not yet seeded
+        if (!data || data.length === 0) {
+          const { error: insertErr } = await supabase
+            .from('profiles')
+            .insert({
+              id: uid,
+              gemini_api_key: trimmed,
+              updated_at: new Date().toISOString(),
+            });
+          if (insertErr) {
+            set({ isLoadingGeminiKey: false });
+            return { success: false, error: insertErr.message };
+          }
+        }
+
+        set({
+          geminiApiKey: trimmed,
+          hasGeminiApiKey: !!trimmed,
+          isLoadingGeminiKey: false,
+        });
+        return { success: true };
+      } catch (err: any) {
+        set({ isLoadingGeminiKey: false });
+        return { success: false, error: err?.message || 'Failed to save Gemini key' };
+      }
+    },
+
+    removeGeminiApiKey: async (userId?: string) => {
+      try {
+        set({ isLoadingGeminiKey: true });
+        let uid = userId;
+        if (!uid) {
+          const { data } = await supabase.auth.getUser();
+          uid = data.user?.id;
+        }
+        if (!uid) {
+          set({ isLoadingGeminiKey: false });
+          return { success: false, error: 'User is not authenticated' };
+        }
+
+        const { error } = await supabase
+          .from('profiles')
+          .update({
+            gemini_api_key: null,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', uid);
+
+        if (error) {
+          set({ isLoadingGeminiKey: false });
+          return { success: false, error: error.message };
+        }
+
+        set({
+          geminiApiKey: null,
+          hasGeminiApiKey: false,
+          isLoadingGeminiKey: false,
+        });
+        return { success: true };
+      } catch (err: any) {
+        set({ isLoadingGeminiKey: false });
+        return { success: false, error: err?.message || 'Failed to remove Gemini key' };
+      }
     },
   };
 });

@@ -748,6 +748,36 @@ Foundational architecture build for a high-performance cross-platform personal f
     - `npx tsc --noEmit`: 0 errors.
     - `npm run lint`: 0 errors, 0 warnings.
 
+- [x] **v1.0.2: Adaptive SMS Learning Engine with Precedence & Cloud Sync**:
+  - **PostgreSQL Schema & Unique Constraints**:
+    - Created migration `20260928000004_user_merchant_rules.sql` with plain column constraint: `CONSTRAINT user_merchant_rules_user_merchant_key UNIQUE (user_id, merchant_name)`.
+    - Added CHECK constraints for `source IN ('gemini', 'user_manual')` and `transaction_type IN ('income', 'expense', 'borrow_given', 'borrow_taken')`.
+    - Stores `merchant_name` already-normalized in lowercase, enabling seamless `supabase-js` upserts with zero ON CONFLICT expression index issues.
+  - **Indian Banking & UPI String Normalization (`normalizeMerchantName`)**:
+    - Extracts canonical merchant keys from noisy bank SMS and UPI strings (e.g. `UPI/4239817/GOPAL SWEET/okhdfcbank` &rarr; `gopal sweet`).
+    - Strips full VPA handles (`@okhdfcbank`, `@oksbi`, `@ybl`, etc.), reference/RRN indicators, digit runs, corporate noise words (`pvt ltd`, `commerce private`), and direction words (`paid to`, `trf to`).
+  - **Strict Exact Matching (No False Positives)**:
+    - High-confidence matching is restricted to exact normalized matches only.
+    - Completely prevents false-positive cross-contamination (e.g. "Gopal Medical" will never match "Gopal Sweet").
+  - **Separation of Notes from Parsed Merchant**:
+    - User free-text notes (e.g. "dinner with friends") are never used to train rules.
+    - Rules are keyed strictly on the parser's extracted `parsedMerchant` candidate.
+    - Rules are only recorded for SMS and screenshot/OCR shares, never from manual scratch entries.
+  - **Precedence & Non-Intrusive Gemini Refinement**:
+    - `user_manual` rules are strictly immutable to Gemini AI (Gemini can never overwrite user-confirmed rules).
+    - Touch tracking in `AddTransactionScreen` ensures late-arriving Gemini results never overwrite fields the user is currently typing in.
+  - **Zustand + Supabase Storage Architecture (`merchantRulesStore.ts`)**:
+    - Scoped AsyncStorage cache per user (`@merchant_rules_<userId>_v1`).
+    - Automatic cloud sync with Supabase `user_merchant_rules`.
+    - Clean Guest mode isolation (Guest mode utilizes seed dictionary without backend sync overhead).
+  - **Settings Management Screen**:
+    - Added interactive **"Learned Merchants & Rules"** modal in `SettingsScreen.tsx`.
+    - Searchable list of all learned merchants, category pills, source tags (`USER` vs `AI`), usage counters, 1-tap category reassignments, and deletion with confirmation.
+  - **Standalone Android APK v1.0.2 (Build 3)**:
+    - EAS Build ID: `c349b1b4-88ab-44ba-b72d-2ffff1631d3d`
+    - Direct APK Download Link: `https://expo.dev/artifacts/eas/l8oGEqKA0E-aBeCN3t6rgKAPF3SVV4kO0glk_ZbnQq4.apk`
+    - Verified all 4 test suites, `npx tsc --noEmit` (0 errors), and `npm run lint` (0 errors, 0 warnings).
+
 ---
 
 ## Architecture Summary
@@ -755,6 +785,7 @@ All features and native capabilities are fully implemented, verified, and integr
 - Core Supabase backend with auto-balancing triggers, RLS, and Realtime sync.
 - 7-part Dashboard with Net Worth hero, Indian bank presets, and Category Manager.
 - Local-first bank & issuer logo system with static Metro registry and initials fallback.
+- Adaptive SMS & UPI learning engine with exact matching, precedence rules, and Supabase cloud sync.
 - YouTube-style drag-and-drop reordering with haptic physics.
 - Financial discipline rules: Net Worth ceiling and balance calibration audit logging.
 - Past month lock system with 4-digit security code and 30-minute auto-relock.
@@ -765,6 +796,7 @@ All features and native capabilities are fully implemented, verified, and integr
 - Multimodal Gemini Flash receipt parser & Android share-sheet receiver with zero native dependencies.
 - On-demand AI Spending Overview with deterministic trigger gating ($\ge 5$ txns, $\ge 2$ categories), historical closed-period framing, budget omission, tuned prompt, and $\le 120$-word cap.
 - Dynamic Gemini model discovery and multi-generation fallback cascade.
-- Standalone Android APK build (v1.0.1, Build 2) with native share sheet receiving.
+- Standalone Android APK build (v1.0.2, Build 3) with native share sheet receiving.
 - Self-hosted in-app update prompt system backed by Supabase `app_versions` and `app-releases` bucket.
+
 

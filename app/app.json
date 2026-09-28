@@ -2,7 +2,7 @@
   "expo": {
     "name": "Expense Tracker",
     "slug": "expense-tracker",
-    "version": "1.0.0",
+    "version": "1.0.2",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "expensetracker",
@@ -10,16 +10,54 @@
     "backgroundColor": "#0C0D11",
     "android": {
       "package": "com.expensetracker.app",
+      "versionCode": 3,
       "backgroundColor": "#0C0D11",
       "adaptiveIcon": {
         "backgroundColor": "#0C0D11"
       },
       "predictiveBackGestureEnabled": false
     },
+    "ios": {
+      "bundleIdentifier": "com.expensetracker.app",
+      "backgroundColor": "#0C0D11"
+    },
     "plugins": [
       "expo-dev-client",
       "@react-native-community/datetimepicker",
-      "expo-sharing"
-    ]
+      "expo-sharing",
+      [
+        "expo-share-intent",
+        {
+          "package": "com.expensetracker.app",
+          "androidIntentFilters": [
+            "image/*",
+            "text/*"
+          ]
+        }
+      ],
+      "expo-font"
+    ],
+    "extra": {
+      "eas": {
+        "build": {
+          "experimental": {
+            "ios": {
+              "appExtensions": [
+                {
+                  "targetName": "ShareExtension",
+                  "bundleIdentifier": "com.expensetracker.app.share-extension",
+                  "entitlements": {
+                    "com.apple.security.application-groups": [
+                      "group.com.expensetracker.app"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "projectId": "827e9173-8c20-445a-b345-16f56340034f"
+      }
+    }
   }
 }

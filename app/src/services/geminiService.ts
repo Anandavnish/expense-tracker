@@ -1,0 +1,840 @@
+// src/services/geminiService.ts
+// Gemini AI integration for Receipt Scanning and Spending Overview
+// Supports Supabase Edge Function 'ask-gemini' with seamless direct Gemini fallback
+// Multimodal Gemini 2.0 Flash vision for reading receipts and screenshots without native OCR dependencies
+
+import * as FileSystem from 'expo-file-system/legacy';
+import { supabase } from './supabase';
+import { TransactionType } from '../types/database';
+import { useSettingsStore } from '../store/settingsStore';
+
+import { normalizeAndMatchCategory } from './smsParser';
+
+export interface ParsedReceiptData {
+  amount: number | null;
+  merchant_or_person: string;
+  suggested_category: string;
+  suggested_type: TransactionType;
+  date_if_present: string | null;
+}
+
+export interface ParseReceiptOptions {
+  text?: string;
+  imageUri?: string;
+  base64?: string;
+  mimeType?: string;
+  availableCategories?: string[];
+}
+
+export interface GeminiResponse<T> {
+  success: boolean;
+  data?: T;
+  error?:
+    | 'MISSING_KEY'
+    | 'INVALID_KEY'
+    | 'RATE_LIMIT'
+    | 'FUNCTION_UNAVAILABLE'
+    | 'GENERIC_ERROR'
+    | 'INSUFFICIENT_DATA';
+  message?: string;
+}
+
+/**
+ * Normalizes suggested transaction type from AI to app's TransactionType enum
+ */
+export function normalizeSuggestedType(type?: string): TransactionType {
+  if (!type) return 'expense';
+  const lower = type.toLowerCase().trim();
+  if (lower === 'income') return 'income';
+  if (lower === 'lent' || lower === 'borrow_given') return 'borrow_given';
+  if (lower === 'borrowed' || lower === 'borrow_taken') return 'borrow_taken';
+  return 'expense';
+}
+
+/**
+ * Retrieves the Gemini API key from settingsStore or database profile
+ */
+async function resolveGeminiApiKey(): Promise<string | null> {
+  // 1. Check in-memory store
+  const storeKey = useSettingsStore.getState().geminiApiKey;
+  if (storeKey && storeKey.trim()) {
+    return storeKey.trim().replace(/^["']|["']$/g, '');
+  }
+
+  // 2. Fallback to Supabase profiles table
+  try {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const userId = sessionData.session?.user?.id;
+    if (userId) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('gemini_api_key')
+        .eq('id', userId)
+        .single();
+      if (profile?.gemini_api_key && profile.gemini_api_key.trim()) {
+        const key = profile.gemini_api_key.trim().replace(/^["']|["']$/g, '');
+        useSettingsStore.setState({ geminiApiKey: key, hasGeminiApiKey: true });
+        return key;
+      }
+    }
+  } catch (err) {
+    console.warn('[geminiService] Could not resolve key from profile:', err);
+  }
+
+  return null;
+}
+
+export interface WorkingModelConfig {
+  model: string;
+  apiVersion: 'v1beta' | 'v1';
+}
+
+let cachedWorkingModel: WorkingModelConfig | null = null;
+let cachedKeyForModel: string | null = null;
+
+// Multi-generation fallback cascade ordered by capability and speed (prioritizing 2026 active models)
+const FALLBACK_MODEL_CANDIDATES = [
+  'gemini-3.5-flash',
+  'gemini-3.5-flash-lite',
+  'gemini-3.8-flash',
+  'gemini-3.1-flash-lite',
+  'gemini-2.5-flash',
+  'gemini-2.5-flash-lite',
+  'gemini-2.5-pro',
+  'gemini-2.0-flash',
+  'gemini-1.5-flash',
+  'gemini-1.5-pro',
+];
+
+/**
+ * Dynamically queries Google Generative Language API ListModels endpoint
+ * to discover the exact model names supported by the user's specific API key.
+ */
+export async function resolveWorkingGeminiModel(
+  rawApiKey: string
+): Promise<WorkingModelConfig> {
+  const apiKey = rawApiKey.trim().replace(/^["']|["']$/g, '');
+
+  if (cachedKeyForModel === apiKey && cachedWorkingModel) {
+    return cachedWorkingModel;
+  }
+
+  // 1. Attempt ListModels on v1beta, then v1
+  for (const apiVersion of ['v1beta', 'v1'] as const) {
+    try {
+      // Try query-param auth only (passing both query param and header can trigger 400 Bad Request)
+      let listUrl = `https://generativelanguage.googleapis.com/${apiVersion}/models?key=${encodeURIComponent(apiKey)}`;
+      let res = await fetch(listUrl);
+
+      // If query-param is rejected, try header auth only
+      if (!res.ok) {
+        listUrl = `https://generativelanguage.googleapis.com/${apiVersion}/models`;
+        res = await fetch(listUrl, {
+          headers: { 'x-goog-api-key': apiKey },
+        });
+      }
+
+      if (res.ok) {
+        const body = await res.json();
+        const models: any[] = body.models || [];
+        // Filter models that support generateContent
+        const supported = models.filter(
+          (m) =>
+            Array.isArray(m.supportedGenerationMethods) &&
+            m.supportedGenerationMethods.includes('generateContent')
+        );
+
+        if (supported.length > 0) {
+          // Priority 1: 3.x Flash models (gemini-3.5-flash, gemini-3.8-flash, etc.)
+          const flash3 = supported.find((m) => {
+            const n = (m.name || '').toLowerCase();
+            return (n.includes('3.5') || n.includes('3.8') || n.includes('3.1')) && n.includes('flash');
+          });
+          // Priority 2: Any Flash model (fast and multimodal)
+          const anyFlash = supported.find((m) => (m.name || '').toLowerCase().includes('flash'));
+          // Priority 3: Pro models
+          const anyPro = supported.find((m) => (m.name || '').toLowerCase().includes('pro'));
+          const chosen = flash3 || anyFlash || anyPro || supported[0];
+          const cleanModelName = (chosen.name || '').replace(/^models\//, '');
+          if (cleanModelName) {
+            const config: WorkingModelConfig = { model: cleanModelName, apiVersion };
+            cachedWorkingModel = config;
+            cachedKeyForModel = apiKey;
+            return config;
+          }
+        }
+      }
+    } catch {
+      // Continue to next version
+    }
+  }
+
+  // 2. Default fallback if ListModels was unavailable
+  const defaultConfig: WorkingModelConfig = { model: 'gemini-3.5-flash', apiVersion: 'v1beta' };
+  return defaultConfig;
+}
+
+/**
+ * Validates an API key with Google Gemini and discovers its active model
+ */
+export async function validateGeminiApiKey(
+  rawApiKey: string
+): Promise<{ valid: boolean; model?: string; error?: string }> {
+  const apiKey = rawApiKey.trim().replace(/^["']|["']$/g, '');
+  if (!apiKey) {
+    return { valid: false, error: 'Please enter a valid API key.' };
+  }
+
+  try {
+    for (const apiVersion of ['v1beta', 'v1'] as const) {
+      // Try query-param auth only
+      let listUrl = `https://generativelanguage.googleapis.com/${apiVersion}/models?key=${encodeURIComponent(apiKey)}`;
+      let res = await fetch(listUrl);
+
+      // Try header auth only if query param failed
+      if (!res.ok) {
+        listUrl = `https://generativelanguage.googleapis.com/${apiVersion}/models`;
+        res = await fetch(listUrl, {
+          headers: { 'x-goog-api-key': apiKey },
+        });
+      }
+
+      if (res.ok) {
+        const body = await res.json();
+        const models: any[] = body.models || [];
+        const supported = models.filter(
+          (m) =>
+            Array.isArray(m.supportedGenerationMethods) &&
+            m.supportedGenerationMethods.includes('generateContent')
+        );
+        const flash3 = supported.find((m) => {
+          const n = (m.name || '').toLowerCase();
+          return (n.includes('3.5') || n.includes('3.8') || n.includes('3.1')) && n.includes('flash');
+        });
+        const anyFlash = supported.find((m) => (m.name || '').toLowerCase().includes('flash'));
+        const chosen = flash3 || anyFlash || supported[0];
+        const cleanName = chosen ? (chosen.name || '').replace(/^models\//, '') : 'gemini-3.5-flash';
+
+        cachedWorkingModel = { model: cleanName, apiVersion };
+        cachedKeyForModel = apiKey;
+
+        return { valid: true, model: cleanName };
+      }
+
+      const errJson = await res.json().catch(() => null);
+      const errMsg = errJson?.error?.message;
+      if (res.status === 400 || res.status === 401 || res.status === 403) {
+        return {
+          valid: false,
+          error: errMsg || 'Invalid API key. Please check your key at aistudio.google.com',
+        };
+      }
+    }
+
+    // Direct test if ListModels is restricted
+    const testRes = await callGeminiDirect(apiKey, 'ping', undefined, false);
+    if (testRes.success) {
+      return { valid: true, model: cachedWorkingModel?.model || 'gemini-flash' };
+    }
+    return { valid: false, error: testRes.message || 'Could not validate key with Google Gemini.' };
+  } catch (err: any) {
+    return { valid: false, error: err?.message || 'Network error connecting to Google Gemini.' };
+  }
+}
+
+/**
+ * Direct call to Google Gemini REST API with dynamic model resolution and multi-model cascade
+ */
+async function callGeminiDirect(
+  apiKey: string,
+  prompt: string,
+  inlineData?: { mimeType: string; data: string },
+  isJson: boolean = false
+): Promise<GeminiResponse<any>> {
+  const cleanedKey = apiKey.trim().replace(/^["']|["']$/g, '');
+  try {
+    const parts: any[] = [{ text: prompt }];
+    if (inlineData) {
+      parts.push({
+        inlineData: {
+          mimeType: inlineData.mimeType,
+          data: inlineData.data,
+        },
+      });
+    }
+
+    const requestBody: Record<string, any> = {
+      contents: [{ parts }],
+      generationConfig: {
+        temperature: 0.2,
+        ...(isJson ? { responseMimeType: 'application/json' } : {}),
+      },
+    };
+
+    // 1. Resolve candidate models to try
+    const modelConfig = await resolveWorkingGeminiModel(cleanedKey);
+
+    const candidateAttempts: { model: string; apiVersion: 'v1beta' | 'v1' }[] = [
+      modelConfig,
+    ];
+
+    for (const m of FALLBACK_MODEL_CANDIDATES) {
+      if (m !== modelConfig.model) {
+        candidateAttempts.push({ model: m, apiVersion: 'v1beta' });
+        candidateAttempts.push({ model: m, apiVersion: 'v1' });
+      } else {
+        const altVer = modelConfig.apiVersion === 'v1beta' ? 'v1' : 'v1beta';
+        candidateAttempts.push({ model: m, apiVersion: altVer });
+      }
+    }
+
+    let lastErrorStatus: number | null = null;
+    let lastErrorMessage: string = '';
+
+    // 2. Cascade through models until success or decisive error (e.g. invalid key)
+    for (const attempt of candidateAttempts) {
+      const geminiUrl = `https://generativelanguage.googleapis.com/${attempt.apiVersion}/models/${attempt.model}:generateContent?key=${encodeURIComponent(cleanedKey)}`;
+
+      let response = await fetch(geminiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody),
+      });
+
+      // If query-param auth was rejected, try header auth only
+      if (response.status === 401 || response.status === 403) {
+        const headerUrl = `https://generativelanguage.googleapis.com/${attempt.apiVersion}/models/${attempt.model}:generateContent`;
+        const retryRes = await fetch(headerUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': cleanedKey,
+          },
+          body: JSON.stringify(requestBody),
+        });
+        if (retryRes.ok || retryRes.status !== 404) {
+          response = retryRes;
+        }
+      }
+
+      if (response.ok) {
+        // Cache this verified working model
+        cachedWorkingModel = attempt;
+        cachedKeyForModel = cleanedKey;
+
+        const data = await response.json();
+        const candidate = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+
+        if (!candidate) {
+          return {
+            success: false,
+            error: 'GENERIC_ERROR',
+            message: 'No response received from Gemini.',
+          };
+        }
+
+        let parsedResult = candidate;
+        if (isJson) {
+          try {
+            let cleaned = candidate.trim();
+            if (cleaned.startsWith('```json')) {
+              cleaned = cleaned.replace(/^```json/, '').replace(/```$/, '').trim();
+            } else if (cleaned.startsWith('```')) {
+              cleaned = cleaned.replace(/^```/, '').replace(/```$/, '').trim();
+            }
+            parsedResult = JSON.parse(cleaned);
+          } catch {
+            return {
+              success: false,
+              error: 'GENERIC_ERROR',
+              message: "Couldn't parse financial details from this receipt.",
+            };
+          }
+        }
+
+        return {
+          success: true,
+          data: parsedResult,
+        };
+      }
+
+      // Read Google's error payload for detailed diagnostics
+      lastErrorStatus = response.status;
+      try {
+        const errJson = await response.json();
+        lastErrorMessage = errJson?.error?.message || '';
+      } catch {
+        lastErrorMessage = '';
+      }
+
+      // Stop immediately on invalid key
+      if (lastErrorStatus === 400 || lastErrorStatus === 401 || lastErrorStatus === 403) {
+        return {
+          success: false,
+          error: 'INVALID_KEY',
+          message: lastErrorMessage || 'Invalid Gemini API key. Please check your key in Settings.',
+        };
+      }
+
+      // Stop immediately on rate limit
+      if (lastErrorStatus === 429) {
+        return {
+          success: false,
+          error: 'RATE_LIMIT',
+          message: lastErrorMessage || 'Gemini API quota exceeded or rate limit reached. Please try again later.',
+        };
+      }
+
+      // On 404 (model not found), continue loop to test next model in cascade!
+    }
+
+    // Reset cached model if everything failed so subsequent requests re-probe fresh
+    cachedWorkingModel = null;
+    cachedKeyForModel = null;
+
+    if (lastErrorStatus === 404) {
+      return {
+        success: false,
+        error: 'GENERIC_ERROR',
+        message: lastErrorMessage || 'No compatible Gemini model found for this API key.',
+      };
+    }
+
+    return {
+      success: false,
+      error: 'GENERIC_ERROR',
+      message: lastErrorMessage || `Gemini API returned error code ${lastErrorStatus}.`,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: 'GENERIC_ERROR',
+      message: err?.message || 'Network error communicating with Gemini API.',
+    };
+  }
+}
+
+
+/**
+ * Parses transaction details from a receipt image or raw text using Gemini AI
+ * Works 100% reliably in Expo Go, Dev Client, and standalone builds.
+ */
+export async function parseReceiptWithGemini(
+  input: string | ParseReceiptOptions
+): Promise<GeminiResponse<ParsedReceiptData>> {
+  try {
+    const apiKey = await resolveGeminiApiKey();
+    if (!apiKey) {
+      return {
+        success: false,
+        error: 'MISSING_KEY',
+        message: 'Set up your AI key in Settings to use this.',
+      };
+    }
+
+    let rawText: string | undefined;
+    let base64Data: string | undefined;
+    let mimeType = 'image/jpeg';
+
+    if (typeof input === 'string') {
+      rawText = input;
+    } else {
+      rawText = input.text;
+      base64Data = input.base64;
+      if (input.mimeType) {
+        mimeType = input.mimeType;
+      } else if (input.imageUri?.toLowerCase().endsWith('.png')) {
+        mimeType = 'image/png';
+      }
+
+      // If we have an imageUri but no base64, read it using expo-file-system
+      if (!base64Data && input.imageUri) {
+        try {
+          base64Data = await FileSystem.readAsStringAsync(input.imageUri, {
+            encoding: FileSystem.EncodingType.Base64,
+          });
+        } catch (fsErr) {
+          console.warn('[geminiService] Failed reading image file as base64:', fsErr);
+        }
+      }
+    }
+
+    if (!rawText && !base64Data) {
+      return {
+        success: false,
+        error: 'GENERIC_ERROR',
+        message: "Couldn't read that screenshot — enter it manually",
+      };
+    }
+
+    // Try Supabase Edge Function first if available
+    let edgeSuccess = false;
+    let edgeData: any = null;
+    let edgeError: any = null;
+
+    try {
+      const { data, error } = await supabase.functions.invoke('ask-gemini', {
+        body: {
+          action: 'parse_receipt',
+          text: rawText,
+          image: base64Data ? { base64: base64Data, mimeType } : undefined,
+        },
+      });
+
+      if (!error && data?.success && data?.data) {
+        edgeSuccess = true;
+        edgeData = data.data;
+      } else if (error) {
+        edgeError = error;
+      }
+    } catch (e) {
+      edgeError = e;
+    }
+
+    const userCats =
+      typeof input === 'object' && input.availableCategories && input.availableCategories.length > 0
+        ? input.availableCategories
+        : [
+            'Food',
+            'Travel',
+            'Hostel/Rent',
+            'Recharge/Data',
+            'Subscriptions',
+            'Books/Stationery',
+            'Shopping',
+            'Entertainment',
+            'Other',
+          ];
+
+    // If Edge Function succeeded, use its result
+    if (edgeSuccess && edgeData) {
+      const normalizedCat = normalizeAndMatchCategory(edgeData.suggested_category, userCats).category;
+      const parsed: ParsedReceiptData = {
+        amount: typeof edgeData.amount === 'number' && !isNaN(edgeData.amount) ? Math.abs(edgeData.amount) : null,
+        merchant_or_person: (edgeData.merchant_or_person || '').trim() || 'Unknown',
+        suggested_category: normalizedCat,
+        suggested_type: normalizeSuggestedType(edgeData.suggested_type),
+        date_if_present: typeof edgeData.date_if_present === 'string' ? edgeData.date_if_present.trim() : null,
+      };
+      return { success: true, data: parsed };
+    }
+
+    // If edge function returned an auth/key error, report it directly
+    if (edgeError) {
+      const handled = await handleEdgeFunctionError(edgeError);
+      if (handled.error === 'MISSING_KEY' || handled.error === 'INVALID_KEY' || handled.error === 'RATE_LIMIT') {
+        return handled;
+      }
+    }
+
+    // Direct Gemini fallback (works with BYOK when edge function is un-deployed or offline)
+    let prompt = `
+You are an expert financial assistant that parses transaction receipts, payment screenshots, and SMS alerts (such as Google Pay, PhonePe, Paytm, UPI, credit card notifications, bank receipts).
+
+Given the payment receipt, transaction screenshot, or text, extract the financial transaction details.
+
+Return a STRICT JSON object with these EXACT keys:
+{
+  "amount": <number, positive float/integer or null if not found>,
+  "merchant_or_person": <string, name of payee/merchant/person or "Unknown">,
+  "suggested_category": <string, choose or match the best category from: ${userCats.join(', ')}. If it is a food/sweet/restaurant/grocery merchant like Gopal Sweet, Zomato, Swiggy, Blinkit, choose "Food">,
+  "suggested_type": <string, one of: "expense", "income", "lent", "borrowed">,
+  "date_if_present": <string in "YYYY-MM-DD" format, or null if no valid date found in the receipt>
+}
+
+Rules:
+1. "amount": Extract the primary transaction amount (e.g. ₹450 -> 450). Never include currency symbols.
+2. "merchant_or_person": The party paid to or received from (e.g., "Gopal Sweet", "Swiggy", "Rahul Sharma", "Uber", "Amazon").
+3. "suggested_type": If paid/debited -> "expense". If received/credited -> "income". If lent to someone -> "lent". If borrowed -> "borrowed". Default to "expense" for typical UPI/card payments.
+4. Output STRICT JSON only. Do NOT include markdown code blocks or extra prose.
+`;
+    if (rawText) {
+      prompt += `\n\nRaw Text:\n"""\n${rawText}\n"""`;
+    }
+
+    const inlineData = base64Data
+      ? {
+          mimeType,
+          data: base64Data.replace(/^data:image\/[a-zA-Z]+;base64,/, ''),
+        }
+      : undefined;
+
+    const directRes = await callGeminiDirect(apiKey, prompt, inlineData, true);
+
+    if (!directRes.success || !directRes.data) {
+      return {
+        success: false,
+        error: directRes.error || 'GENERIC_ERROR',
+        message: directRes.message || "Couldn't read that screenshot — enter it manually",
+      };
+    }
+
+    const raw = directRes.data;
+    const normalizedDirectCat = normalizeAndMatchCategory(raw.suggested_category, userCats).category;
+    const parsed: ParsedReceiptData = {
+      amount: typeof raw.amount === 'number' && !isNaN(raw.amount) ? Math.abs(raw.amount) : null,
+      merchant_or_person: (raw.merchant_or_person || '').trim() || 'Unknown',
+      suggested_category: normalizedDirectCat,
+      suggested_type: normalizeSuggestedType(raw.suggested_type),
+      date_if_present: typeof raw.date_if_present === 'string' ? raw.date_if_present.trim() : null,
+    };
+
+    if (parsed.amount === null && (parsed.merchant_or_person === 'Unknown' || !parsed.merchant_or_person)) {
+      return {
+        success: false,
+        error: 'GENERIC_ERROR',
+        message: "Couldn't read financial details from that screenshot — please enter manually.",
+      };
+    }
+
+    return {
+      success: true,
+      data: parsed,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: 'GENERIC_ERROR',
+      message: err?.message || "Couldn't read that screenshot — enter it manually",
+    };
+  }
+}
+
+export const SPENDING_OVERVIEW_SYSTEM_PROMPT = `You are a spending-pattern observer for a personal finance app, not a financial advisor. You will be given aggregated JSON data (totals, category breakdowns, percentages — never raw transaction lists).
+
+STRICT RULES:
+- Every claim must be directly derivable from the JSON provided. Never invent a number, merchant, date, or month-over-month comparison that isn't explicitly present in the input.
+- Never recommend specific financial products, investments, loans, insurance, or debt actions. You observe spending behavior only — never prescribe financial decisions.
+- If the input data doesn't support a section below, OMIT it entirely — do not fabricate content to fill the template.
+- If this period is marked as a historical/closed period, use past tense and frame as a finalized retrospective summary, not in-progress pace advice.
+- If no budget is present in the data, do NOT comment on budget adherence, budget tracking, or "staying within budget".
+
+OUTPUT EXACTLY THIS STRUCTURE, under 120 words total:
+1. SNAPSHOT — one factual line restating the core numbers exactly as given (e.g. "You spent ₹X of ₹Y budgeted, saving Z% of income this month.") — the user should be able to verify this instantly against their own screen.
+2. PATTERN — one specific behavioral observation from the category data only (e.g. "Food and Travel made up 62% of spending.")
+3. FLAG (optional — omit if nothing crosses a real threshold) — only include if credit utilization > 30%, a category spiked meaningfully vs. prior data given, or spending is outpacing days remaining in the month.
+4. NEXT STEP — one concrete, specific-to-these-numbers behavioral suggestion (adjust a category budget, review a specific recurring charge) — never generic ("save more") and never financial-product advice.`;
+
+/**
+ * Enforces the ~120-word cap on AI overview output
+ */
+export function cleanAndCapOverviewText(rawText: string, maxWords: number = 120): string {
+  const trimmed = rawText.trim();
+  const words = trimmed.split(/\s+/).filter(Boolean);
+  if (words.length <= maxWords) {
+    return trimmed;
+  }
+
+  // Find sentence endings before or near maxWords
+  const sentences = trimmed.match(/[^.!?]+[.!?]+/g) || [trimmed];
+  let accumulated = '';
+  for (const sentence of sentences) {
+    const candidate = (accumulated + ' ' + sentence).trim();
+    const count = candidate.split(/\s+/).filter(Boolean).length;
+    if (count <= maxWords) {
+      accumulated = candidate;
+    } else {
+      break;
+    }
+  }
+
+  if (accumulated.trim().length > 0) {
+    return accumulated.trim();
+  }
+
+  return words.slice(0, maxWords).join(' ') + '...';
+}
+
+/**
+ * Invokes Gemini AI to generate an on-demand plain-language spending overview
+ */
+export async function getSpendingOverviewWithGemini(
+  summary: Record<string, any>
+): Promise<GeminiResponse<string>> {
+  // 1. Concrete deterministic trigger gate (defense-in-depth before calling Gemini)
+  if (
+    typeof summary.transactionCount === 'number' &&
+    typeof summary.distinctCategoriesCount === 'number'
+  ) {
+    if (summary.transactionCount < 5 || summary.distinctCategoriesCount < 2) {
+      return {
+        success: false,
+        error: 'INSUFFICIENT_DATA',
+        message: 'Log a few more transactions this month to unlock an overview',
+      };
+    }
+  }
+
+  try {
+    const apiKey = await resolveGeminiApiKey();
+    if (!apiKey) {
+      return {
+        success: false,
+        error: 'MISSING_KEY',
+        message: 'Set up your AI key in Settings to use this.',
+      };
+    }
+
+    // Try Supabase Edge Function first
+    try {
+      const { data, error } = await supabase.functions.invoke('ask-gemini', {
+        body: {
+          action: 'spending_overview',
+          summary,
+        },
+      });
+
+      if (!error && data?.success && data?.data) {
+        return {
+          success: true,
+          data: cleanAndCapOverviewText(String(data.data), 120),
+        };
+      }
+    } catch {
+      // Fall through to direct call
+    }
+
+    // Direct Gemini fallback with Tuned Prompt
+    const buildPrompt = (retryConstraint?: string) => `
+${SPENDING_OVERVIEW_SYSTEM_PROMPT}
+
+${retryConstraint ? `\nCRITICAL RETRY REQUIREMENT: ${retryConstraint}\n` : ''}
+Aggregated Monthly Financial Data (JSON):
+${JSON.stringify(summary, null, 2)}
+`;
+
+    let directRes = await callGeminiDirect(apiKey, buildPrompt(), undefined, false);
+
+    if (directRes.success && directRes.data) {
+      let text = String(directRes.data).trim();
+      const words = text.split(/\s+/).filter(Boolean);
+
+      // Check if wildly over length (> 135 words) or missing essential sections
+      const isWildlyOver = words.length > 135;
+      const missingStructure =
+        !/SNAPSHOT/i.test(text) || !/PATTERN/i.test(text) || !/NEXT\s*STEP/i.test(text);
+
+      if (isWildlyOver || missingStructure) {
+        const retryRes = await callGeminiDirect(
+          apiKey,
+          buildPrompt(
+            `Your previous response was ${words.length} words and did not strictly follow the structure. Re-generate strictly under 120 words total adhering to SNAPSHOT, PATTERN, FLAG (if threshold met), NEXT STEP.`
+          ),
+          undefined,
+          false
+        );
+        if (retryRes.success && retryRes.data) {
+          text = String(retryRes.data).trim();
+        }
+      }
+
+      const capped = cleanAndCapOverviewText(text, 120);
+      return {
+        success: true,
+        data: capped,
+      };
+    }
+
+    return {
+      success: false,
+      error: directRes.error || 'GENERIC_ERROR',
+      message: directRes.message || 'Failed to generate spending overview.',
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: 'GENERIC_ERROR',
+      message: err?.message || 'Failed to generate spending overview.',
+    };
+  }
+}
+
+/**
+ * Maps Supabase Edge Function error to user-friendly typed responses
+ */
+async function handleEdgeFunctionError(error: any): Promise<GeminiResponse<any>> {
+  try {
+    if (error.context && typeof error.context.json === 'function') {
+      try {
+        const body = await error.context.json();
+        if (body.error === 'MISSING_KEY') {
+          return {
+            success: false,
+            error: 'MISSING_KEY',
+            message: 'Set up your AI key in Settings to use this.',
+          };
+        }
+        if (body.error === 'INVALID_KEY') {
+          return {
+            success: false,
+            error: 'INVALID_KEY',
+            message: 'Invalid Gemini API key. Please check your key in Settings.',
+          };
+        }
+        if (body.error === 'RATE_LIMIT') {
+          return {
+            success: false,
+            error: 'RATE_LIMIT',
+            message: 'Gemini API quota exceeded or rate limit reached. Please try again later.',
+          };
+        }
+        if (body.message) {
+          return {
+            success: false,
+            error: 'GENERIC_ERROR',
+            message: body.message,
+          };
+        }
+      } catch {
+        // failed to parse body
+      }
+    }
+
+    const errMsg = String(error.message || '');
+    if (errMsg.includes('404') || errMsg.includes('not found') || error.status === 404) {
+      return {
+        success: false,
+        error: 'FUNCTION_UNAVAILABLE',
+        message: "The 'ask-gemini' Edge Function is not reachable.",
+      };
+    }
+
+    if (errMsg.includes('MISSING_KEY') || errMsg.includes('No Gemini API key')) {
+      return {
+        success: false,
+        error: 'MISSING_KEY',
+        message: 'Set up your AI key in Settings to use this.',
+      };
+    }
+
+    if (errMsg.includes('INVALID_KEY') || errMsg.includes('Invalid Gemini API key')) {
+      return {
+        success: false,
+        error: 'INVALID_KEY',
+        message: 'Invalid Gemini API key. Please check your key in Settings.',
+      };
+    }
+
+    if (errMsg.includes('RATE_LIMIT') || errMsg.includes('quota')) {
+      return {
+        success: false,
+        error: 'RATE_LIMIT',
+        message: 'Gemini API quota exceeded or rate limit reached. Please try again later.',
+      };
+    }
+
+    return {
+      success: false,
+      error: 'GENERIC_ERROR',
+      message: errMsg || 'An error occurred while communicating with the AI service.',
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: 'GENERIC_ERROR',
+      message: err?.message || 'AI service communication failure.',
+    };
+  }
+}

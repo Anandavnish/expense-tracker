@@ -57,7 +57,7 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
     accounts,
     transactions,
     updateAccountOptimistic,
-    deleteAccountWithCalibration,
+    deleteAccountOptimistic,
     payCreditCardBill,
   } = useFinanceStore();
 
@@ -181,16 +181,14 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
     setDeleteConfirmModalVisible(true);
   };
 
-  const handleConfirmDelete = async (calibrateFirst: boolean) => {
-    if (!account || !user) return;
+  const handleConfirmDelete = async () => {
+    if (!account) return;
     setIsDeleting(true);
-    const res = await deleteAccountWithCalibration(account.id, user.id, calibrateFirst);
+    await deleteAccountOptimistic(account.id);
     setIsDeleting(false);
-    if (res.success) {
-      setDeleteConfirmModalVisible(false);
-      setEditModalVisible(false);
-      navigation?.goBack();
-    }
+    setDeleteConfirmModalVisible(false);
+    setEditModalVisible(false);
+    navigation?.goBack();
   };
 
   if (!account) {
@@ -240,10 +238,6 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
 
   const displayTitle = account.name?.trim() || typeLabel;
   const displaySubtitle = account.name?.trim() ? typeLabel : null;
-
-
-  const accountBalanceNum = Number(account.current_balance || 0);
-  const hasNonZeroBalance = Math.abs(accountBalanceNum) > 0.01;
 
   return (
     <View style={[styles.safeArea, { paddingTop: insets.top }]}>
@@ -824,73 +818,29 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
 
             <Text style={styles.deleteConfirmTitle}>Delete Money Source?</Text>
 
-            {hasNonZeroBalance ? (
-              <>
-                <Text style={styles.deleteConfirmBody}>
-                  <Text style={{ fontWeight: '700', color: colors.textPrimary }}>{account.name}</Text> currently has an active balance of{' '}
-                  <Text style={{ fontWeight: '700', color: accountBalanceNum < 0 ? colors.alert : accent.hex }}>
-                    ₹{Math.abs(accountBalanceNum).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                  </Text>.
-                  {'\n\n'}
-                  Deleting without calibrating will leave an unadjusted gap in your calculated net worth.
+            <Text style={styles.deleteConfirmBody}>
+              Are you sure you want to delete <Text style={{ fontWeight: '700', color: colors.textPrimary }}>{account.name}</Text>? Past transaction records linked to this source will remain in your history.
+            </Text>
+
+            <View style={styles.deleteActionButtons}>
+              <TactileButton
+                onPress={handleConfirmDelete}
+                disabled={isDeleting}
+                style={[styles.modalApplyBtn, { backgroundColor: colors.alert }]}
+              >
+                <Text style={styles.modalApplyBtnText}>
+                  {isDeleting ? 'Deleting...' : 'Delete Money Source'}
                 </Text>
+              </TactileButton>
 
-                <View style={styles.deleteActionButtons}>
-                  <TactileButton
-                    onPress={() => handleConfirmDelete(true)}
-                    disabled={isDeleting}
-                    style={[styles.modalApplyBtn, { backgroundColor: accent.hex }]}
-                  >
-                    <Text style={styles.modalApplyBtnText}>
-                      {isDeleting ? 'Calibrating & Deleting...' : 'Calibrate to ₹0 First (Recommended)'}
-                    </Text>
-                  </TactileButton>
-
-                  <TouchableOpacity
-                    onPress={() => handleConfirmDelete(false)}
-                    disabled={isDeleting}
-                    style={styles.deleteAnywayBtn}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={styles.deleteAnywayBtnText}>Delete Anyway (Leave Gap)</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    onPress={() => setDeleteConfirmModalVisible(false)}
-                    disabled={isDeleting}
-                    style={styles.modalSecondaryBtn}
-                  >
-                    <Text style={styles.modalSecondaryBtnText}>Cancel</Text>
-                  </TouchableOpacity>
-                </View>
-              </>
-            ) : (
-              <>
-                <Text style={styles.deleteConfirmBody}>
-                  Are you sure you want to delete <Text style={{ fontWeight: '700', color: colors.textPrimary }}>{account.name}</Text>? Past transaction records linked to this source will remain in your history.
-                </Text>
-
-                <View style={styles.deleteActionButtons}>
-                  <TactileButton
-                    onPress={() => handleConfirmDelete(false)}
-                    disabled={isDeleting}
-                    style={[styles.modalApplyBtn, { backgroundColor: colors.alert }]}
-                  >
-                    <Text style={styles.modalApplyBtnText}>
-                      {isDeleting ? 'Deleting...' : 'Delete Account'}
-                    </Text>
-                  </TactileButton>
-
-                  <TouchableOpacity
-                    onPress={() => setDeleteConfirmModalVisible(false)}
-                    disabled={isDeleting}
-                    style={styles.modalSecondaryBtn}
-                  >
-                    <Text style={styles.modalSecondaryBtnText}>Cancel</Text>
-                  </TouchableOpacity>
-                </View>
-              </>
-            )}
+              <TouchableOpacity
+                onPress={() => setDeleteConfirmModalVisible(false)}
+                disabled={isDeleting}
+                style={styles.modalSecondaryBtn}
+              >
+                <Text style={styles.modalSecondaryBtnText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>

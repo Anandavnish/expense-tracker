@@ -6,14 +6,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { DashboardScreen } from '../screens/main/DashboardScreen';
 import { TransactionsScreen } from '../screens/main/TransactionsScreen';
 import { BudgetsScreen } from '../screens/main/BudgetsScreen';
-import { BorrowsScreen } from '../screens/main/BorrowsScreen';
+import { SettingsScreen } from '../screens/main/SettingsScreen';
 import { useSettingsStore } from '../store/settingsStore';
 
 export type MainTabsParamList = {
   Dashboard: undefined;
   Transactions: undefined;
   Budgets: undefined;
-  Borrows: undefined;
+  Settings: undefined;
 };
 
 const Tab = createBottomTabNavigator<MainTabsParamList>();
@@ -86,13 +86,13 @@ export const MainTabs = () => {
         }}
       />
       <Tab.Screen
-        name="Borrows"
-        component={BorrowsScreen}
+        name="Settings"
+        component={SettingsScreen}
         options={{
-          tabBarLabel: 'Borrows',
+          tabBarLabel: 'Settings',
           tabBarIcon: ({ color, focused }) => (
             <Ionicons
-              name={focused ? 'swap-horizontal' : 'swap-horizontal-outline'}
+              name={focused ? 'settings' : 'settings-outline'}
               size={20}
               color={color}
             />
