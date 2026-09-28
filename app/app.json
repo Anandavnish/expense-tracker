@@ -10,7 +10,7 @@
     "backgroundColor": "#0C0D11",
     "android": {
       "package": "com.expensetracker.app",
-      "versionCode": 6,
+      "versionCode": 5,
       "backgroundColor": "#0C0D11",
       "adaptiveIcon": {
         "backgroundColor": "#0C0D11"
