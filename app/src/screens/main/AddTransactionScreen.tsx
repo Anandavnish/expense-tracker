@@ -232,7 +232,7 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
           { text: 'Cancel', style: 'cancel' },
           {
             text: 'Go to Settings',
-            onPress: () => navigation.navigate('Settings'),
+            onPress: () => navigation.navigate('MainTabs', { screen: 'Settings' }),
           },
         ]
       );
@@ -274,7 +274,7 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
             'Set up your AI key in Settings to use this feature.',
             [
               { text: 'Cancel', style: 'cancel' },
-              { text: 'Go to Settings', onPress: () => navigation.navigate('Settings') },
+              { text: 'Go to Settings', onPress: () => navigation.navigate('MainTabs', { screen: 'Settings' }) },
             ]
           );
         } else if (geminiRes.error === 'INVALID_KEY') {
@@ -283,7 +283,7 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
             geminiRes.message || 'Please check your Gemini key in Settings.',
             [
               { text: 'Cancel', style: 'cancel' },
-              { text: 'Settings', onPress: () => navigation.navigate('Settings') },
+              { text: 'Settings', onPress: () => navigation.navigate('MainTabs', { screen: 'Settings' }) },
             ]
           );
         } else if (geminiRes.error === 'RATE_LIMIT') {
@@ -494,7 +494,7 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
     if (navigation.canGoBack()) {
       navigation.goBack();
     } else {
-      navigation.navigate('Dashboard');
+      navigation.navigate('MainTabs', { screen: 'Dashboard' });
     }
   };
 

@@ -175,7 +175,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ navigation }) => {
         </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>Profile & Account</Text>
         <TouchableOpacity
-          onPress={() => navigation.navigate('Settings')}
+          onPress={() => navigation.navigate('MainTabs', { screen: 'Settings' })}
           style={styles.settingsIconBtn}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
@@ -516,7 +516,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ navigation }) => {
           </Text>
 
           <TouchableOpacity
-            onPress={() => navigation.navigate('Settings')}
+            onPress={() => navigation.navigate('MainTabs', { screen: 'Settings' })}
             style={[styles.geminiSettingsLink, { borderColor: colors.border }]}
             activeOpacity={0.7}
           >

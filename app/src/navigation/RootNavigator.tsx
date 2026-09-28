@@ -21,6 +21,7 @@ import { AddTransactionScreen } from '../screens/main/AddTransactionScreen';
 import { AccountDetailScreen } from '../screens/main/AccountDetailScreen';
 import { TransactionDetailScreen } from '../screens/main/TransactionDetailScreen';
 import { ProfileScreen } from '../screens/main/ProfileScreen';
+import { SettingsScreen } from '../screens/main/SettingsScreen';
 import { parseReceiptWithGemini } from '../services/geminiService';
 import { parseBankingSms } from '../services/smsParser';
 import {
@@ -320,6 +321,11 @@ export const RootNavigator = () => {
           <AppStack.Screen
             name="Profile"
             component={ProfileScreen}
+            options={{ animation: 'slide_from_right' }}
+          />
+          <AppStack.Screen
+            name="Settings"
+            component={SettingsScreen}
             options={{ animation: 'slide_from_right' }}
           />
           <AppStack.Screen
