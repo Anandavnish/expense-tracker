@@ -4,6 +4,7 @@
 // Multimodal Gemini 2.0 Flash vision for reading receipts and screenshots without native OCR dependencies
 
 import * as FileSystem from 'expo-file-system/legacy';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from './supabase';
 import { TransactionType } from '../types/database';
 import { useSettingsStore } from '../store/settingsStore';
@@ -52,7 +53,7 @@ export function normalizeSuggestedType(type?: string): TransactionType {
 }
 
 /**
- * Retrieves the Gemini API key from settingsStore or database profile
+ * Retrieves the Gemini API key from settingsStore, AsyncStorage, or database profile
  */
 async function resolveGeminiApiKey(): Promise<string | null> {
   // 1. Check in-memory store
@@ -61,7 +62,19 @@ async function resolveGeminiApiKey(): Promise<string | null> {
     return storeKey.trim().replace(/^["']|["']$/g, '');
   }
 
-  // 2. Fallback to Supabase profiles table
+  // 2. Check local persistent storage (offline / guest mode / cold start)
+  try {
+    const localKey = await AsyncStorage.getItem('@gemini_byok_api_key');
+    if (localKey && localKey.trim()) {
+      const cleaned = localKey.trim().replace(/^["']|["']$/g, '');
+      useSettingsStore.setState({ geminiApiKey: cleaned, hasGeminiApiKey: true });
+      return cleaned;
+    }
+  } catch (err) {
+    console.warn('[geminiService] Could not resolve key from AsyncStorage:', err);
+  }
+
+  // 3. Fallback to Supabase profiles table
   try {
     const { data: sessionData } = await supabase.auth.getSession();
     const userId = sessionData.session?.user?.id;
@@ -74,6 +87,7 @@ async function resolveGeminiApiKey(): Promise<string | null> {
       if (profile?.gemini_api_key && profile.gemini_api_key.trim()) {
         const key = profile.gemini_api_key.trim().replace(/^["']|["']$/g, '');
         useSettingsStore.setState({ geminiApiKey: key, hasGeminiApiKey: true });
+        await AsyncStorage.setItem('@gemini_byok_api_key', key).catch(() => {});
         return key;
       }
     }
@@ -92,18 +106,15 @@ export interface WorkingModelConfig {
 let cachedWorkingModel: WorkingModelConfig | null = null;
 let cachedKeyForModel: string | null = null;
 
-// Multi-generation fallback cascade ordered by capability and speed (prioritizing 2026 active models)
+// Multi-generation fallback cascade ordered by capability and speed (prioritizing active models with lowest latency and highest capacity)
 const FALLBACK_MODEL_CANDIDATES = [
-  'gemini-3.5-flash',
   'gemini-3.5-flash-lite',
   'gemini-3.8-flash',
+  'gemini-3.5-flash',
   'gemini-3.1-flash-lite',
-  'gemini-2.5-flash',
-  'gemini-2.5-flash-lite',
+  'gemini-flash-lite-latest',
+  'gemini-flash-latest',
   'gemini-2.5-pro',
-  'gemini-2.0-flash',
-  'gemini-1.5-flash',
-  'gemini-1.5-pro',
 ];
 
 /**
@@ -145,16 +156,20 @@ export async function resolveWorkingGeminiModel(
         );
 
         if (supported.length > 0) {
-          // Priority 1: 3.x Flash models (gemini-3.5-flash, gemini-3.8-flash, etc.)
-          const flash3 = supported.find((m) => {
+          // Priority 1: Flash-Lite models (highest availability, lowest latency, immune to high-demand 503s)
+          const flashLite = supported.find((m) => {
             const n = (m.name || '').toLowerCase();
-            return (n.includes('3.5') || n.includes('3.8') || n.includes('3.1')) && n.includes('flash');
+            return (n.includes('3.5') || n.includes('3.1') || n.includes('latest')) && n.includes('flash-lite');
           });
-          // Priority 2: Any Flash model (fast and multimodal)
+          // Priority 2: 3.8 Flash (stable, fast)
+          const flash38 = supported.find((m) => (m.name || '').toLowerCase().includes('3.8-flash'));
+          // Priority 3: 3.5 Flash
+          const flash35 = supported.find((m) => (m.name || '').toLowerCase().includes('3.5-flash'));
+          // Priority 4: Any Flash model
           const anyFlash = supported.find((m) => (m.name || '').toLowerCase().includes('flash'));
-          // Priority 3: Pro models
+          // Priority 5: Pro models
           const anyPro = supported.find((m) => (m.name || '').toLowerCase().includes('pro'));
-          const chosen = flash3 || anyFlash || anyPro || supported[0];
+          const chosen = flashLite || flash38 || flash35 || anyFlash || anyPro || supported[0];
           const cleanModelName = (chosen.name || '').replace(/^models\//, '');
           if (cleanModelName) {
             const config: WorkingModelConfig = { model: cleanModelName, apiVersion };
@@ -170,7 +185,7 @@ export async function resolveWorkingGeminiModel(
   }
 
   // 2. Default fallback if ListModels was unavailable
-  const defaultConfig: WorkingModelConfig = { model: 'gemini-3.5-flash', apiVersion: 'v1beta' };
+  const defaultConfig: WorkingModelConfig = { model: 'gemini-3.5-flash-lite', apiVersion: 'v1beta' };
   return defaultConfig;
 }
 
@@ -207,13 +222,15 @@ export async function validateGeminiApiKey(
             Array.isArray(m.supportedGenerationMethods) &&
             m.supportedGenerationMethods.includes('generateContent')
         );
-        const flash3 = supported.find((m) => {
+        const flashLite = supported.find((m) => {
           const n = (m.name || '').toLowerCase();
-          return (n.includes('3.5') || n.includes('3.8') || n.includes('3.1')) && n.includes('flash');
+          return (n.includes('3.5') || n.includes('3.1') || n.includes('latest')) && n.includes('flash-lite');
         });
+        const flash38 = supported.find((m) => (m.name || '').toLowerCase().includes('3.8-flash'));
+        const flash35 = supported.find((m) => (m.name || '').toLowerCase().includes('3.5-flash'));
         const anyFlash = supported.find((m) => (m.name || '').toLowerCase().includes('flash'));
-        const chosen = flash3 || anyFlash || supported[0];
-        const cleanName = chosen ? (chosen.name || '').replace(/^models\//, '') : 'gemini-3.5-flash';
+        const chosen = flashLite || flash38 || flash35 || anyFlash || supported[0];
+        const cleanName = chosen ? (chosen.name || '').replace(/^models\//, '') : 'gemini-3.5-flash-lite';
 
         cachedWorkingModel = { model: cleanName, apiVersion };
         cachedKeyForModel = apiKey;
@@ -234,7 +251,7 @@ export async function validateGeminiApiKey(
     // Direct test if ListModels is restricted
     const testRes = await callGeminiDirect(apiKey, 'ping', undefined, false);
     if (testRes.success) {
-      return { valid: true, model: cachedWorkingModel?.model || 'gemini-flash' };
+      return { valid: true, model: cachedWorkingModel?.model || 'gemini-3.5-flash-lite' };
     }
     return { valid: false, error: testRes.message || 'Could not validate key with Google Gemini.' };
   } catch (err: any) {
@@ -369,8 +386,17 @@ async function callGeminiDirect(
         lastErrorMessage = '';
       }
 
-      // Stop immediately on invalid key
-      if (lastErrorStatus === 400 || lastErrorStatus === 401 || lastErrorStatus === 403) {
+      const lowerMsg = lastErrorMessage.toLowerCase();
+
+      // Check if it's an explicit API key authentication failure
+      const isAuthError =
+        (lastErrorStatus === 401 || lastErrorStatus === 403) &&
+        (lowerMsg.includes('api key') ||
+          lowerMsg.includes('unregistered') ||
+          lowerMsg.includes('not valid') ||
+          lowerMsg.includes('key not found'));
+
+      if (isAuthError) {
         return {
           success: false,
           error: 'INVALID_KEY',
@@ -378,8 +404,8 @@ async function callGeminiDirect(
         };
       }
 
-      // Stop immediately on rate limit
-      if (lastErrorStatus === 429) {
+      // Check if account quota is completely exhausted
+      if (lastErrorStatus === 429 && lowerMsg.includes('quota')) {
         return {
           success: false,
           error: 'RATE_LIMIT',
@@ -387,12 +413,26 @@ async function callGeminiDirect(
         };
       }
 
-      // On 404 (model not found), continue loop to test next model in cascade!
+      // Transient errors: 503 (model overloaded / high demand), 500 (internal), 404 (model not found),
+      // 400 (model deprecated or generateContent unsupported for this model)
+      // Log and seamlessly continue to the next candidate model in the cascade!
+      console.warn(
+        `[geminiService] Model attempt ${attempt.model} (${attempt.apiVersion}) failed with status ${lastErrorStatus}: ${lastErrorMessage}. Trying next candidate in cascade...`
+      );
+      continue;
     }
 
     // Reset cached model if everything failed so subsequent requests re-probe fresh
     cachedWorkingModel = null;
     cachedKeyForModel = null;
+
+    if (lastErrorStatus === 503) {
+      return {
+        success: false,
+        error: 'GENERIC_ERROR',
+        message: 'Google Gemini is currently experiencing high demand. Please try again in a few moments.',
+      };
+    }
 
     if (lastErrorStatus === 404) {
       return {
@@ -405,7 +445,7 @@ async function callGeminiDirect(
     return {
       success: false,
       error: 'GENERIC_ERROR',
-      message: lastErrorMessage || `Gemini API returned error code ${lastErrorStatus}.`,
+      message: lastErrorMessage || `Gemini API returned error code ${lastErrorStatus || 500}.`,
     };
   } catch (err: any) {
     return {

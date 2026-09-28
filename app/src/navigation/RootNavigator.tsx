@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useCallback } from 'react';
 import { View, StyleSheet, Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ActivityIndicator } from 'react-native-paper';
 import {
   NavigationContainer,
@@ -105,7 +106,19 @@ export const RootNavigator = () => {
 
   const processSharedImage = useCallback(
     async (uri: string) => {
-      if (!hasGeminiApiKey) {
+      let keyAvailable = hasGeminiApiKey;
+      if (!keyAvailable) {
+        try {
+          const localKey = await AsyncStorage.getItem('@gemini_byok_api_key');
+          if (localKey && localKey.trim()) {
+            keyAvailable = true;
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      if (!keyAvailable) {
         // Immediately navigate to AddTransaction on the go, with informative note
         navigateOrQueue('AddTransaction', {
           imageUri: uri,

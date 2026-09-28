@@ -35,6 +35,7 @@ export const ACCENT_PALETTE: AccentColor[] = [
 const THEME_MODE_STORAGE_KEY = '@finance_tracker_theme_mode';
 const THEME_STYLE_STORAGE_KEY = '@finance_tracker_theme_style';
 const SHOW_AI_OVERVIEW_STORAGE_KEY = '@finance_tracker_show_ai_overview';
+export const GEMINI_API_KEY_STORAGE_KEY = '@gemini_byok_api_key';
 
 const getSystemScheme = (): 'dark' | 'light' => {
   const scheme = Appearance.getColorScheme();
@@ -168,10 +169,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
 
     loadSettings: async () => {
       try {
-        const [savedMode, savedStyle, savedShowAi] = await Promise.all([
+        const [savedMode, savedStyle, savedShowAi, savedGeminiKey] = await Promise.all([
           AsyncStorage.getItem(THEME_MODE_STORAGE_KEY),
           AsyncStorage.getItem(THEME_STYLE_STORAGE_KEY),
           AsyncStorage.getItem(SHOW_AI_OVERVIEW_STORAGE_KEY),
+          AsyncStorage.getItem(GEMINI_API_KEY_STORAGE_KEY),
         ]);
 
         let mode: ThemeMode = 'dark';
@@ -200,6 +202,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
         );
 
         const showAi = savedShowAi !== null ? savedShowAi === 'true' : true;
+        const cleanedLocalKey = savedGeminiKey && savedGeminiKey.trim() ? savedGeminiKey.trim() : null;
 
         set({
           themeMode: mode,
@@ -208,6 +211,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
           isDark: effective === 'dark',
           colors: resolvedColors,
           showAiOverviewOnDashboard: showAi,
+          geminiApiKey: cleanedLocalKey,
+          hasGeminiApiKey: !!cleanedLocalKey,
           accent: {
             name: THEME_STYLES[style]?.name || 'Theme',
             hex: resolvedColors.primary,
@@ -215,7 +220,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
           },
         });
 
-        // Fetch Gemini BYOK key in background
+        // Sync with Supabase profile in background
         get().fetchGeminiApiKey().catch(() => {});
       } catch {
         // Fallback to defaults
@@ -298,87 +303,121 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
     fetchGeminiApiKey: async (userId?: string) => {
       try {
         set({ isLoadingGeminiKey: true });
+
+        // 1. Check local storage first (instant access)
+        const localKey = await AsyncStorage.getItem(GEMINI_API_KEY_STORAGE_KEY);
+        if (localKey && localKey.trim()) {
+          const cleanedLocal = localKey.trim();
+          set({
+            geminiApiKey: cleanedLocal,
+            hasGeminiApiKey: true,
+          });
+        }
+
+        // 2. Sync with Supabase profile if user is logged in
         let uid = userId;
         if (!uid) {
           const { data } = await supabase.auth.getUser();
           uid = data.user?.id;
         }
-        if (!uid) {
-          set({ isLoadingGeminiKey: false, geminiApiKey: null, hasGeminiApiKey: false });
-          return null;
+
+        if (uid) {
+          const { data, error } = await supabase
+            .from('profiles')
+            .select('gemini_api_key')
+            .eq('id', uid)
+            .single();
+
+          if (error && error.code !== 'PGRST116') {
+            console.warn('[settingsStore] Error fetching gemini_api_key:', error.message);
+          }
+
+          const remoteKey = data?.gemini_api_key ? data.gemini_api_key.trim() : null;
+          if (remoteKey) {
+            await AsyncStorage.setItem(GEMINI_API_KEY_STORAGE_KEY, remoteKey).catch(() => {});
+            set({
+              geminiApiKey: remoteKey,
+              hasGeminiApiKey: true,
+              isLoadingGeminiKey: false,
+            });
+            return remoteKey;
+          } else if (localKey && localKey.trim()) {
+            // Profile has no key, but device has one: sync local key to profile!
+            await supabase
+              .from('profiles')
+              .update({
+                gemini_api_key: localKey.trim(),
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', uid);
+          }
         }
 
-        const { data, error } = await supabase
-          .from('profiles')
-          .select('gemini_api_key')
-          .eq('id', uid)
-          .single();
-
-        if (error && error.code !== 'PGRST116') {
-          console.warn('[settingsStore] Error fetching gemini_api_key:', error.message);
-        }
-
-        const key = data?.gemini_api_key || null;
+        // If local key exists, keep it
+        const currentKey = get().geminiApiKey;
         set({
-          geminiApiKey: key,
-          hasGeminiApiKey: !!(key && key.trim()),
           isLoadingGeminiKey: false,
+          hasGeminiApiKey: !!(currentKey && currentKey.trim()),
         });
-        return key;
+        return currentKey;
       } catch {
         set({ isLoadingGeminiKey: false });
-        return null;
+        return get().geminiApiKey;
       }
     },
 
     saveGeminiApiKey: async (key: string, userId?: string) => {
       try {
         set({ isLoadingGeminiKey: true });
+        const trimmed = key.trim();
+
+        // 1. Always save to local device storage first (instant & supports guest/offline mode)
+        if (trimmed) {
+          await AsyncStorage.setItem(GEMINI_API_KEY_STORAGE_KEY, trimmed);
+        } else {
+          await AsyncStorage.removeItem(GEMINI_API_KEY_STORAGE_KEY);
+        }
+
+        set({
+          geminiApiKey: trimmed || null,
+          hasGeminiApiKey: !!trimmed,
+        });
+
+        // 2. If user is authenticated, sync to Supabase profile
         let uid = userId;
         if (!uid) {
           const { data } = await supabase.auth.getUser();
           uid = data.user?.id;
         }
-        if (!uid) {
-          set({ isLoadingGeminiKey: false });
-          return { success: false, error: 'User is not authenticated' };
-        }
 
-        const trimmed = key.trim();
-        const { data, error } = await supabase
-          .from('profiles')
-          .update({
-            gemini_api_key: trimmed,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', uid)
-          .select('id');
-
-        if (error) {
-          set({ isLoadingGeminiKey: false });
-          return { success: false, error: error.message };
-        }
-
-        // Fallback for rare case where profile row was not yet seeded
-        if (!data || data.length === 0) {
-          const { error: insertErr } = await supabase
+        if (uid) {
+          const { data, error } = await supabase
             .from('profiles')
-            .insert({
-              id: uid,
-              gemini_api_key: trimmed,
+            .update({
+              gemini_api_key: trimmed || null,
               updated_at: new Date().toISOString(),
-            });
-          if (insertErr) {
-            set({ isLoadingGeminiKey: false });
-            return { success: false, error: insertErr.message };
+            })
+            .eq('id', uid)
+            .select('id');
+
+          if (error) {
+            console.warn('[settingsStore] Warning updating profile key:', error.message);
+          } else if (!data || data.length === 0) {
+            try {
+              await supabase
+                .from('profiles')
+                .insert({
+                  id: uid,
+                  gemini_api_key: trimmed || null,
+                  updated_at: new Date().toISOString(),
+                });
+            } catch {
+              // ignore
+            }
           }
         }
 
-        set({
-          geminiApiKey: trimmed,
-          hasGeminiApiKey: !!trimmed,
-          isLoadingGeminiKey: false,
-        });
+        set({ isLoadingGeminiKey: false });
         return { success: true };
       } catch (err: any) {
         set({ isLoadingGeminiKey: false });
@@ -389,27 +428,26 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
     removeGeminiApiKey: async (userId?: string) => {
       try {
         set({ isLoadingGeminiKey: true });
+        await AsyncStorage.removeItem(GEMINI_API_KEY_STORAGE_KEY).catch(() => {});
+
         let uid = userId;
         if (!uid) {
           const { data } = await supabase.auth.getUser();
           uid = data.user?.id;
         }
-        if (!uid) {
-          set({ isLoadingGeminiKey: false });
-          return { success: false, error: 'User is not authenticated' };
-        }
 
-        const { error } = await supabase
-          .from('profiles')
-          .update({
-            gemini_api_key: null,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', uid);
-
-        if (error) {
-          set({ isLoadingGeminiKey: false });
-          return { success: false, error: error.message };
+        if (uid) {
+          try {
+            await supabase
+              .from('profiles')
+              .update({
+                gemini_api_key: null,
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', uid);
+          } catch {
+            // ignore
+          }
         }
 
         set({

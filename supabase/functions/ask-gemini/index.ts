@@ -227,15 +227,14 @@ ${JSON.stringify(summary, null, 2)}
       geminiRequestBody.generationConfig.responseMimeType = "application/json";
     }
 
-    // Active Gemini models ordered by capability and speed (prioritizing 2026 active models)
+    // Active Gemini models ordered by capability and speed (prioritizing active models with lowest latency and highest capacity)
     const candidateModels = [
-      "gemini-3.5-flash",
       "gemini-3.5-flash-lite",
       "gemini-3.8-flash",
-      "gemini-2.5-flash",
-      "gemini-2.5-flash-lite",
-      "gemini-2.0-flash",
-      "gemini-1.5-flash",
+      "gemini-3.5-flash",
+      "gemini-3.1-flash-lite",
+      "gemini-flash-lite-latest",
+      "gemini-flash-latest",
     ];
 
     let geminiResponse: Response | null = null;
@@ -273,16 +272,41 @@ ${JSON.stringify(summary, null, 2)}
           break;
         }
 
-        // On non-404 error (e.g. 400 invalid key or 429 rate limit), stop cascade
-        if (res.status !== 404) {
+        const errClone = await res.clone().text().catch(() => "");
+        let errJson: any = null;
+        try {
+          errJson = JSON.parse(errClone);
+        } catch {
+          // ignore
+        }
+        const errMsg = (errJson?.error?.message || "").toLowerCase();
+
+        // If key is fundamentally invalid, stop immediately
+        if (
+          (res.status === 401 || res.status === 403) &&
+          (errMsg.includes("api key") || errMsg.includes("unregistered") || errMsg.includes("not valid"))
+        ) {
           geminiResponse = res;
           break;
         }
 
+        // If user quota is completely exhausted, stop cascade
+        if (res.status === 429 && errMsg.includes("quota")) {
+          geminiResponse = res;
+          break;
+        }
+
+        // On 503 (high demand), 500, 404, or 400 (unsupported model/config), keep cascading!
         geminiResponse = res;
       }
 
-      if (geminiResponse && (geminiResponse.ok || geminiResponse.status !== 404)) {
+      if (geminiResponse && geminiResponse.ok) {
+        break;
+      }
+      if (
+        geminiResponse &&
+        (geminiResponse.status === 401 || geminiResponse.status === 403 || geminiResponse.status === 429)
+      ) {
         break;
       }
     }
@@ -308,6 +332,16 @@ ${JSON.stringify(summary, null, 2)}
       }
 
       const status = geminiResponse.status;
+      if (status === 503) {
+        return new Response(
+          JSON.stringify({
+            error: "SERVICE_UNAVAILABLE",
+            message: "Google Gemini is currently experiencing high demand. Please try again in a few moments.",
+          }),
+          { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
       if (status === 400 || status === 403 || status === 401) {
         return new Response(
           JSON.stringify({
