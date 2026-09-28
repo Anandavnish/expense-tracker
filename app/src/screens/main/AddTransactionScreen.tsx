@@ -1,24 +1,30 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  KeyboardAvoidingView,
   Platform,
   Modal,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { TextInput } from 'react-native-paper';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import * as ImagePicker from 'expo-image-picker';
 import { useAuthStore } from '../../store/authStore';
-import { useFinanceStore } from '../../store/financeStore';
+import { useFinanceStore, getCurrentMonthString } from '../../store/financeStore';
 import { useSettingsStore } from '../../store/settingsStore';
-import { SPACING, TYPOGRAPHY, ThemeColors, ACCOUNT_TYPE_COLORS } from '../../theme/tokens';
+import { SPACING, TYPOGRAPHY, ThemeColors } from '../../theme/tokens';
 import { TactileButton } from '../../components/TactileButton';
-import { TransactionType } from '../../types/database';
+import { KeyboardAwareScrollView } from '../../components/KeyboardAwareScrollView';
+import { BankLogo } from '../../components/BankLogo';
+import { TransactionType, TransactionSource } from '../../types/database';
+import { parseReceiptWithGemini } from '../../services/geminiService';
+import { normalizeAndMatchCategory } from '../../services/smsParser';
 
 interface AddTransactionScreenProps {
   navigation: any;
@@ -30,16 +36,6 @@ const formatLocalDate = (d: Date) => {
   const month = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
-};
-
-const getAccountIconProps = (acc: { type: string }) => {
-  if (acc.type === 'credit_card') {
-    return { name: 'card-outline' as const, color: ACCOUNT_TYPE_COLORS.credit_card };
-  }
-  if (acc.type === 'cash') {
-    return { name: 'cash-outline' as const, color: ACCOUNT_TYPE_COLORS.cash };
-  }
-  return { name: 'business-outline' as const, color: ACCOUNT_TYPE_COLORS.bank };
 };
 
 const INCOME_CATEGORIES = [
@@ -71,36 +67,267 @@ const CREDIT_CARD_INCOME_CATEGORIES = [
 export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navigation, route }) => {
   const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
-  const { accent, colors, effectiveTheme } = useSettingsStore();
+  const { accent, colors, effectiveTheme, hasGeminiApiKey } = useSettingsStore();
   const styles = useMemo(() => getStyles(colors), [colors]);
   const {
     accounts,
     categories,
     addTransactionOptimistic,
-    addBorrowOptimistic,
+    addBorrowWithTransactionOptimistic,
+    isMonthLocked,
   } = useFinanceStore();
 
-  const today = useMemo(() => new Date(), []);
-  const minDate = useMemo(() => new Date(today.getFullYear(), today.getMonth(), 1), [today]);
-  const maxDate = useMemo(
-    () => new Date(today.getFullYear(), today.getMonth() + 1, 0, 23, 59, 59),
-    [today]
-  );
-  const currentMonthName = useMemo(() => {
-    return today.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-  }, [today]);
+  const scrollViewRef = useRef<ScrollView>(null);
 
-  const [type, setType] = useState<TransactionType>('expense');
-  const [amount, setAmount] = useState('');
-  const [selectedAccountId, setSelectedAccountId] = useState(
-    route?.params?.accountId || accounts[0]?.id || ''
+  const today = useMemo(() => new Date(), []);
+  const params = route?.params;
+  const initialMonth = params?.initialMonth;
+  const currentMonthStr = useMemo(() => getCurrentMonthString(), []);
+  const isPastMonthMode = Boolean(initialMonth && initialMonth < currentMonthStr);
+
+  const initialMonthLastDay = useMemo(() => {
+    if (!initialMonth) return 28;
+    const [y, m] = initialMonth.split('-').map(Number);
+    return new Date(y, m, 0).getDate();
+  }, [initialMonth]);
+
+  const minDate = useMemo(() => {
+    if (isPastMonthMode && initialMonth) {
+      const [y, m] = initialMonth.split('-').map(Number);
+      return new Date(y, m - 1, 1);
+    }
+    return new Date(today.getFullYear() - 1, 0, 1);
+  }, [isPastMonthMode, initialMonth, today]);
+
+  const maxDate = useMemo(() => {
+    if (isPastMonthMode && initialMonth) {
+      const [y, m] = initialMonth.split('-').map(Number);
+      return new Date(y, m - 1, initialMonthLastDay, 23, 59, 59);
+    }
+    return new Date(today.getFullYear(), today.getMonth() + 1, 0, 23, 59, 59);
+  }, [isPastMonthMode, initialMonth, initialMonthLastDay, today]);
+
+  const [type, setType] = useState<TransactionType>(params?.prefillType || 'expense');
+  const [amount, setAmount] = useState(
+    params?.prefillAmount !== undefined && params?.prefillAmount !== null
+      ? String(params.prefillAmount)
+      : ''
   );
-  const [category, setCategory] = useState(categories[0] || 'Food');
-  const [note, setNote] = useState('');
-  const [personName, setPersonName] = useState('');
-  const [date, setDate] = useState(() => formatLocalDate(new Date()));
+  const [selectedAccountId, setSelectedAccountId] = useState(
+    params?.accountId || accounts[0]?.id || ''
+  );
+  const [category, setCategory] = useState(() => {
+    if (params?.prefillCategory) {
+      return normalizeAndMatchCategory(params.prefillCategory, categories).category;
+    }
+    return categories[0] || 'Food';
+  });
+  const [note, setNote] = useState(
+    params?.prefillNote !== undefined && params?.prefillNote !== null
+      ? String(params.prefillNote)
+      : ''
+  );
+  const [personName, setPersonName] = useState(
+    params?.prefillPersonName !== undefined && params?.prefillPersonName !== null
+      ? String(params.prefillPersonName)
+      : ''
+  );
+  const [date, setDate] = useState(() => {
+    if (params?.prefillDate) return String(params.prefillDate);
+    if (params?.initialMonth) {
+      const [yStr, mStr] = params.initialMonth.split('-').map(Number);
+      const lastDay = new Date(yStr, mStr, 0).getDate();
+      return `${params.initialMonth}-${String(lastDay).padStart(2, '0')}`;
+    }
+    return formatLocalDate(new Date());
+  });
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+
+  // OCR and Screenshot states
+  const [source, setSource] = useState<TransactionSource>(params?.prefillSource || 'manual');
+  const [isScanning, setIsScanning] = useState(Boolean(params?.isAnalyzing));
+  const [scanToast, setScanToast] = useState<{
+    type: 'success' | 'error' | 'info';
+    message: string;
+  } | null>(() => {
+    if (params?.scanMessage) return { type: 'success', message: params.scanMessage };
+    if (params?.scanError) return { type: 'error', message: params.scanError };
+    return null;
+  });
+
+  // Automatically add newly detected category if it doesn't exist
+  React.useEffect(() => {
+    if (params?.prefillCategory) {
+      const match = normalizeAndMatchCategory(params.prefillCategory, categories);
+      if (match.isNew) {
+        useFinanceStore.getState().addCategory(match.category);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Adjust state during render if route.params changes after initial mount (React recommended pattern)
+  const [prevParams, setPrevParams] = useState(params);
+  if (params && params !== prevParams) {
+    setPrevParams(params);
+    if (params.prefillAmount !== undefined && params.prefillAmount !== null) {
+      setAmount(String(params.prefillAmount));
+    }
+    if (params.prefillNote !== undefined && params.prefillNote !== null) {
+      setNote(String(params.prefillNote));
+    }
+    if (params.prefillPersonName !== undefined && params.prefillPersonName !== null) {
+      setPersonName(String(params.prefillPersonName));
+    }
+    if (params.prefillType !== undefined && params.prefillType !== null) {
+      setType(params.prefillType);
+    }
+    if (params.prefillCategory !== undefined && params.prefillCategory !== null) {
+      const match = normalizeAndMatchCategory(params.prefillCategory, categories);
+      if (match.isNew) {
+        useFinanceStore.getState().addCategory(match.category);
+      }
+      setCategory(match.category);
+    }
+    if (params.accountId) {
+      setSelectedAccountId(params.accountId);
+    }
+    if (params.isAnalyzing !== undefined) {
+      setIsScanning(Boolean(params.isAnalyzing));
+    }
+    if (params.prefillDate !== undefined && params.prefillDate !== null) {
+      setDate(params.prefillDate);
+    }
+    if (params.prefillSource !== undefined && params.prefillSource !== null) {
+      setSource(params.prefillSource);
+    }
+    if (params.scanMessage) {
+      setScanToast({ type: 'success', message: params.scanMessage });
+    }
+    if (params.scanError) {
+      setScanToast({ type: 'error', message: params.scanError });
+    }
+  }
+
+  const handlePickAndScanImage = async () => {
+    // 1. Check if Gemini API key is configured
+    if (!hasGeminiApiKey) {
+      Alert.alert(
+        'Gemini Key Required',
+        'Set up your free AI key in Settings to unlock screenshot scanning and automatic receipt parsing.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Go to Settings',
+            onPress: () => navigation.navigate('Settings'),
+          },
+        ]
+      );
+      return;
+    }
+
+    try {
+      // 2. Open image picker from device gallery
+      const pickRes = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: false,
+        quality: 0.8,
+        base64: true,
+      });
+
+      if (pickRes.canceled || !pickRes.assets || pickRes.assets.length === 0) {
+        return;
+      }
+
+      const asset = pickRes.assets[0];
+      const imageUri = asset.uri;
+      const base64 = asset.base64;
+      setIsScanning(true);
+      setScanToast({ type: 'info', message: 'Analyzing receipt with Gemini AI...' });
+
+      // Parse receipt using Gemini Vision
+      const geminiRes = await parseReceiptWithGemini({
+        imageUri,
+        base64: base64 || undefined,
+        mimeType: asset.mimeType || undefined,
+      });
+
+      setIsScanning(false);
+
+      if (!geminiRes.success || !geminiRes.data) {
+        if (geminiRes.error === 'MISSING_KEY') {
+          Alert.alert(
+            'Gemini Key Required',
+            'Set up your AI key in Settings to use this feature.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Go to Settings', onPress: () => navigation.navigate('Settings') },
+            ]
+          );
+        } else if (geminiRes.error === 'INVALID_KEY') {
+          Alert.alert(
+            'Invalid API Key',
+            geminiRes.message || 'Please check your Gemini key in Settings.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Settings', onPress: () => navigation.navigate('Settings') },
+            ]
+          );
+        } else if (geminiRes.error === 'RATE_LIMIT') {
+          setScanToast({
+            type: 'error',
+            message: 'Gemini rate limit exceeded. Please wait a minute and try again.',
+          });
+        } else {
+          setScanToast({
+            type: 'error',
+            message: geminiRes.message || "Couldn't read that screenshot — enter it manually",
+          });
+        }
+        return;
+      }
+
+      // 5. Pre-fill form values for user review
+      const parsed = geminiRes.data;
+      if (parsed.amount) {
+        setAmount(String(parsed.amount));
+      }
+      if (parsed.suggested_type) {
+        setType(parsed.suggested_type);
+        if (parsed.suggested_type === 'borrow_given' || parsed.suggested_type === 'borrow_taken') {
+          setPersonName(parsed.merchant_or_person || '');
+        }
+      }
+      if (parsed.merchant_or_person && parsed.merchant_or_person !== 'Unknown') {
+        setNote(parsed.merchant_or_person);
+      }
+      if (parsed.suggested_category) {
+        // Check if category exists or set directly
+        setCategory(parsed.suggested_category);
+      }
+      if (parsed.date_if_present) {
+        const [yStr, mStr] = parsed.date_if_present.split('-');
+        if (
+          parseInt(yStr, 10) === today.getFullYear() &&
+          parseInt(mStr, 10) === today.getMonth() + 1
+        ) {
+          setDate(parsed.date_if_present);
+        }
+      }
+      setSource('screenshot');
+      setScanToast({
+        type: 'success',
+        message: 'Screenshot parsed! Review details and tap Save.',
+      });
+    } catch {
+      setIsScanning(false);
+      setScanToast({
+        type: 'error',
+        message: "Couldn't read that screenshot — enter it manually",
+      });
+    }
+  };
 
   const effectiveAccountId = selectedAccountId || route?.params?.accountId || accounts[0]?.id || '';
   const selectedAccount = accounts.find((a) => a.id === effectiveAccountId);
@@ -111,14 +338,16 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
       setShowDatePicker(false);
     }
     if (event.type === 'set' && selectedDate) {
-      if (selectedDate < minDate) {
-        setDate(formatLocalDate(minDate));
-      } else if (selectedDate > maxDate) {
-        setDate(formatLocalDate(maxDate));
+      const formatted = formatLocalDate(selectedDate);
+      const chosenMonth = formatted.substring(0, 7);
+      if (isMonthLocked(chosenMonth)) {
+        const dObj = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1);
+        const lockedName = dObj.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+        setFormError(`${lockedName} is locked. Unlock it from the Dashboard to log past entries.`);
       } else {
-        setDate(formatLocalDate(selectedDate));
+        setFormError(null);
       }
-      setFormError(null);
+      setDate(formatted);
     } else if (event.type === 'dismissed') {
       setShowDatePicker(false);
     }
@@ -171,10 +400,16 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
   };
 
   const getAvailableCategories = () => {
-    if (isCreditCard && type === 'income') return CREDIT_CARD_INCOME_CATEGORIES;
-    if (type === 'expense') return categories;
-    if (type === 'income') return INCOME_CATEGORIES;
-    return BORROW_CATEGORIES;
+    let list: string[];
+    if (isCreditCard && type === 'income') list = CREDIT_CARD_INCOME_CATEGORIES;
+    else if (type === 'expense') list = categories;
+    else if (type === 'income') list = INCOME_CATEGORIES;
+    else list = BORROW_CATEGORIES;
+
+    if (category && !list.some((c) => c.toLowerCase() === category.toLowerCase())) {
+      return [category, ...list];
+    }
+    return list;
   };
 
   const handleSubmit = () => {
@@ -197,41 +432,40 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
       return;
     }
 
-    // Validate that transaction date falls within the current running month
-    const [yStr, mStr] = date.split('-');
-    const selYear = parseInt(yStr, 10);
-    const selMonth = parseInt(mStr, 10);
-    if (selYear !== today.getFullYear() || selMonth !== today.getMonth() + 1) {
+    // Validate that transaction date does not belong to a locked month
+    const txMonth = date.substring(0, 7);
+    if (isMonthLocked(txMonth)) {
+      const [yStr, mStr] = txMonth.split('-');
+      const d = new Date(parseInt(yStr, 10), parseInt(mStr, 10) - 1, 1);
+      const lockedName = d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
       setFormError(
-        `Transactions can only be logged for the current running month (${currentMonthName}).`
+        `${lockedName} is currently locked. Please unlock it from the Dashboard before logging transactions for this month.`
       );
       return;
     }
 
     setFormError(null);
 
-    // 1. Optimistic write to transaction store (fires background sync)
-    addTransactionOptimistic({
-      user_id: user.id,
-      account_id: effectiveAccountId,
-      type,
-      amount: numAmount,
-      category,
-      note: note.trim() || null,
-      date,
-      source: 'manual',
-    });
-
-    // 2. If borrow, also add to borrows optimistic store with clean direction
     if (type === 'borrow_given' || type === 'borrow_taken') {
-      addBorrowOptimistic({
+      addBorrowWithTransactionOptimistic({
         user_id: user.id,
         person_name: personName.trim(),
         amount: numAmount,
-        status: 'pending',
         type: type === 'borrow_taken' ? 'borrowed' : 'lent',
-        linked_transaction_id: null,
         date,
+        account_id: effectiveAccountId,
+        note: note.trim() || null,
+      });
+    } else {
+      addTransactionOptimistic({
+        user_id: user.id,
+        account_id: effectiveAccountId,
+        type,
+        amount: numAmount,
+        category,
+        note: note.trim() || null,
+        date,
+        source,
       });
     }
 
@@ -260,22 +494,105 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
           </TouchableOpacity>
         )}
         <Text style={styles.headerTitle}>LOG TRANSACTION</Text>
-        {navigation.canGoBack() && <View style={styles.headerSpacer} />}
+        <TouchableOpacity
+          onPress={handlePickAndScanImage}
+          disabled={isScanning}
+          style={[
+            styles.headerScanBtn,
+            { backgroundColor: colors.surfaceVariant, borderColor: colors.border },
+          ]}
+          activeOpacity={0.7}
+        >
+          {isScanning ? (
+            <ActivityIndicator size="small" color={colors.primary} />
+          ) : (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <Ionicons name="scan-outline" size={14} color={colors.primary} />
+              <Text style={[styles.headerScanText, { color: colors.primary }]}>Scan</Text>
+            </View>
+          )}
+        </TouchableOpacity>
       </View>
 
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'android' ? undefined : 'padding'}
-        style={styles.keyboardContainer}
+      <KeyboardAwareScrollView
+        ref={scrollViewRef}
+        contentContainerStyle={styles.scrollContent}
+        extraScrollHeight={60}
       >
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          keyboardShouldPersistTaps="handled"
-        >
-          {formError ? (
-            <View style={styles.errorBanner}>
-              <Text style={styles.errorBannerText}>{formError}</Text>
-            </View>
-          ) : null}
+        {/* Scan Status Toast Banner */}
+        {scanToast && (
+          <View
+            style={[
+              styles.scanToastCard,
+              {
+                backgroundColor:
+                  scanToast.type === 'error'
+                    ? colors.alertMuted
+                    : scanToast.type === 'success'
+                    ? colors.incomeMuted
+                    : colors.primaryContainer,
+                borderColor:
+                  scanToast.type === 'error'
+                    ? colors.alert
+                    : scanToast.type === 'success'
+                    ? colors.income
+                    : colors.primary,
+              },
+            ]}
+          >
+            <Ionicons
+              name={
+                scanToast.type === 'error'
+                  ? 'alert-circle'
+                  : scanToast.type === 'success'
+                  ? 'checkmark-circle'
+                  : 'information-circle'
+              }
+              size={16}
+              color={
+                scanToast.type === 'error'
+                  ? colors.alert
+                  : scanToast.type === 'success'
+                  ? colors.income
+                  : colors.primary
+              }
+            />
+            <Text
+              style={[
+                styles.scanToastText,
+                {
+                  color:
+                    scanToast.type === 'error'
+                      ? colors.alert
+                      : scanToast.type === 'success'
+                      ? colors.income
+                      : colors.primary,
+                },
+              ]}
+            >
+              {scanToast.message}
+            </Text>
+            <TouchableOpacity onPress={() => setScanToast(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Ionicons
+                name="close"
+                size={14}
+                color={
+                  scanToast.type === 'error'
+                    ? colors.alert
+                    : scanToast.type === 'success'
+                    ? colors.income
+                    : colors.primary
+                }
+              />
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {formError ? (
+          <View style={styles.errorBanner}>
+            <Text style={styles.errorBannerText}>{formError}</Text>
+          </View>
+        ) : null}
 
           {/* 1. Transaction Type Selector */}
           <View style={styles.typeSelector}>
@@ -334,7 +651,6 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
             <View style={styles.moneySourcesGrid}>
               {accounts.map((acc) => {
                 const active = effectiveAccountId === acc.id;
-                const iconProps = getAccountIconProps(acc);
                 const isCard = acc.type === 'credit_card';
                 const bal = Number(acc.current_balance || 0);
                 const balText = isCard
@@ -359,18 +675,7 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
                       },
                     ]}
                   >
-                    <View
-                      style={[
-                        styles.sourceIconBadge,
-                        { backgroundColor: iconProps.color + '18' },
-                      ]}
-                    >
-                      <Ionicons
-                        name={iconProps.name}
-                        size={16}
-                        color={active ? accent.hex : iconProps.color}
-                      />
-                    </View>
+                    <BankLogo account={acc} size={30} />
 
                     <View style={styles.sourceTextCol}>
                       <Text
@@ -417,6 +722,11 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
               <TextInput
                 value={personName}
                 onChangeText={setPersonName}
+                onFocus={() => {
+                  setTimeout(() => {
+                    scrollViewRef.current?.scrollTo({ y: 300, animated: true });
+                  }, 120);
+                }}
                 placeholder="e.g. Rahul, Priya"
                 placeholderTextColor={colors.textMuted}
                 mode="outlined"
@@ -433,7 +743,7 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
             <Text style={styles.sectionLabel}>CATEGORY</Text>
             <View style={styles.categoriesGrid}>
               {getAvailableCategories().map((cat) => {
-                const active = category === cat;
+                const active = category.toLowerCase() === cat.toLowerCase();
                 return (
                   <TouchableOpacity
                     key={cat}
@@ -460,79 +770,162 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
             </View>
           </View>
 
-          {/* 5. Date & Calendar Picker (Restricted to Current Running Month) */}
+          {/* 5. Date & Calendar Picker */}
           <View style={styles.section}>
             <View style={styles.dateHeader}>
-              <Text style={styles.sectionLabel}>DATE (CURRENT MONTH ONLY)</Text>
+              <Text style={styles.sectionLabel}>TRANSACTION DATE</Text>
               <View style={styles.quickDateRow}>
-                <TouchableOpacity
-                  onPress={() => {
-                    setDate(formatLocalDate(today));
-                    setFormError(null);
-                  }}
-                  style={[
-                    styles.quickDateBtn,
-                    date === formatLocalDate(today) && {
-                      backgroundColor: accent.hex + '22',
-                      borderColor: accent.hex,
-                      borderWidth: 1,
-                    },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.quickDateText,
-                      { color: date === formatLocalDate(today) ? accent.hex : colors.textSecondary },
-                    ]}
-                  >
-                    Today
-                  </Text>
-                </TouchableOpacity>
-
-                {yesterdayInCurrentMonth && (
-                  <TouchableOpacity
-                    onPress={() => {
-                      const yesterday = new Date(
-                        today.getFullYear(),
-                        today.getMonth(),
-                        today.getDate() - 1
-                      );
-                      setDate(formatLocalDate(yesterday));
-                      setFormError(null);
-                    }}
-                    style={[
-                      styles.quickDateBtn,
-                      date ===
-                        formatLocalDate(
-                          new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1)
-                        ) && {
-                        backgroundColor: accent.hex + '22',
-                        borderColor: accent.hex,
-                        borderWidth: 1,
-                      },
-                    ]}
-                  >
-                    <Text
+                {isPastMonthMode && initialMonth ? (
+                  <>
+                    <TouchableOpacity
+                      onPress={() => {
+                        setDate(`${initialMonth}-01`);
+                        setFormError(null);
+                      }}
                       style={[
-                        styles.quickDateText,
-                        {
-                          color:
-                            date ===
-                            formatLocalDate(
-                              new Date(
-                                today.getFullYear(),
-                                today.getMonth(),
-                                today.getDate() - 1
-                              )
-                            )
-                              ? accent.hex
-                              : colors.textSecondary,
+                        styles.quickDateBtn,
+                        date === `${initialMonth}-01` && {
+                          backgroundColor: accent.hex + '22',
+                          borderColor: accent.hex,
+                          borderWidth: 1,
                         },
                       ]}
                     >
-                      Yesterday
-                    </Text>
-                  </TouchableOpacity>
+                      <Text
+                        style={[
+                          styles.quickDateText,
+                          { color: date === `${initialMonth}-01` ? accent.hex : colors.textSecondary },
+                        ]}
+                      >
+                        1st
+                      </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      onPress={() => {
+                        setDate(`${initialMonth}-15`);
+                        setFormError(null);
+                      }}
+                      style={[
+                        styles.quickDateBtn,
+                        date === `${initialMonth}-15` && {
+                          backgroundColor: accent.hex + '22',
+                          borderColor: accent.hex,
+                          borderWidth: 1,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.quickDateText,
+                          { color: date === `${initialMonth}-15` ? accent.hex : colors.textSecondary },
+                        ]}
+                      >
+                        15th
+                      </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      onPress={() => {
+                        setDate(`${initialMonth}-${String(initialMonthLastDay).padStart(2, '0')}`);
+                        setFormError(null);
+                      }}
+                      style={[
+                        styles.quickDateBtn,
+                        date === `${initialMonth}-${String(initialMonthLastDay).padStart(2, '0')}` && {
+                          backgroundColor: accent.hex + '22',
+                          borderColor: accent.hex,
+                          borderWidth: 1,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.quickDateText,
+                          {
+                            color:
+                              date === `${initialMonth}-${String(initialMonthLastDay).padStart(2, '0')}`
+                                ? accent.hex
+                                : colors.textSecondary,
+                          },
+                        ]}
+                      >
+                        Month End
+                      </Text>
+                    </TouchableOpacity>
+                  </>
+                ) : (
+                  <>
+                    <TouchableOpacity
+                      onPress={() => {
+                        setDate(formatLocalDate(today));
+                        setFormError(null);
+                      }}
+                      style={[
+                        styles.quickDateBtn,
+                        date === formatLocalDate(today) && {
+                          backgroundColor: accent.hex + '22',
+                          borderColor: accent.hex,
+                          borderWidth: 1,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.quickDateText,
+                          { color: date === formatLocalDate(today) ? accent.hex : colors.textSecondary },
+                        ]}
+                      >
+                        Today
+                      </Text>
+                    </TouchableOpacity>
+
+                    {yesterdayInCurrentMonth && (
+                      <TouchableOpacity
+                        onPress={() => {
+                          const yesterday = new Date(
+                            today.getFullYear(),
+                            today.getMonth(),
+                            today.getDate() - 1
+                          );
+                          setDate(formatLocalDate(yesterday));
+                          setFormError(null);
+                        }}
+                        style={[
+                          styles.quickDateBtn,
+                          date ===
+                            formatLocalDate(
+                              new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1)
+                            ) && {
+                            backgroundColor: accent.hex + '22',
+                            borderColor: accent.hex,
+                            borderWidth: 1,
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.quickDateText,
+                            {
+                              color:
+                                date ===
+                                formatLocalDate(
+                                  new Date(
+                                    today.getFullYear(),
+                                    today.getMonth(),
+                                    today.getDate() - 1
+                                  )
+                                )
+                                  ? accent.hex
+                                  : colors.textSecondary,
+                            },
+                          ]}
+                        >
+                          Yesterday
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                  </>
                 )}
               </View>
             </View>
@@ -552,7 +945,9 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
               <View style={styles.dateTextCol}>
                 <Text style={styles.dateSelectedText}>{formattedDateLabel}</Text>
                 <Text style={styles.dateMonthRestrictionHint}>
-                  {currentMonthName} (1st – {maxDate.getDate()}th only)
+                  {isMonthLocked(date.substring(0, 7))
+                    ? '🔒 Month Locked (Unlock on Dashboard)'
+                    : formattedDateLabel}
                 </Text>
               </View>
               <View style={[styles.dateChangeBadge, { borderColor: accent.hex + '40' }]}>
@@ -574,7 +969,7 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
                     <View style={styles.datePickerModalCard}>
                       <View style={styles.datePickerModalHeader}>
                         <Text style={styles.datePickerModalTitle}>
-                          Select Date • {currentMonthName}
+                          Select Date
                         </Text>
                         <TouchableOpacity onPress={() => setShowDatePicker(false)}>
                           <Text style={[styles.datePickerModalDoneText, { color: accent.hex }]}>
@@ -612,6 +1007,11 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
             <TextInput
               value={note}
               onChangeText={setNote}
+              onFocus={() => {
+                setTimeout(() => {
+                  scrollViewRef.current?.scrollToEnd({ animated: true });
+                }, 120);
+              }}
               placeholder="e.g. Lunch with friends, Book purchase"
               placeholderTextColor={colors.textMuted}
               mode="outlined"
@@ -629,9 +1029,8 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
           >
             <Text style={styles.submitBtnText}>Save Transaction</Text>
           </TactileButton>
-        </ScrollView>
-      </KeyboardAvoidingView>
-    </View>
+        </KeyboardAwareScrollView>
+      </View>
   );
 };
 
@@ -666,6 +1065,68 @@ function getStyles(colors: ThemeColors) {
     },
     headerSpacer: {
       width: 48,
+    },
+    headerScanBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+      borderRadius: 8,
+      borderWidth: 1,
+    },
+    headerScanText: {
+      fontSize: 12,
+      fontWeight: '700',
+    },
+    ocrBanner: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      padding: SPACING.md,
+      borderRadius: 12,
+      borderWidth: 1,
+      marginBottom: SPACING.md,
+      gap: 12,
+    },
+    ocrIconBadge: {
+      width: 38,
+      height: 38,
+      borderRadius: 10,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    ocrBannerTitle: {
+      fontSize: 13,
+      fontWeight: '700',
+    },
+    ocrBannerSub: {
+      fontSize: 11,
+      marginTop: 2,
+    },
+    aiBadge: {
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+      borderRadius: 4,
+      borderWidth: 1,
+    },
+    aiBadgeText: {
+      fontSize: 9,
+      fontWeight: '800',
+      letterSpacing: 0.5,
+    },
+    scanToastCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      padding: SPACING.sm,
+      paddingHorizontal: SPACING.md,
+      borderRadius: 8,
+      borderWidth: 1,
+      marginBottom: SPACING.md,
+      gap: 8,
+    },
+    scanToastText: {
+      flex: 1,
+      fontSize: 12,
+      fontWeight: '600',
     },
     keyboardContainer: {
       flex: 1,

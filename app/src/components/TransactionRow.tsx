@@ -7,6 +7,8 @@ import { Transaction, TransactionType } from '../types/database';
 import { SPACING, TYPOGRAPHY } from '../theme/tokens';
 import { useAppTheme } from '../theme/useAppTheme';
 import { getCategoryIcon, getCategoryColor } from '../utils/categoryIcons';
+import { BankLogo } from './BankLogo';
+import { useFinanceStore } from '../store/financeStore';
 
 export interface TransactionRowProps {
   transaction: Transaction;
@@ -34,6 +36,9 @@ const TransactionRowComponent: React.FC<TransactionRowProps> = ({
 }) => {
   const navigation = useNavigation<any>();
   const { colors, accent } = useAppTheme();
+  const account = useFinanceStore((s) =>
+    s.accounts.find((a) => a.id === transaction.account_id)
+  );
 
   const isIncome = transaction.type === 'income';
   const isExpense = transaction.type === 'expense';
@@ -152,11 +157,11 @@ const TransactionRowComponent: React.FC<TransactionRowProps> = ({
                         { backgroundColor: colors.surfaceLight },
                       ]}
                     >
-                      <Ionicons
-                        name="wallet-outline"
-                        size={11}
-                        color={colors.textSecondary}
-                        style={{ marginRight: 3 }}
+                      <BankLogo
+                        account={account}
+                        name={accountName}
+                        size={14}
+                        style={{ marginRight: 4 }}
                       />
                       <Text
                         style={[styles.accountBadgeText, { color: colors.textSecondary }]}
@@ -186,11 +191,11 @@ const TransactionRowComponent: React.FC<TransactionRowProps> = ({
                       { backgroundColor: colors.surfaceLight },
                     ]}
                   >
-                    <Ionicons
-                      name="wallet-outline"
-                      size={11}
-                      color={colors.textSecondary}
-                      style={{ marginRight: 3 }}
+                    <BankLogo
+                      account={account}
+                      name={accountName}
+                      size={14}
+                      style={{ marginRight: 4 }}
                     />
                     <Text
                       style={[styles.accountBadgeText, { color: colors.textSecondary }]}

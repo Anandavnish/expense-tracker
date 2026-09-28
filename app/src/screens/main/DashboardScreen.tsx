@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,15 +9,28 @@ import {
   Modal,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { ProgressBar, TextInput } from 'react-native-paper';
 import * as Haptics from 'expo-haptics';
 import { useAuthStore } from '../../store/authStore';
-import { useFinanceStore, parseBorrowDetails, calculateNetWorth } from '../../store/financeStore';
+import {
+  useFinanceStore,
+  parseBorrowDetails,
+  calculateNetWorth,
+  getCurrentMonthString,
+  getHistoricalAccountBalances,
+  getHistoricalBorrows,
+  calculateHistoricalNetWorth,
+} from '../../store/financeStore';
 import { useSettingsStore } from '../../store/settingsStore';
+import { MonthUnlockModal } from '../../components/MonthUnlockModal';
+import { getSpendingOverviewWithGemini } from '../../services/geminiService';
 import {
   SPACING,
   TYPOGRAPHY,
@@ -32,6 +45,7 @@ import { TactileButton } from '../../components/TactileButton';
 import { InlineError } from '../../components/InlineError';
 import { YouTubeStyleDraggableList } from '../../components/YouTubeStyleDraggableList';
 import { KeyboardAwareScrollView } from '../../components/KeyboardAwareScrollView';
+import { BankLogo } from '../../components/BankLogo';
 import { Account, AccountType, BankPresetCode, CreditCardIssuerCode } from '../../types/database';
 
 interface DashboardScreenProps {
@@ -96,10 +110,62 @@ export const getCategoryIconProps = (category: string): { name: keyof typeof Ion
   };
 };
 
+/**
+ * Formats structured AI Overview sections (SNAPSHOT, PATTERN, FLAG, NEXT STEP)
+ */
+const renderFormattedOverview = (text: string, styles: any, colors: any, accent: any) => {
+  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+
+  return (
+    <View style={{ gap: 8 }}>
+      {lines.map((line, idx) => {
+        const match = line.match(/^(\d+\.?\s*)?(SNAPSHOT|PATTERN|FLAG|NEXT\s*STEP)\s*[:—–-]\s*(.*)$/i);
+        if (match) {
+          const sectionKey = match[2].toUpperCase().replace(/\s+/g, ' ');
+          const content = match[3];
+          const isFlag = sectionKey === 'FLAG';
+          const isNextStep = sectionKey === 'NEXT STEP';
+          const isSnapshot = sectionKey === 'SNAPSHOT';
+
+          return (
+            <View key={idx} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6 }}>
+              <Text
+                style={[
+                  styles.aiSectionLabel,
+                  {
+                    color: isFlag
+                      ? colors.warning
+                      : isNextStep
+                      ? accent.hex
+                      : isSnapshot
+                      ? colors.primary
+                      : colors.textSecondary,
+                  },
+                ]}
+              >
+                {sectionKey}:
+              </Text>
+              <Text style={[styles.aiSectionBody, { color: colors.textPrimary, flex: 1 }]}>
+                {content}
+              </Text>
+            </View>
+          );
+        }
+
+        return (
+          <Text key={idx} style={[styles.aiOverviewParagraph, { color: colors.textPrimary }]}>
+            {line}
+          </Text>
+        );
+      })}
+    </View>
+  );
+};
+
 export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, route }) => {
   const insets = useSafeAreaInsets();
-  const { user } = useAuthStore();
-  const { accent, colors } = useSettingsStore();
+  const { user, isGuest } = useAuthStore();
+  const { accent, colors, hasGeminiApiKey, showAiOverviewOnDashboard } = useSettingsStore();
   const styles = useMemo(() => getStyles(colors), [colors]);
 
   const sourceModalScrollRef = useRef<ScrollView>(null);
@@ -130,13 +196,53 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
     reorderCategories,
     inlineError,
     setInlineError,
+    isMonthLocked,
+    lockMonth,
+    getUnlockRemainingSeconds,
   } = useFinanceStore();
 
   const [refreshing, setRefreshing] = useState(false);
 
+  // Month lock & unlock state
+  const [unlockModalVisible, setUnlockModalVisible] = useState(false);
+  const [, setLockTick] = useState(0);
+
   // Monthly Budget Deletion State
   const [deleteBudgetModalVisible, setDeleteBudgetModalVisible] = useState(false);
   const [isDeletingBudget, setIsDeletingBudget] = useState(false);
+
+  // AI Spending Overview State (On-demand with local cache)
+  const [aiOverviewText, setAiOverviewText] = useState<string | null>(null);
+  const [aiOverviewTimestamp, setAiOverviewTimestamp] = useState<string | null>(null);
+  const [isGeneratingAiOverview, setIsGeneratingAiOverview] = useState(false);
+  const [aiOverviewError, setAiOverviewError] = useState<string | null>(null);
+
+  // Load cached AI spending overview whenever selectedMonth changes
+  useEffect(() => {
+    let isMounted = true;
+    const loadCachedAiOverview = async () => {
+      try {
+        const cached = await AsyncStorage.getItem(`@finance_ai_overview_${selectedMonth}`);
+        if (cached && isMounted) {
+          const parsed = JSON.parse(cached);
+          setAiOverviewText(parsed.text || null);
+          setAiOverviewTimestamp(parsed.generatedAt || null);
+        } else if (isMounted) {
+          setAiOverviewText(null);
+          setAiOverviewTimestamp(null);
+        }
+      } catch {
+        if (isMounted) {
+          setAiOverviewText(null);
+          setAiOverviewTimestamp(null);
+        }
+      }
+    };
+    loadCachedAiOverview();
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedMonth]);
 
   const handleConfirmDeleteBudget = async () => {
     if (!user) return;
@@ -241,9 +347,63 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
     return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
   }, [selectedMonth]);
 
-  // Calculations for Net Worth Formula:
+  const currentMonthStr = useMemo(() => getCurrentMonthString(), []);
+  const isPastMonth = selectedMonth < currentMonthStr;
+  const isFutureMonth = selectedMonth > currentMonthStr;
+  const isLocked = isPastMonth ? isMonthLocked(selectedMonth) : false;
+  const unlockSecondsLeft = isPastMonth && !isLocked ? getUnlockRemainingSeconds(selectedMonth) : 0;
+
+  // Real-time countdown timer for unlocked past months
+  useEffect(() => {
+    if (!isPastMonth || isLocked) {
+      return;
+    }
+    const timer = setInterval(() => {
+      const remaining = getUnlockRemainingSeconds(selectedMonth);
+      if (remaining <= 0) {
+        lockMonth(selectedMonth);
+      } else {
+        setLockTick((t) => t + 1);
+      }
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [selectedMonth, isPastMonth, isLocked, getUnlockRemainingSeconds, lockMonth]);
+
+  const handleToggleLock = () => {
+    if (isLocked) {
+      setUnlockModalVisible(true);
+    } else {
+      Alert.alert(
+        'Lock Month?',
+        `Re-lock ${formattedMonthLabel} now? No further transactions or edits can be made without entering the security code.`,
+        [
+          { text: 'Keep Unlocked', style: 'cancel' },
+          {
+            text: 'Lock Now',
+            style: 'destructive',
+            onPress: () => {
+              lockMonth(selectedMonth);
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+            },
+          },
+        ]
+      );
+    }
+  };
+
+  // Calculations for Net Worth Formula (Historical closing balances if past month, 0 if future):
+  const effectiveAccounts = useMemo(() => {
+    if (isFutureMonth) {
+      return accounts.map((acc) => ({ ...acc, current_balance: 0 }));
+    }
+    if (isPastMonth) {
+      return getHistoricalAccountBalances(accounts, transactions, selectedMonth);
+    }
+    return accounts;
+  }, [accounts, transactions, selectedMonth, isPastMonth, isFutureMonth]);
+
   // 1. Liquid Assets: SUM(all bank accounts + cash)
-  const liquidAccounts = accounts.filter(
+  const liquidAccounts = effectiveAccounts.filter(
     (a) => a.type === 'bank' || a.type === 'cash'
   );
   const liquidTotal = liquidAccounts.reduce(
@@ -251,22 +411,29 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
     0
   );
 
-  // 2. Lent & Borrowed (Pending only, separated cleanly using parseBorrowDetails)
-  const pendingBorrows = borrows.filter((b) => b.status === 'pending');
+  // 2. Lent & Borrowed (Using getHistoricalBorrows so past months don't show future borrows, and future months show 0)
+  const effectiveBorrows = useMemo(() => {
+    return getHistoricalBorrows(borrows, transactions, selectedMonth);
+  }, [borrows, transactions, selectedMonth]);
+
   let totalLent = 0;
   let totalBorrowed = 0;
+  let pendingLentCount = 0;
+  let pendingBorrowedCount = 0;
 
-  pendingBorrows.forEach((b) => {
+  effectiveBorrows.forEach((b) => {
     const { type } = parseBorrowDetails(b, transactions);
     if (type === 'borrowed') {
       totalBorrowed += Number(b.amount || 0);
+      pendingBorrowedCount += 1;
     } else {
       totalLent += Number(b.amount || 0);
+      pendingLentCount += 1;
     }
   });
 
   // 3. Credit Card Accounts calculations
-  const creditAccounts = accounts.filter((a) => a.type === 'credit_card');
+  const creditAccounts = effectiveAccounts.filter((a) => a.type === 'credit_card');
   const totalCreditLimit = creditAccounts.reduce(
     (sum, a) => sum + Number(a.credit_limit || 0),
     0
@@ -280,7 +447,16 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
   const totalAvailCredit = Math.max(0, totalCreditLimit - totalCreditDebt);
 
   // Net Worth: Liquid (Bank + Cash) + Lent - Borrowed - Credit Card Dues
-  const fullNetWorth = calculateNetWorth(accounts, borrows, transactions);
+  const fullNetWorth = useMemo(() => {
+    if (isFutureMonth) {
+      return 0;
+    }
+    if (isPastMonth) {
+      return calculateHistoricalNetWorth(accounts, borrows, transactions, selectedMonth);
+    }
+    return calculateNetWorth(accounts, borrows, transactions);
+  }, [accounts, borrows, transactions, selectedMonth, isPastMonth, isFutureMonth]);
+
   const formattedNetWorth = fullNetWorth < 0
     ? `−₹${Math.abs(fullNetWorth).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
     : `₹${fullNetWorth.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
@@ -334,6 +510,167 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
     const vals = Object.values(categorySpendingMap);
     return Math.max(1, ...vals);
   }, [categorySpendingMap]);
+
+  // Month transactions and distinct categories for gating & overview
+  const monthTransactions = useMemo(() => {
+    return transactions.filter(
+      (t) => t.date && t.date.startsWith(selectedMonth)
+    );
+  }, [transactions, selectedMonth]);
+
+  const distinctCategoriesCount = useMemo(() => {
+    const set = new Set<string>();
+    monthTransactions.forEach((t) => {
+      if (t.category && t.category.trim()) {
+        set.add(t.category.trim());
+      }
+    });
+    return set.size;
+  }, [monthTransactions]);
+
+  // Concrete trigger gate: At least 5 transactions AND at least 2 distinct categories
+  const isAiOverviewGated = monthTransactions.length < 5 || distinctCategoriesCount < 2;
+
+  const handleGenerateAiOverview = async () => {
+    // 1. Concrete deterministic trigger gate BEFORE calling Gemini
+    if (isAiOverviewGated) {
+      return;
+    }
+
+    if (!hasGeminiApiKey) {
+      Alert.alert(
+        'Gemini Key Required',
+        'Set up your free AI key in Settings to unlock AI spending summaries.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Go to Settings',
+            onPress: () => navigation.navigate('Settings'),
+          },
+        ]
+      );
+      return;
+    }
+
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+      setIsGeneratingAiOverview(true);
+      setAiOverviewError(null);
+
+      let totalIncome = 0;
+      let totalExpense = 0;
+      const categoryMap: Record<string, number> = {};
+
+      monthTransactions.forEach((t) => {
+        const amt = Number(t.amount) || 0;
+        if (t.type === 'income') {
+          totalIncome += amt;
+        } else if (t.type === 'expense') {
+          totalExpense += amt;
+          categoryMap[t.category] = (categoryMap[t.category] || 0) + amt;
+        }
+      });
+
+      // Top 5 categories with percentages
+      const topCategories = Object.entries(categoryMap)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([cat, amt]) => ({
+          category: cat,
+          amount: amt,
+          percentOfTotal: totalExpense > 0 ? Math.round((amt / totalExpense) * 100) : 0,
+        }));
+
+      const isHistorical = isPastMonth || isLocked;
+
+      // Days remaining in month (only for active in-progress month)
+      let daysRemainingInMonth: number | null = null;
+      if (!isHistorical) {
+        const today = new Date();
+        const currentYear = today.getFullYear();
+        const currentMonthNum = today.getMonth() + 1;
+        const [selYear, selMonth] = selectedMonth.split('-').map(Number);
+        if (selYear === currentYear && selMonth === currentMonthNum) {
+          const daysInMonth = new Date(selYear, selMonth, 0).getDate();
+          daysRemainingInMonth = Math.max(0, daysInMonth - today.getDate());
+        }
+      }
+
+      // Check credit limit & debt across all credit cards
+      const totalCreditLimit = creditAccounts.reduce((sum, c) => sum + Number(c.credit_limit || 0), 0);
+
+      // Construct compact summary with strict omission of budget variance if no budget exists
+      const compactSummary: Record<string, any> = {
+        month: formattedMonthLabel,
+        isHistorical,
+        periodStatus: isHistorical
+          ? `Historical closed and finalized period for ${formattedMonthLabel}`
+          : `Active in-progress period for ${formattedMonthLabel}`,
+        totalIncome,
+        totalExpense,
+        netSavings: totalIncome - totalExpense,
+        transactionCount: monthTransactions.length,
+        distinctCategoriesCount,
+        topSpendingCategories: topCategories,
+        ...(daysRemainingInMonth !== null ? { daysRemainingInMonth } : {}),
+        ...(totalCreditLimit > 0
+          ? {
+              creditCardUtilizationPercent: Math.round((totalCreditDebt / totalCreditLimit) * 100),
+            }
+          : {}),
+      };
+
+      // STRICT: Omit budget-variance data entirely if no budget is set!
+      if (budgetLimit > 0) {
+        compactSummary.budgetLimit = budgetLimit;
+        compactSummary.budgetSpent = budgetSpent;
+        compactSummary.budgetRemaining = budgetLimit - budgetSpent;
+        compactSummary.budgetPercentUsed = Math.round((budgetSpent / budgetLimit) * 100);
+      }
+
+      const res = await getSpendingOverviewWithGemini(compactSummary);
+      setIsGeneratingAiOverview(false);
+
+      if (res.success && res.data) {
+        setAiOverviewText(res.data);
+        const nowIso = new Date().toISOString();
+        setAiOverviewTimestamp(nowIso);
+        await AsyncStorage.setItem(
+          `@finance_ai_overview_${selectedMonth}`,
+          JSON.stringify({ month: selectedMonth, text: res.data, generatedAt: nowIso })
+        ).catch(() => {});
+      } else {
+        if (res.error === 'INSUFFICIENT_DATA') {
+          setAiOverviewError(res.message || 'Log a few more transactions this month to unlock an overview');
+        } else if (res.error === 'MISSING_KEY') {
+          Alert.alert(
+            'Gemini Key Required',
+            'Set up your AI key in Settings to use this feature.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Go to Settings', onPress: () => navigation.navigate('Settings') },
+            ]
+          );
+        } else if (res.error === 'INVALID_KEY') {
+          Alert.alert(
+            'Invalid API Key',
+            res.message || 'Please check your Gemini key in Settings.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Go to Settings', onPress: () => navigation.navigate('Settings') },
+            ]
+          );
+        } else if (res.error === 'RATE_LIMIT') {
+          setAiOverviewError('Rate limit exceeded. Please wait a minute before trying again.');
+        } else {
+          setAiOverviewError(res.message || 'Failed to generate AI overview.');
+        }
+      }
+    } catch (err: any) {
+      setIsGeneratingAiOverview(false);
+      setAiOverviewError(err?.message || 'Failed to generate AI overview.');
+    }
+  };
 
   // Helper to parse preset & custom name from an account
   const parseAccountDetails = (acc: Account) => {
@@ -401,39 +738,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
 
     // Cash
     return { title: rawName || 'Cash Wallet', subtitle: 'Cash Wallet' };
-  };
-
-  const getAccountIconProps = (acc: Account): { name: keyof typeof Ionicons.glyphMap; color: string } => {
-    if (acc.type === 'bank') {
-      const parsed = parseAccountDetails(acc);
-      const presetCode = acc.bank_preset || parsed.preset;
-      const preset = BANK_PRESETS.find((p) => p.code === presetCode);
-      if (preset && preset.code !== 'Custom') {
-        return { name: preset.icon, color: preset.color };
-      }
-      return {
-        name: (acc.custom_icon as any) || 'business-outline',
-        color: acc.custom_color || accent.hex,
-      };
-    }
-
-    if (acc.type === 'credit_card') {
-      const parsed = parseAccountDetails(acc);
-      const issuerCode = acc.card_issuer || parsed.issuer;
-      const issuer = CARD_ISSUERS.find((i) => i.code === issuerCode);
-      if (issuer && issuer.code !== 'Custom') {
-        return { name: issuer.icon, color: issuer.color };
-      }
-      return {
-        name: (acc.custom_icon as any) || 'card-outline',
-        color: acc.custom_color || accent.hex,
-      };
-    }
-
-    return {
-      name: 'cash-outline',
-      color: colors.income,
-    };
   };
 
   // Handle Save or Edit Source
@@ -669,21 +973,23 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
         <View>
           <Text style={styles.appGreeting}>Welcome back,</Text>
           <Text style={styles.appName}>
-            {user?.email ? user.email.split('@')[0] : 'Expense Tracker'}
+            {isGuest ? 'Guest Explorer' : user?.email ? user.email.split('@')[0] : 'Expense Tracker'}
           </Text>
         </View>
         <View style={styles.topRightActions}>
-          <View style={[styles.avatarPill, { borderColor: accent.hex }]}>
-            <Text style={[styles.avatarText, { color: accent.hex }]}>
-              {user?.email?.charAt(0).toUpperCase() || 'U'}
-            </Text>
-          </View>
           <TouchableOpacity
-            onPress={() => navigation.navigate('Settings')}
-            style={styles.settingsIconBtn}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            onPress={() => navigation.navigate('Profile')}
+            style={[styles.avatarPill, { borderColor: accent.hex }]}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            activeOpacity={0.8}
           >
-            <Ionicons name="settings-outline" size={20} color={colors.textSecondary} />
+            {isGuest ? (
+              <Ionicons name="person-outline" size={16} color={accent.hex} />
+            ) : (
+              <Text style={[styles.avatarText, { color: accent.hex }]}>
+                {user?.email?.charAt(0).toUpperCase() || 'U'}
+              </Text>
+            )}
           </TouchableOpacity>
         </View>
       </View>
@@ -698,7 +1004,41 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
           >
             <Ionicons name="chevron-back" size={18} color={accent.hex} />
           </TouchableOpacity>
-          <Text style={styles.monthLabelText}>{formattedMonthLabel}</Text>
+
+          <View style={styles.capsuleCenterRow}>
+            <Text style={styles.monthLabelText}>{formattedMonthLabel}</Text>
+            {isPastMonth && (
+              <TouchableOpacity
+                onPress={handleToggleLock}
+                style={[
+                  styles.capsuleLockBadge,
+                  isLocked ? styles.capsuleLockBadgeLocked : styles.capsuleLockBadgeUnlocked,
+                ]}
+                hitSlop={{ top: 8, bottom: 8, left: 6, right: 8 }}
+                activeOpacity={0.7}
+              >
+                <Ionicons
+                  name={isLocked ? 'lock-closed' : 'lock-open'}
+                  size={12}
+                  color={isLocked ? colors.textMuted : accent.hex}
+                />
+                {!isLocked && (
+                  <Text style={[styles.capsuleLockTimerText, { color: accent.hex }]}>
+                    {Math.max(1, Math.ceil(unlockSecondsLeft / 60))}m
+                  </Text>
+                )}
+              </TouchableOpacity>
+            )}
+            {isFutureMonth && (
+              <View style={[styles.capsuleLockBadge, styles.capsuleLockBadgeLocked]}>
+                <Ionicons name="time-outline" size={12} color={colors.textMuted} />
+                <Text style={[styles.capsuleLockTimerText, { color: colors.textMuted }]}>
+                  UPCOMING
+                </Text>
+              </View>
+            )}
+          </View>
+
           <TouchableOpacity
             onPress={handleNextMonth}
             style={styles.arrowBtn}
@@ -707,6 +1047,26 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
             <Ionicons name="chevron-forward" size={18} color={accent.hex} />
           </TouchableOpacity>
         </View>
+
+        {selectedMonth !== currentMonthStr && (
+          <TouchableOpacity
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+              setSelectedMonth(currentMonthStr, user?.id);
+            }}
+            style={[
+              styles.returnCurrentMonthBtn,
+              { borderColor: accent.hex + '44', backgroundColor: colors.surface },
+            ]}
+            activeOpacity={0.7}
+            hitSlop={{ top: 6, bottom: 6, left: 10, right: 10 }}
+          >
+            <Ionicons name="arrow-undo-outline" size={12} color={accent.hex} />
+            <Text style={[styles.returnCurrentMonthText, { color: accent.hex }]}>
+              Return to Current Month
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       <InlineError message={inlineError} onDismiss={() => setInlineError(null)} />
@@ -732,7 +1092,19 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
         <View style={styles.netWorthCard}>
           <View style={styles.netWorthHeader}>
             <View>
-              <Text style={styles.netWorthEyebrow}>Total Net Worth</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Text style={styles.netWorthEyebrow}>Total Net Worth</Text>
+                {isPastMonth && (
+                  <View style={styles.historicalSnapshotPill}>
+                    <Text style={styles.historicalSnapshotText}>CLOSING SNAPSHOT</Text>
+                  </View>
+                )}
+                {isFutureMonth && (
+                  <View style={[styles.historicalSnapshotPill, { backgroundColor: colors.border }]}>
+                    <Text style={[styles.historicalSnapshotText, { color: colors.textMuted }]}>UPCOMING</Text>
+                  </View>
+                )}
+              </View>
               <Text
                 style={[
                   styles.netWorthHeroNumber,
@@ -742,7 +1114,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
               >
                 {formattedNetWorth}
               </Text>
-              {totalCreditLimit > 0 && (
+              {totalCreditLimit > 0 && !isFutureMonth && (
                 <View style={[styles.availCreditPill, { borderColor: colors.border }]}>
                   <Ionicons name="card-outline" size={12} color={accent.hex} />
                   <Text style={styles.availCreditText}>
@@ -777,8 +1149,15 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
               </Text>
             </View>
 
-            <View style={styles.breakdownItem}>
-              <Text style={styles.breakdownLabel}>Lent</Text>
+            <TouchableOpacity
+              style={styles.breakdownItem}
+              onPress={() => navigation.navigate('Borrows')}
+              activeOpacity={0.7}
+            >
+              <View style={styles.breakdownLabelRow}>
+                <Text style={styles.breakdownLabel}>Lent</Text>
+                <Ionicons name="chevron-forward" size={10} color={colors.textMuted} />
+              </View>
               <Text
                 style={[
                   styles.breakdownValue,
@@ -788,10 +1167,17 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
               >
                 {totalLent > 0 ? `+₹${totalLent.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '₹0'}
               </Text>
-            </View>
+            </TouchableOpacity>
 
-            <View style={styles.breakdownItem}>
-              <Text style={styles.breakdownLabel}>Borrowed</Text>
+            <TouchableOpacity
+              style={styles.breakdownItem}
+              onPress={() => navigation.navigate('Borrows')}
+              activeOpacity={0.7}
+            >
+              <View style={styles.breakdownLabelRow}>
+                <Text style={styles.breakdownLabel}>Borrowed</Text>
+                <Ionicons name="chevron-forward" size={10} color={colors.textMuted} />
+              </View>
               <Text
                 style={[
                   styles.breakdownValue,
@@ -801,7 +1187,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
               >
                 {totalBorrowed > 0 ? `−₹${totalBorrowed.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '₹0'}
               </Text>
-            </View>
+            </TouchableOpacity>
 
             <View style={styles.breakdownItem}>
               <Text style={styles.breakdownLabel}>Card Dues</Text>
@@ -824,7 +1210,12 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
         <View style={styles.card}>
           <View style={styles.cardHeaderWithAction}>
             <Text style={styles.cardHeaderLabel}>Monthly Budget</Text>
-            {budgetLimit > 0 ? (
+            {isPastMonth && isLocked ? (
+              <View style={styles.budgetLockedTag}>
+                <Ionicons name="lock-closed" size={11} color={colors.textMuted} />
+                <Text style={styles.budgetLockedTagText}>LOCKED</Text>
+              </View>
+            ) : budgetLimit > 0 ? (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                 <TouchableOpacity
                   onPress={() =>
@@ -904,17 +1295,141 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
           )}
         </View>
 
+        {/* AI Spending Overview Card */}
+        {showAiOverviewOnDashboard && (
+          <View style={styles.card}>
+            <View style={styles.cardHeaderWithAction}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, paddingRight: 8 }}>
+                <Ionicons
+                  name={isPastMonth || isLocked ? 'time-outline' : 'sparkles'}
+                  size={14}
+                  color={accent.hex}
+                />
+                <Text style={styles.cardHeaderLabel} numberOfLines={1}>
+                  {isPastMonth || isLocked
+                    ? `Historical summary for ${formattedMonthLabel}`
+                    : 'Spending Overview'}
+                </Text>
+              </View>
+              {!isAiOverviewGated && aiOverviewText && (
+                <TouchableOpacity
+                  onPress={handleGenerateAiOverview}
+                  disabled={isGeneratingAiOverview}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
+                >
+                  {isGeneratingAiOverview ? (
+                    <ActivityIndicator size="small" color={accent.hex} />
+                  ) : (
+                    <>
+                      <Ionicons name="reload-outline" size={13} color={accent.hex} />
+                      <Text style={[styles.cardHeaderAction, { color: accent.hex }]}>Refresh</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {isGeneratingAiOverview ? (
+              <View style={styles.aiOverviewLoadingBox}>
+                <ActivityIndicator size="small" color={accent.hex} />
+                <Text style={styles.aiOverviewLoadingText}>
+                  {isPastMonth || isLocked
+                    ? `Synthesizing historical summary for ${formattedMonthLabel}...`
+                    : `Analyzing your ${formattedMonthLabel} spending with Gemini AI...`}
+                </Text>
+              </View>
+            ) : isAiOverviewGated ? (
+              /* Distinct, clearly-worded empty state (not an error) */
+              <View style={styles.aiOverviewGatedBox}>
+                <View style={[styles.aiOverviewGatedIconBadge, { backgroundColor: colors.surfaceVariant }]}>
+                  <Ionicons name="bar-chart-outline" size={20} color={colors.textSecondary} />
+                </View>
+                <Text style={[styles.aiOverviewGatedTitle, { color: colors.textPrimary }]}>
+                  Log a few more transactions this month to unlock an overview
+                </Text>
+                <Text style={[styles.aiOverviewGatedSub, { color: colors.textMuted }]}>
+                  Requires at least 5 transactions across 2 distinct categories (Currently {monthTransactions.length}/5 transactions • {distinctCategoriesCount}/2 categories)
+                </Text>
+              </View>
+            ) : aiOverviewText ? (
+              <View style={styles.aiOverviewContentBox}>
+                {renderFormattedOverview(aiOverviewText, styles, colors, accent)}
+                {aiOverviewTimestamp && (
+                  <View style={styles.aiOverviewMetaRow}>
+                    <Text style={styles.aiOverviewMetaText}>
+                      Cached • Generated{' '}
+                      {new Date(aiOverviewTimestamp).toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </Text>
+                    <View style={[styles.byokTag, { borderColor: colors.border }]}>
+                      <Text style={styles.byokTagText}>
+                        {isPastMonth || isLocked ? 'CLOSED PERIOD' : 'BYOK GEMINI'}
+                      </Text>
+                    </View>
+                  </View>
+                )}
+              </View>
+            ) : (
+              <View style={styles.aiOverviewEmptyBox}>
+                <Text style={styles.aiOverviewEmptyDesc}>
+                  {isPastMonth || isLocked
+                    ? `Generate an official historical synthesis of your closed ${formattedMonthLabel} ledger.`
+                    : `Get an on-demand, plain-language summary of your spending patterns and top categories for ${formattedMonthLabel}.`}
+                </Text>
+                <TactileButton
+                  onPress={handleGenerateAiOverview}
+                  style={[
+                    styles.aiGenerateBtn,
+                    { backgroundColor: colors.surfaceVariant, borderColor: colors.border },
+                  ]}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Ionicons name="sparkles" size={14} color={accent.hex} />
+                    <Text style={[styles.aiGenerateBtnText, { color: colors.textPrimary }]}>
+                      {isPastMonth || isLocked ? 'Generate Historical Summary' : 'Generate AI Overview'}
+                    </Text>
+                  </View>
+                </TactileButton>
+              </View>
+            )}
+
+            {aiOverviewError && !isAiOverviewGated && (
+              <View style={styles.aiOverviewErrorBox}>
+                <Ionicons name="alert-circle-outline" size={14} color={colors.alert} />
+                <Text style={styles.aiOverviewErrorText}>{aiOverviewError}</Text>
+              </View>
+            )}
+          </View>
+        )}
+
         {/* 5. Money Sources Card */}
         <View style={styles.card}>
           <View style={styles.cardHeaderWithAction}>
-            <Text style={styles.cardHeaderLabel}>Money Sources</Text>
-            <TouchableOpacity
-              onPress={() => setSourcesManageVisible(true)}
-              style={styles.manageIconBtn}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <Ionicons name="pencil-outline" size={15} color={colors.textSecondary} />
-            </TouchableOpacity>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Text style={styles.cardHeaderLabel}>Money Sources</Text>
+              {isPastMonth && (
+                <View style={styles.historicalSnapshotPill}>
+                  <Text style={styles.historicalSnapshotText}>CLOSING SNAPSHOT</Text>
+                </View>
+              )}
+              {isFutureMonth && (
+                <View style={[styles.historicalSnapshotPill, { backgroundColor: colors.border }]}>
+                  <Text style={[styles.historicalSnapshotText, { color: colors.textMuted }]}>UPCOMING</Text>
+                </View>
+              )}
+            </View>
+            {isPastMonth || isFutureMonth ? null : (
+              <TouchableOpacity
+                onPress={() => setSourcesManageVisible(true)}
+                style={styles.manageIconBtn}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Ionicons name="pencil-outline" size={15} color={colors.textSecondary} />
+              </TouchableOpacity>
+            )}
           </View>
 
           <View style={styles.sourcesList}>
@@ -926,11 +1441,10 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
               </Text>
             </View>
 
-            {accounts
+            {effectiveAccounts
               .filter((a) => a.type !== 'credit_card')
               .map((acc) => {
                 const { title, subtitle } = getAccountDisplay(acc);
-                const iconProps = getAccountIconProps(acc);
                 return (
                   <TouchableOpacity
                     key={acc.id}
@@ -942,13 +1456,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                     activeOpacity={0.7}
                   >
                     <View style={styles.sourceLeft}>
-                      <View style={[styles.sourceIconBadge, { backgroundColor: iconProps.color + '15' }]}>
-                        <Ionicons
-                          name={iconProps.name}
-                          size={16}
-                          color={iconProps.color}
-                        />
-                      </View>
+                      <BankLogo account={acc} name={title} size={36} />
                       <View>
                         <Text style={styles.sourceName}>{title}</Text>
                         {subtitle ? (
@@ -1024,7 +1532,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                 const usedRatio = limit > 0 ? Math.min(spent / limit, 1) : 0;
                 const barColor = isOverspent ? colors.alert : usedRatio > 0.8 ? colors.warning : accent.hex;
                 const { title } = getAccountDisplay(card);
-                const iconProps = getAccountIconProps(card);
 
                 return (
                   <View key={card.id} style={styles.creditCardSourceContainer}>
@@ -1038,9 +1545,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                     >
                       <View style={styles.sourceRow}>
                         <View style={styles.sourceLeft}>
-                          <View style={[styles.sourceIconBadge, { backgroundColor: iconProps.color + '15' }]}>
-                            <Ionicons name={iconProps.name} size={16} color={iconProps.color} />
-                          </View>
+                          <BankLogo account={card} name={title} size={36} />
                           <View>
                             <Text style={styles.sourceName}>{title}</Text>
                             <Text style={styles.sourceSub}>
@@ -1100,6 +1605,134 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
               })
             )}
           </View>
+        </View>
+
+        {/* Debts & Borrows Summary Card */}
+        <View style={styles.card}>
+          <View style={styles.cardHeaderWithAction}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Ionicons name="swap-horizontal" size={16} color={accent.hex} />
+              <Text style={styles.cardHeaderLabel}>Debts & Borrows</Text>
+              {isPastMonth && (
+                <View style={styles.historicalSnapshotPill}>
+                  <Text style={styles.historicalSnapshotText}>CLOSING SNAPSHOT</Text>
+                </View>
+              )}
+              {isFutureMonth && (
+                <View style={[styles.historicalSnapshotPill, { backgroundColor: colors.border }]}>
+                  <Text style={[styles.historicalSnapshotText, { color: colors.textMuted }]}>UPCOMING</Text>
+                </View>
+              )}
+            </View>
+            {isFutureMonth ? null : (
+              <TouchableOpacity
+                onPress={() => navigation.navigate('Borrows')}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}
+              >
+                <Text style={[styles.cardHeaderAction, { color: accent.hex }]}>Manage</Text>
+                <Ionicons name="chevron-forward" size={13} color={accent.hex} />
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {effectiveBorrows.length === 0 ? (
+            <TouchableOpacity
+              style={styles.borrowEmptyRow}
+              onPress={() => navigation.navigate('Borrows')}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="swap-horizontal-outline" size={18} color={colors.textMuted} />
+              <Text style={styles.borrowEmptyText}>
+                {isFutureMonth
+                  ? 'Upcoming month — No active debts or loans recorded yet.'
+                  : isPastMonth
+                  ? `No active debts or loans were recorded for ${formattedMonthLabel}.`
+                  : 'No open debts or loans. Tap to record or view history.'}
+              </Text>
+            </TouchableOpacity>
+          ) : (
+            <View style={styles.borrowOverviewContent}>
+              <View style={styles.borrowStatsRow}>
+                <TouchableOpacity
+                  style={[styles.borrowStatBox, { borderColor: `${colors.lent}33`, backgroundColor: `${colors.lent}0D` }]}
+                  onPress={() => navigation.navigate('Borrows')}
+                  activeOpacity={0.8}
+                >
+                  <View style={styles.borrowStatHeader}>
+                    <Ionicons name="arrow-up-circle" size={14} color={colors.lent} />
+                    <Text style={[styles.borrowStatBadgeText, { color: colors.lent }]}>TO RECEIVE</Text>
+                  </View>
+                  <Text style={[styles.borrowStatAmount, TYPOGRAPHY.tabularText, { color: colors.lent }]}>
+                    +₹{totalLent.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                  </Text>
+                  <Text style={styles.borrowStatSub}>
+                    {pendingLentCount} {pendingLentCount === 1 ? 'person owes you' : 'people owe you'}
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.borrowStatBox, { borderColor: `${colors.borrowed}33`, backgroundColor: `${colors.borrowed}0D` }]}
+                  onPress={() => navigation.navigate('Borrows')}
+                  activeOpacity={0.8}
+                >
+                  <View style={styles.borrowStatHeader}>
+                    <Ionicons name="arrow-down-circle" size={14} color={colors.borrowed} />
+                    <Text style={[styles.borrowStatBadgeText, { color: colors.borrowed }]}>TO PAY</Text>
+                  </View>
+                  <Text style={[styles.borrowStatAmount, TYPOGRAPHY.tabularText, { color: colors.borrowed }]}>
+                    −₹{totalBorrowed.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                  </Text>
+                  <Text style={styles.borrowStatSub}>
+                    {pendingBorrowedCount} {pendingBorrowedCount === 1 ? 'person to repay' : 'people to repay'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Show top 2 active pending items for instant context */}
+              <View style={styles.borrowMiniList}>
+                {effectiveBorrows.slice(0, 2).map((b) => {
+                  const { type, displayName } = parseBorrowDetails(b, transactions);
+                  const isLent = type !== 'borrowed';
+                  return (
+                    <TouchableOpacity
+                      key={b.id}
+                      style={styles.borrowMiniItem}
+                      onPress={() => navigation.navigate('Borrows')}
+                      activeOpacity={0.7}
+                    >
+                      <View style={styles.borrowMiniLeft}>
+                        <View
+                          style={[
+                            styles.borrowMiniBadge,
+                            { backgroundColor: isLent ? colors.lentMuted : colors.borrowedMuted },
+                          ]}
+                        >
+                          <Ionicons
+                            name={isLent ? 'arrow-up' : 'arrow-down'}
+                            size={12}
+                            color={isLent ? colors.lent : colors.borrowed}
+                          />
+                        </View>
+                        <Text style={styles.borrowMiniName} numberOfLines={1}>
+                          {displayName || b.person_name}
+                        </Text>
+                      </View>
+                      <Text
+                        style={[
+                          styles.borrowMiniAmount,
+                          TYPOGRAPHY.tabularText,
+                          { color: isLent ? colors.lent : colors.borrowed },
+                        ]}
+                      >
+                        {isLent ? '+' : '−'}₹{Number(b.amount || 0).toLocaleString('en-IN')}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+          )}
         </View>
 
         {/* 6. Spending by Category Card */}
@@ -1170,12 +1803,43 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
 
       {/* 7. Floating Circular "+" Button */}
       <TouchableOpacity
-        onPress={() => navigation.navigate('AddTransaction')}
-        style={[styles.floatingAddBtn, { backgroundColor: accent.hex }]}
+        onPress={() => {
+          if (isFutureMonth) {
+            Alert.alert(
+              'Upcoming Month',
+              `${formattedMonthLabel} has not begun yet. Transactions cannot be logged in future months.`
+            );
+            return;
+          }
+          if (isPastMonth && isLocked) {
+            setUnlockModalVisible(true);
+          } else {
+            navigation.navigate('AddTransaction', isPastMonth ? { initialMonth: selectedMonth } : undefined);
+          }
+        }}
+        style={[
+          styles.floatingAddBtn,
+          {
+            backgroundColor:
+              isFutureMonth
+                ? colors.surfaceLight
+                : isPastMonth && isLocked
+                ? colors.surfaceLight
+                : accent.hex,
+          },
+          (isFutureMonth || (isPastMonth && isLocked)) && {
+            borderColor: colors.border,
+            borderWidth: 1,
+          },
+        ]}
         activeOpacity={0.7}
         hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
       >
-        <Ionicons name="add" size={30} color={colors.onPrimary} />
+        <Ionicons
+          name={isFutureMonth ? 'time-outline' : isPastMonth && isLocked ? 'lock-closed' : 'add'}
+          size={isFutureMonth || (isPastMonth && isLocked) ? 20 : 30}
+          color={isFutureMonth || (isPastMonth && isLocked) ? colors.textMuted : colors.onPrimary}
+        />
       </TouchableOpacity>
 
       {/* SYNC REQUIRED BOTTOM SHEET / MODAL */}
@@ -1673,9 +2337,12 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                               isSelected && { borderColor: accent.hex, backgroundColor: accent.hex + '12' },
                             ]}
                           >
-                            <View style={[styles.presetIconBadge, { backgroundColor: preset.color + '20' }]}>
-                              <Ionicons name={preset.icon} size={20} color={preset.color} />
-                            </View>
+                            <BankLogo
+                              presetId={preset.code}
+                              name={preset.label}
+                              brandColor={preset.color}
+                              size={36}
+                            />
                             <View style={styles.presetInfoCol}>
                               <Text
                                 style={[
@@ -1755,9 +2422,12 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                               isSelected && { borderColor: accent.hex, backgroundColor: accent.hex + '12' },
                             ]}
                           >
-                            <View style={[styles.presetIconBadge, { backgroundColor: issuer.color + '20' }]}>
-                              <Ionicons name={issuer.icon} size={20} color={issuer.color} />
-                            </View>
+                            <BankLogo
+                              presetId={issuer.code}
+                              name={issuer.label}
+                              brandColor={issuer.color}
+                              size={36}
+                            />
                             <View style={styles.presetInfoCol}>
                               <Text
                                 style={[
@@ -1978,7 +2648,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                     onDragEnd={() => setIsSourcesDragging(false)}
                     renderContent={(acc) => {
                       const { title } = getAccountDisplay(acc);
-                      const iconProps = getAccountIconProps(acc);
 
                       return (
                         <TouchableOpacity
@@ -1986,9 +2655,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                           onPress={() => handleOpenEditSource(acc)}
                           activeOpacity={0.7}
                         >
-                          <View style={[styles.managerItemIconBadge, { backgroundColor: iconProps.color + '18' }]}>
-                            <Ionicons name={iconProps.name} size={18} color={iconProps.color} />
-                          </View>
+                          <BankLogo account={acc} name={title} size={36} />
 
                           <View style={styles.managerItemTextCol}>
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -2435,6 +3102,13 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
           </View>
         </View>
       </Modal>
+
+      {/* MONTH UNLOCK VERIFICATION MODAL */}
+      <MonthUnlockModal
+        visible={unlockModalVisible}
+        month={selectedMonth}
+        onClose={() => setUnlockModalVisible(false)}
+      />
     </View>
   );
 };
@@ -2502,6 +3176,26 @@ function getStyles(colors: ThemeColors) {
     backgroundColor: 'transparent',
     zIndex: 20,
   },
+  returnCurrentMonthBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 14,
+    borderWidth: 1,
+    shadowColor: colors.shadow,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.15,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  returnCurrentMonthText: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+  },
   monthSelectorCapsule: {
     width: 280,
     maxWidth: '85%',
@@ -2530,6 +3224,63 @@ function getStyles(colors: ThemeColors) {
     fontSize: 14,
     fontWeight: '700',
     letterSpacing: -0.2,
+  },
+  capsuleCenterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  capsuleLockBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  capsuleLockBadgeLocked: {
+    backgroundColor: colors.surfaceLight,
+    borderColor: colors.border,
+  },
+  capsuleLockBadgeUnlocked: {
+    backgroundColor: colors.surfaceLight,
+    borderColor: colors.border,
+  },
+  capsuleLockTimerText: {
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  budgetLockedTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 6,
+    backgroundColor: colors.surfaceLight,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  budgetLockedTagText: {
+    color: colors.textMuted,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  historicalSnapshotPill: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    backgroundColor: colors.surfaceLight,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  historicalSnapshotText: {
+    color: colors.textMuted,
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
   scrollWrapper: {
     flex: 1,
@@ -2600,13 +3351,18 @@ function getStyles(colors: ThemeColors) {
     flex: 1,
     minWidth: 80,
   },
+  breakdownLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    marginBottom: 2,
+  },
   breakdownLabel: {
     color: colors.textMuted,
     fontSize: 10,
     fontWeight: '600',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
-    marginBottom: 2,
   },
   breakdownValue: {
     color: colors.textPrimary,
@@ -2637,6 +3393,205 @@ function getStyles(colors: ThemeColors) {
   cardHeaderAction: {
     fontSize: 12,
     fontWeight: '700',
+  },
+  borrowEmptyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+    paddingVertical: SPACING.sm,
+  },
+  borrowEmptyText: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    flex: 1,
+  },
+  borrowOverviewContent: {
+    gap: SPACING.sm,
+  },
+  borrowStatsRow: {
+    flexDirection: 'row',
+    gap: SPACING.sm,
+  },
+  borrowStatBox: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: SPACING.sm,
+  },
+  borrowStatHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginBottom: 4,
+  },
+  borrowStatBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  borrowStatAmount: {
+    fontSize: 15,
+    fontWeight: '800',
+    marginBottom: 2,
+  },
+  borrowStatSub: {
+    fontSize: 11,
+    color: colors.textSecondary,
+  },
+  borrowMiniList: {
+    gap: 6,
+    marginTop: 4,
+  },
+  borrowMiniItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+    backgroundColor: colors.surfaceVariant,
+  },
+  borrowMiniLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+  },
+  borrowMiniBadge: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  borrowMiniName: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.textPrimary,
+    flex: 1,
+  },
+  borrowMiniAmount: {
+    fontSize: 12,
+    fontWeight: '700',
+    marginLeft: 8,
+  },
+  aiOverviewLoadingBox: {
+    paddingVertical: SPACING.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  aiOverviewLoadingText: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  aiOverviewContentBox: {
+    gap: 10,
+  },
+  aiOverviewParagraph: {
+    color: colors.textPrimary,
+    fontSize: 13,
+    lineHeight: 20,
+    fontWeight: '500',
+  },
+  aiOverviewMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  aiOverviewMetaText: {
+    color: colors.textMuted,
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  byokTag: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    borderWidth: 1,
+  },
+  byokTagText: {
+    color: colors.textMuted,
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  aiOverviewEmptyBox: {
+    gap: 12,
+  },
+  aiOverviewEmptyDesc: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  aiGenerateBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  aiGenerateBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  aiOverviewErrorBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 10,
+    padding: 8,
+    borderRadius: 6,
+    backgroundColor: colors.alertMuted,
+    borderWidth: 1,
+    borderColor: colors.alert,
+  },
+  aiOverviewErrorText: {
+    color: colors.alert,
+    fontSize: 11,
+    flex: 1,
+  },
+  aiOverviewGatedBox: {
+    paddingVertical: SPACING.md,
+    paddingHorizontal: SPACING.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  aiOverviewGatedIconBadge: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 2,
+  },
+  aiOverviewGatedTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  aiOverviewGatedSub: {
+    fontSize: 11,
+    fontWeight: '500',
+    textAlign: 'center',
+    lineHeight: 15,
+  },
+  aiSectionLabel: {
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  aiSectionBody: {
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '500',
   },
   manageIconBtn: {
     width: 28,

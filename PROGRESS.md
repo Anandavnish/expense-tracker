@@ -232,7 +232,7 @@ Foundational architecture build for a high-performance cross-platform personal f
     - *Move to Very Bottom*
   - Sequence order persists instantly locally via `AsyncStorage` and syncs with Supabase `display_order`.
 
-### 8. Redesigned Transaction Card & Deep-Dive Transaction Detail Screen
+### 9. Redesigned Transaction Card & Deep-Dive Transaction Detail Screen
 - [x] **Redesigned Modern Fintech Transaction Card (`TransactionRow.tsx`)**:
   - Replaced legacy text layout with modern obsidian/carbon card architecture (`COLORS.surface`, `14px` border radius, subtle obsidian borders).
   - Dynamic Category Avatar (`42x42px`, `12px` rounded capsule) with contextual category icons (`fast-food`, `airplane`, `home`, `cash`, etc.) and tinted frosted background colors.
@@ -266,7 +266,7 @@ Foundational architecture build for a high-performance cross-platform personal f
 
 ---
 
-### 6. Unified Manager Redesign: Money Sources & Spending Categories
+### 10. Unified Manager Redesign: Money Sources & Spending Categories
 - [x] **Eliminated Non-Working Horizontal Drag Handle (`=`)**:
   - Replaced the confusing non-functional drag handle (`reorder-two-outline`) with direct, tactile **Move Up (`↑` / `chevron-up`)** and **Move Down (`↓` / `chevron-down`)** buttons on every account row.
   - Tapping `↑` or `↓` instantly swaps account positions with immediate state updates in `financeStore` (`reorderAccounts`) and persists sequence order to `AsyncStorage`.
@@ -286,7 +286,7 @@ Foundational architecture build for a high-performance cross-platform personal f
 
 ---
 
-### 7. Dark/Light Theme System & Performance Optimization
+### 11. Dark/Light Theme System & Performance Optimization
 - [x] **Expanded Accent Palette (10 Options)**:
   - Expanded `ACCENT_PALETTE` in `settingsStore.ts` with 10 rich palettes: `Mint #00D09C`, `Emerald #10B981`, `Cyan #06B6D4`, `Sapphire #3B82F6`, `Violet #8B5CF6`, `Amethyst #A855F7`, `Rose #F43F5E`, `Orange #F97316`, `Gold #F59E0B`, and `Pink #EC4899`.
 - [x] **Complete Light Mode Support across DashboardScreen**:
@@ -305,7 +305,7 @@ Foundational architecture build for a high-performance cross-platform personal f
   - Expo lint passes with 0 errors and 0 warnings (`npx expo lint`).
   - Android Hermes bundle export builds cleanly (`npx expo export --platform android`).
 
-### 9. Render Error Fix & Distinct Categories by Transaction Type
+### 12. Render Error Fix & Distinct Categories by Transaction Type
 - [x] **Render Error Fix (`Property 'getStyles' doesn't exist`)**:
   - Resolved `ReferenceError: Property 'getStyles' doesn't exist` that crashed `TransactionsScreen.tsx` on render.
   - Converted `const getStyles = (colors) => StyleSheet.create(...)` into a hoisted `function getStyles(colors: ThemeColors) { return StyleSheet.create(...); }` across both `TransactionsScreen.tsx` and `DashboardScreen.tsx`, guaranteeing proper hoisting and initialization during module evaluation.
@@ -326,7 +326,7 @@ Foundational architecture build for a high-performance cross-platform personal f
   - Expo lint passes with 0 errors (`npx expo lint`).
   - Automated E2E verification test suite (`node test_e2e.mjs`) passes 100%.
 
-### 10. Single-Section Filter Modal & Quick Pill Direct Access
+### 13. Single-Section Filter Modal & Quick Pill Direct Access
 - [x] **Context-Sensitive Filter Modal**:
   - Replaced monolithic filter modal state (`isFilterModalVisible`) with section-targeted modal state (`filterModalSection: 'all' | 'date' | 'account' | 'type' | 'category' | null`).
   - Clicking any quick filter pill on `TransactionsScreen` now opens the popup displaying **only** the selected section:
@@ -349,7 +349,7 @@ Foundational architecture build for a high-performance cross-platform personal f
   - Automated E2E verification test suite (`node test_e2e.mjs`) passes 100%.
 
 
-### 11. Light Mode Integration for Account Details & Log Transaction Screens
+### 14. Light Mode Integration for Account Details & Log Transaction Screens
 - [x] **Complete Light Mode Support for Account Details (`AccountDetailScreen.tsx`)**:
   - Replaced all static `COLORS` tokens with dynamic `ThemeColors` from `../../theme/tokens`.
   - Converted static StyleSheet to theme-reactive hoisted `function getStyles(colors: ThemeColors)` hook with `useMemo(() => getStyles(colors), [colors])`.
@@ -368,7 +368,7 @@ Foundational architecture build for a high-performance cross-platform personal f
   - Expo lint passes with 0 errors and 0 warnings (`npx expo lint`).
   - Automated E2E verification test suite (`node test_e2e.mjs`) passes 100%.
 
-### 12. Theme System — Multi-Style Engine & Android Material You Support
+### 15. Theme System — Multi-Style Engine & Android Material You Support
 - [x] **Full Material Design 3 (MD3) Token Architecture (`tokens.ts`)**:
   - Replaced ad-hoc flat naming with formal MD3 roles: `background`, `onBackground`, `surface`, `onSurface`, `surfaceVariant`, `onSurfaceVariant`, `surfaceElevated`, `outline`, `outlineVariant`, `primary`, `onPrimary`, `primaryContainer`, `onPrimaryContainer`, `inverseSurface`, `inverseOnSurface`, `inversePrimary`, `shadow`, `scrim`.
   - Mapped directly onto React Native Paper's `MD3DarkTheme` and `MD3LightTheme` in `theme.ts`.
@@ -402,7 +402,7 @@ Foundational architecture build for a high-performance cross-platform personal f
   - TypeScript typecheck passed with 0 errors (`npx tsc --noEmit`).
   - ESLint passed with 0 errors and 0 warnings (`npx expo lint`).
 
-### 13. UI Polish & Theme Consistency Audit
+### 16. UI Polish & Theme Consistency Audit
 - [x] **Budget Screen Duplicate Plus Icon Fix (`BudgetsScreen.tsx`)**:
   - Resolved the duplicate `+` indicator on the "+ Set Budget" header action button. The text now renders cleanly as "Set Budget" alongside the `<Ionicons name={showForm ? 'close' : 'add'} />` icon.
 - [x] **Complete Hardcoded Hex Purge (`DashboardScreen.tsx`)**:
@@ -421,7 +421,7 @@ Foundational architecture build for a high-performance cross-platform personal f
   - Expo lint passes with 0 errors and 0 warnings (`npx expo lint`).
   - Automated E2E verification test suite (`node test_e2e.mjs`) passes 100%.
 
-### 14. Net Worth Budget Ceiling & Financial Discipline Rule
+### 17. Net Worth Budget Ceiling & Financial Discipline Rule
 - [x] **Net Worth Ceiling Enforcement (`BudgetsScreen.tsx`)**:
   - Implemented strict financial discipline rule: monthly budget limits cannot exceed total calculated Net Worth ($$\text{Net Worth} = \text{Cash \& Bank} + \text{Lent} - \text{Borrow} - \text{Credit Card Dues}$$).
   - Synchronously evaluates `calculateNetWorth(accounts, borrows, transactions)` to dynamically compute `totalNetWorth` and `isExceedingNetWorth = !isNaN(parsedLimit) && parsedLimit > totalNetWorth`.
@@ -441,7 +441,7 @@ Foundational architecture build for a high-performance cross-platform personal f
   - Expo lint passes with 0 errors and 0 warnings (`npx expo lint`).
   - Automated E2E verification test suite (`node test_e2e.mjs`) passes 100%.
 
-### 15. Ledger Balance Calibration & Offline Sync System
+### 18. Ledger Balance Calibration & Offline Sync System
 - [x] **Balance Calibration Flow (`financeStore.ts`, `AccountDetailScreen.tsx`, `DashboardScreen.tsx`)**:
   - Replaced ambiguous balance overrides with a strict dual-choice calibration protocol:
     1. **"Calibrate & Log Transaction" (Ledger-Preserving)**: Computes the exact signed difference between old and new balance ($$\Delta = \text{Balance}_{\text{new}} - \text{Balance}_{\text{old}}$$). Automatically posts an Adjustment transaction (`income` if positive, `expense` if negative) categorized as `'Adjustment'` (`"Balance calibration (+/-₹X)"`), fully preserving double-entry accounting integrity and the database balance trigger.
@@ -458,7 +458,7 @@ Foundational architecture build for a high-performance cross-platform personal f
   - Expo lint passes with 0 errors and 0 warnings (`npx expo lint`).
   - Automated E2E verification test suite (`node test_e2e.mjs`) passes 100%.
 
-### 16. Fintech Statement Export & Scoped Storage PDF Sharing
+### 19. Fintech Statement Export & Scoped Storage PDF Sharing
 - [x] **Cross-Platform Scoped Storage PDF Export (`statementExport.ts`)**:
   - Fixed Android & Expo Go scoped storage permission barrier (`"Not allowed to read file under given URL"`) when sharing generated PDF files.
   - Integrated `expo-file-system/legacy` to generate the PDF with base64 encoding and safely write it into the application's scoped sandbox directory (`FileSystem.cacheDirectory + 'Statement_YYYY-MM-DD.pdf'`) before passing the URI to `expo-sharing`.
@@ -470,7 +470,7 @@ Foundational architecture build for a high-performance cross-platform personal f
   - Full TypeScript compilation passes with 0 errors (`npx tsc --noEmit`).
   - Expo lint passes with 0 errors and 0 warnings (`npx expo lint`).
 
-### 17. Cross-Platform Keyboard Avoidance & Fluid Auto-Scroll Architecture
+### 20. Cross-Platform Keyboard Avoidance & Fluid Auto-Scroll Architecture
 - [x] **Root Cause Diagnosis**:
   - `behavior={Platform.OS === 'android' ? undefined : 'padding'}` disabled `KeyboardAvoidingView` on Android.
   - Android translucent status bar / edge-to-edge modals prevent system `adjustResize` from working properly on nested scrollviews and modals.
@@ -486,7 +486,8 @@ Foundational architecture build for a high-performance cross-platform personal f
   - `AccountDetailScreen.tsx`: Dynamic keyboard offset calculation on modal sheets (`Math.min(keyboardHeight * 0.75, 200)`) + `KeyboardAwareScrollView` in Edit Account and Pay Card Bill modals.
   - `TransactionDetailScreen.tsx`: Replaced outer `ScrollView` with `KeyboardAwareScrollView`, replaced nested `KeyboardAvoidingView` with a responsive layout, and added auto-scrolling on Amount, Date, and Note fields.
   - `LoginScreen.tsx` & `SignUpScreen.tsx`: Replaced non-responsive `KeyboardAvoidingView` with `KeyboardAwareScrollView` and auto-scrolling focus handlers.
-### 18. Borrows & Lending Architecture Redesign & Money Source Integration
+
+### 21. Borrows & Lending Architecture Redesign & Money Source Integration
 - [x] **Store & Database Ledger Synchronization (`financeStore.ts`)**:
   - Implemented `addBorrowWithTransactionOptimistic`:
     - Synchronously links new Lent/Borrowed entries to money source accounts (`accounts` table).
@@ -530,7 +531,7 @@ Foundational architecture build for a high-performance cross-platform personal f
   - Full TypeScript compilation passes with 0 errors (`npx tsc --noEmit`).
   - Expo lint passes with 0 errors and 0 warnings (`npm run lint`).
 
-### 21. Budget Card Action Button & Title Wrapping Fix
+### 22. Budget Card Action Button & Title Wrapping Fix
 - [x] **Card Header Boundary & Delete Button Containment (`BudgetsScreen.tsx`)**:
   - Resolved issue where `cardDeletePill` (trash button) overflowed outside the right border of budget cards on compact screens or with long category names.
   - Constrained `cardHeaderTitleRow` and `catTitleLeft` with `flex: 1`, `marginRight: SPACING.xs`, and `minWidth: 0`.
@@ -541,14 +542,210 @@ Foundational architecture build for a high-performance cross-platform personal f
   - Full TypeScript compilation passes with 0 errors (`npx tsc --noEmit`).
   - Expo lint passes with 0 errors and 0 warnings (`npx expo lint`).
 
+### 23. OCR Screenshot Logging & AI Spending Overview (BYOK Gemini)
+- [x] **Part 1 — BYOK Gemini Key Setup & Security Architecture**:
+  - Replaced the placeholder row in `SettingsScreen.tsx` with an interactive Gemini AI Key (BYOK) row featuring dynamic status badges (`ACTIVE` in emerald green or `SET UP` in primary).
+  - Added dedicated full-screen BYOK Setup Modal:
+    - Step-by-step instructions on obtaining a free API key from `aistudio.google.com/apikey`.
+    - Security note explaining keys are stored securely in database profiles and never transmitted in client HTTP bodies.
+    - Password-masked API key input with toggle reveal button and 1-tap clipboard paste button (`expo-clipboard`).
+    - Save API Key action with validation and instant profile persistence.
+    - Fixed `new row violates row-level security policy for table "profiles"`: transitioned `saveGeminiApiKey` from `.upsert()` to `.update()`, directly matching the existing `FOR UPDATE USING (auth.uid() = id)` PostgreSQL RLS policy on `public.profiles`. Created migration `20260928000001_profiles_insert_policy.sql` adding `FOR INSERT WITH CHECK (auth.uid() = id)` for defense-in-depth.
+    - Keyboard Avoidance & Auto-Scroll: Wrapped the modal backdrop in `KeyboardAvoidingView` with dynamic `paddingBottom` via `useKeyboard()`, replaced the inner `ScrollView` with `KeyboardAwareScrollView` (`extraScrollHeight={80}`), and added `onFocus` auto-scroll on the API key `TextInput` to ensure the input, paste button, and "Save API Key" button always remain fully visible above the software keyboard.
+    - Remove Key action to deactivate AI features and clear database column.
+  - Supabase Edge Function `ask-gemini` (`supabase/functions/ask-gemini/index.ts`):
+    - Authenticates the calling user via their Supabase JWT (`Authorization: Bearer <token>`).
+    - Fetches `gemini_api_key` strictly from the `profiles` table using the authenticated user's ID (`auth.uid()`).
+    - Never accepts or trusts client-supplied keys in the request body.
+    - Routes requests to Google Generative Language API using Gemini 2.0 Flash (`gemini-2.0-flash`), with automatic graceful fallback to Gemini 1.5 Flash (`gemini-1.5-flash`).
+    - Standardized error codes: returns mapped error responses for `UNAUTHORIZED` (401), `MISSING_KEY` (400), `INVALID_KEY` (400), `RATE_LIMIT` (429), and `GEMINI_ERROR` (500).
+- [x] **Part 2 — Screenshot OCR Logging & Android Share-Sheet Receiver**:
+  - Native Android Share Receiver (`expo-share-intent` v8.0.1):
+    - Configured intent filters in `app.json` for `image/*` and `text/*` with Android package `com.expensetracker.app`.
+    - Executed Continuous Native Generation (CNG): `npx expo prebuild --platform android --no-install`.
+    - Hooked `useShareIntent` in `RootNavigator.tsx` to intercept screenshots shared from Google Pay, PhonePe, Paytm, or Gallery.
+  - On-Device OCR Engine (`expo-mlkit-ocr`):
+    - `extractTextFromImage(uri)` performs fast on-device text recognition.
+    - Forwards extracted text to `ask-gemini` with `action: 'parse_receipt'`.
+  - Structured Receipt Parsing:
+    - Gemini parses raw OCR text and outputs strict JSON: `amount` (number), `merchant_or_person` (string), `suggested_category` (string matching existing categories), `suggested_type` (`expense`, `income`, `borrow_given`, `borrow_taken`), and `date_if_present` (`YYYY-MM-DD`).
+  - Add Transaction Screen Integration (`AddTransactionScreen.tsx`):
+    - Added top-right header `Scan` button and gallery picker (`ImagePicker.launchImageLibraryAsync`).
+    - Pre-fills form fields (amount, merchant note, person name, category, date) with `source: 'screenshot'` for user review before saving.
+    - Prominent status banner (`AI PARSED`) and contextual toast feedback (`scanToast`).
+    - Graceful error fallback: if OCR fails or text cannot be parsed, presents a non-intrusive toast (`"Couldn't read that screenshot — enter it manually"`) allowing manual entry.
+    - If no Gemini key is configured, displays a prompt alerting the user to set up their key in Settings.
+- [x] **Part 3 — Dashboard AI Spending Overview**:
+  - Dedicated `AI Spending Overview` card integrated into `DashboardScreen.tsx` directly below the Monthly Budget card.
+  - Compact Aggregation Payload: Dashboard aggregates active month metrics (`spent`, `budget_limit`, `days_left_in_month`, `burn_rate`, top 3 spending categories with totals) and sends the aggregated snapshot to `ask-gemini` (`action: 'spending_overview'`). Raw transaction feeds are never transmitted.
+  - Executive Financial Synthesis: Gemini returns a concise 2–4 sentence summary highlighting burn rate, largest category outlays, and budget pacing.
+  - Zero-Quota Caching (`AsyncStorage`):
+    - Stores the synthesized overview per month (`@finance_ai_overview_${month}`).
+    - Reopening the app reads from local cache with a `CACHED • [MONTH]` badge, preventing free-tier quota exhaustion.
+    - Includes a manual refresh icon button allowing the user to refresh the summary on demand.
+- [x] **Verification**:
+  - TypeScript compilation: `npx tsc --noEmit` passes with 0 errors.
+  - Expo linter: `npm run lint` passes with 0 errors and 0 warnings.
+  - Automated E2E verification test suite: `npm run test:e2e` passes with 6/6 checks.
+  - Visual verification: Rendered interactive Generative UI simulator artifact `ai_features_showcase.html` and generated high-fidelity UI mockup screenshots for BYOK Setup Modal, OCR Pre-filled Add Transaction, and Dashboard AI Overview across design styles in Dark and Light modes.
+
+- [x] **Past Month Lock & Month Transition Engine**:
+  - **Dynamic Month Capsule Lock Indicator**:
+    - Appears *strictly* on past months (`month < currentMonth`); never shown on current or future months.
+    - Shows `🔒` (locked, view-only) or `🔓` (unlocked) with live remaining countdown (e.g., `🔓 29m`).
+    - Tapping when unlocked allows user to manually re-lock immediately.
+  - **4-Digit Numeric Verification (`MonthUnlockModal.tsx`)**:
+    - Tapping locked icon opens clean verification card displaying a randomly generated 4-digit code (e.g. `4829`).
+    - Dedicated numeric keypad (`number-pad`), 4 digit-boxes, and tactile unlock button.
+    - Includes a refresh button to generate a new code if desired, with haptic feedback.
+    - Temporarily unlocks the month for **30 minutes** with auto-relock timer.
+  - **In-Progress Edit Protection**:
+    - Active edits inside transaction edit flows are guarded so users are never interrupted mid-edit if the timer expires.
+  - **Strict View-Only Guarding in Locked Months**:
+    - Adding new transactions: FAB (+) prompts to unlock before adding; `AddTransactionScreen` date picker flags locked dates and submit is blocked.
+    - Transaction detail: Edit and Delete buttons are replaced with a locked banner and a 1-tap "Unlock <Month>" button.
+    - Budgets: Setting or editing budget limits in a locked month is disabled with a `LOCKED` badge.
+  - **Historical Closing Snapshots & Budget Rollover**:
+    - Past months calculate closing account balances and Net Worth as of the last day of that month (`YYYY-MM-<lastDay> 23:59:59`).
+    - Budget limits (overall and category limits) auto-carry forward fresh into new months with spent amount starting at ₹0, preserving past months' frozen final snapshots.
+    - Unsettled borrows/lends persist across months until resolved.
+
+- [x] **Native Module Crash Fix (`Cannot find native module 'ExpoMlkitOcr'`)**:
+  - **Root Cause**: `expo-mlkit-ocr` required unbundled native binaries (`android/` Java code) not supported by Expo Go. Its entry point invoked synchronous `requireNativeModule('ExpoMlkitOcr')` during module import, causing a fatal RedScreen crash on launch.
+  - **Resolution**:
+    - Uninstalled `expo-mlkit-ocr` and purged it from `app.json` plugins.
+    - Upgraded receipt/screenshot scanning to **Gemini 2.0 Flash Multimodal Vision** via `inlineData` (base64 image encoded directly via Expo-bundled `expo-file-system/legacy` or `expo-image-picker`).
+    - Added direct client fallback in [geminiService.ts](file:///c:/Users/anand/Coding%20stuff/Expense%20Tracker/app/src/services/geminiService.ts) using the user's BYOK key from `settingsStore` if the Supabase Edge Function is un-deployed or offline.
+    - Updated [RootNavigator.tsx](file:///c:/Users/anand/Coding%20stuff/Expense%20Tracker/app/src/navigation/RootNavigator.tsx) and [AddTransactionScreen.tsx](file:///c:/Users/anand/Coding%20stuff/Expense%20Tracker/app/src/screens/main/AddTransactionScreen.tsx) to eliminate intermediate OCR parsing and parse receipts directly via multimodal vision.
+    - [x] **Gemini 404 Resolution, Multi-Model Cascade & Screenshot Scanning Fix**:
+  - **Root Cause of 404 & "Couldn't read that screenshot"**:
+    - Direct calls to Google Gemini API hardcoded `gemini-2.0-flash` on `v1beta`. Depending on the user's Google AI Studio project creation date, region, or API tier, `gemini-2.0-flash` returned `404 Not Found`.
+    - When `callGeminiDirect` received 404, it fell back to generic error code formatting (`Gemini API returned error code 404`) instead of inspecting Google's error payload.
+    - In `AddTransactionScreen.tsx`, screenshot scanning received `error: 'GENERIC_ERROR'` from this 404, triggering the fallback toast: `"Couldn't read that screenshot — enter it manually"`.
+  - **Resolution**:
+    - **Dynamic Model Discovery (`resolveWorkingGeminiModel`)**: Queries Google's official `GET /v1beta/models` and `GET /v1/models` ListModels endpoints using the user's API key to detect exact available models supporting `generateContent` (prioritizing fast flash models).
+    - **Resilient Multi-Model Cascade**: Cascades through `['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-flash-latest', 'gemini-2.0-flash-001', 'gemini-2.0-flash-exp', 'gemini-2.5-pro', 'gemini-1.5-pro']` across both `v1beta` and `v1` endpoints until a 200 OK is received, caching the verified working model in memory for subsequent zero-latency requests.
+    - **Live Key Verification in Settings (`validateGeminiApiKey`)**: When users enter their API key in Settings, the modal verifies it live against Google Gemini before saving, displaying an immediate `"Verified! Connected to Gemini (Model)"` confirmation or exact Google error message (e.g. invalid key).
+    - **Screenshot Vision Enhancement**: Passes image mimeType to `parseReceiptWithGemini` and displays granular diagnostic toasts (`RATE_LIMIT`, Google error message, or fallback manual entry only when receipt contains no readable financial values).
+- [x] **AI Spending Overview Concrete Trigger Gate & Tuned Prompt**:
+  - **Deterministic Trigger Gate**:
+    - Evaluated before calling Gemini API (both client-side in `geminiService.ts` and in `DashboardScreen.tsx`, as well as defense-in-depth in `supabase/functions/ask-gemini/index.ts`).
+    - Requires $\ge 5$ transactions logged AND $\ge 2$ distinct categories in the selected month.
+    - If criteria are not met, displays a calm, clearly-worded empty state: `"Log a few more transactions this month to unlock an overview"` with current count progress (e.g. `2/5 transactions • 1/2 categories`) — never a weak generic paragraph or error banner.
+  - **Historical Closed-Period Framing**:
+    - When viewing a locked or past month, the card header dynamically reflects `"Historical summary for [Month]"`.
+    - Retrospective closed-period framing is passed into the prompt, instructing Gemini to use past tense and frame the synthesis as a finalized retrospective summary rather than in-progress pace advice.
+  - **Strict Budget Variance Omission**:
+    - When no budget is set (`budgetLimit <= 0`), budget-related metrics (`budgetLimit`, `budgetSpent`, `budgetRemaining`, `budgetPercentUsed`) are completely stripped from the JSON payload.
+    - System prompt strictly instructs Gemini to omit budget commentary when no budget is present, preventing hallucinations such as "you are on track with your budget" when no budget was set.
+  - **Tuned Gemini System Prompt**:
+    - Enforces observer role (not financial advisor); forbids prescribing financial products, investments, loans, or insurance.
+    - Output strictly follows a 4-part structure under 120 words: `SNAPSHOT`, `PATTERN`, `FLAG` (optional), `NEXT STEP`.
+    - Section parsing in `DashboardScreen.tsx` cleanly bolds labels and structures the text into visually appealing paragraphs.
+  - **Word Capping & Retry Enforcement**:
+    - Automatically retries once if output is wildly over length ($> 135$ words) or missing sections.
+    - Programmatically truncates output at sentence boundaries to strictly enforce the $\le 120$-word limit.
+  - **Verification**:
+    - Added and ran automated test suite `app/test_ai_overview_gating.mjs` verifying gating, budget omission, and sentence-boundary word capping.
+    - Verified `npx tsc --noEmit` (0 errors), `npm run lint` (0 errors), and `npm run test:e2e` (all 6 E2E steps passed).
+
 ---
 
-## Next Steps
-- Implement Screenshot OCR & share-intent parsing (requires dev-client native builds).
-- Implement Gemini AI overview & BYOK API key settings modal.
+- [x] **Native Android Standalone APK Build & Self-Hosted In-App Update Engine**:
+  - **Standalone Android APK Generation**:
+    - Created `eas.json` configuring `preview` and `production` build profiles with `"buildType": "apk"`.
+    - Generated Android Keystore in the cloud under `Build Credentials oZAo_joWqw (default)`.
+    - Resolved Linux worker dependency sync issue with explicit `@emnapi/core` and `@emnapi/runtime` locking and `.npmrc` (`legacy-peer-deps=true`).
+    - Successfully produced standalone multi-architecture `.apk` (v1.0.0, Build 1) on EAS Build ID `c8bbda89-2ef0-46dd-aa2a-0443af4bece7`.
+    - Direct download link: `https://expo.dev/artifacts/eas/-Rkp7YdTypZDK3dl1jZ5FKS7f8x3wJDDwExt1R9ViaY.apk`
+    - Stored local archive at `app/releases/ExpenseTracker-v1.0.0.apk` (89.5 MB).
+  - **Android System Share Sheet Integration (Images & Text)**:
+    - Wired `expo-share-intent` in `RootNavigator.tsx` to handle incoming intents from external apps without requiring Expo Go.
+    - Supports receiving transaction receipt/payment screenshots (routes to Multimodal Gemini Vision parsing in `AddTransactionScreen`).
+    - Supports receiving banking SMS and UPI payment text messages (e.g. from Google Pay, PhonePe, Paytm, Bank SMS alerts) via `processSharedText` with regex amount extraction.
+  - **Self-Hosted In-App Version & Update Engine**:
+    - **Database Schema (`app_versions` table)**: Created migration `20260928000002_app_versions.sql` with public read access. Tracks `version`, `version_code`, `download_url`, `release_notes`, `is_critical`, and `min_version_code`.
+    - **Storage Bucket (`app-releases`)**: Created migration `20260928000003_storage_app_releases.sql` configuring a 100 MB public storage bucket for hosting downloadable update APKs.
+    - **Version Service (`versionService.ts`)**: Embedded `CURRENT_APP_VERSION = '1.0.0'` and `CURRENT_VERSION_CODE = 1`. Implemented `checkForAppUpdate()` querying the latest release record from Supabase.
+    - **Interactive Update UI (`UpdatePromptModal.tsx`)**:
+      - Automatic launch check: alerts users when a newer build is available.
+      - Displays version name, build number, release notes, and a direct "Download & Update" button invoking the Android browser/download manager.
+      - Enforces mandatory un-dismissible modal if `is_critical` is true or `CURRENT_VERSION_CODE < min_version_code`.
+    - **Settings Screen Integration (`SettingsScreen.tsx`)**: Added manual "Check for Updates" button showing current installed version (`v1.0.0 (Build 1)`) with instant alert dialogs.
+    - **Test Coverage**: Created and passed unit test suite `test_version_service.mjs` verifying up-to-date checks, optional updates, and critical/forced updates.
 
+---
 
+- [x] **v1.0.1: Smart SMS Parsing, Dynamic Category Selection & Strict Guest Sandbox**:
+  - **Strict Guest Mode Sandbox & Session Data Isolation**:
+    - Created scoped AsyncStorage keys per user ID (`@finance_store_cache_<userId>_v3`, `@finance_categories_<userId>`, `@finance_account_order_<userId>`).
+    - Isolated Guest mode exclusively into `@finance_store_cache_guest_v3`.
+    - Added `resetForSignOut()` in `financeStore.ts` that immediately wipes in-memory accounts, transactions, borrows, budgets, active subscriptions, and active user references upon logout or Guest switch, guaranteeing zero data leakage from previously logged-in Google accounts.
+  - **Instant Auto-Open Share Intent Navigation (`RootNavigator.tsx`)**:
+    - Upgraded intent listener to immediately mount and navigate to `AddTransactionScreen` without requiring manual taps on the `+` FAB.
+    - Added `pendingNavRef` and `onReady` synchronization on `<NavigationContainer>` so intents received during initial cold starts navigate instantly as soon as navigation mounts.
+  - **Smart Offline Indian Banking & UPI SMS Parser (`smsParser.ts`)**:
+    - Built-in regex engine supporting Indian bank SMS alerts (SBI, HDFC, ICICI, Axis, Kotak, PNB, etc.) and UPI apps (Google Pay, PhonePe, Paytm).
+    - Extracts amount, debit/credit type, date, merchant (e.g. `Gopal Sweet`, `Zomato`, `Blinkit`, `Swiggy`, `Uber`, `Amazon`), account hint (`X0186`), and automatically associates with the user's matched bank account.
+    - Works 100% offline with zero external API calls or latency.
+  - **Intelligent Category Auto-Matching & Auto-Addition (`normalizeAndMatchCategory`)**:
+    - Normalizes detected payee/merchant names to relevant categories (e.g. `Gopal Sweet` &rarr; `Food`, `Zomato` &rarr; `Food`, `Blinkit` &rarr; `Food`/`Groceries`, `Uber` &rarr; `Travel`).
+    - If a valid category does not already exist in the user's category list, it is dynamically registered via `addCategory()` and immediately selected in the UI.
+  - **Standalone Android APK v1.0.1 (Build 2)**:
+    - EAS Build ID: `fbdf94e6-8a33-4e57-95bf-38a7b996db5e`
+    - APK Download Link: `https://expo.dev/artifacts/eas/Ikz2tOAsDafQrFOmQVyb5Fax1IFGEazXwb5qOsuFYl0.apk`
+    - Verified all 4 SMS/Isolation tests, TypeScript check (`0 errors`), and ESLint (`0 warnings, 0 errors`).
 
+---
 
+- [x] **Local-First Bank & Issuer Logos with Initials Fallback**:
+  - **Asset Pipeline (`app/assets/logos/`)**:
+    - Sourced 12 official square symbol/mark brand assets (~256x256 transparent PNGs) for existing bank & credit card issuer presets:
+      - Banks: `sbi.png`, `ippb.png` (India Post Payments Bank), `hdfc.png`, `canara.png`, `pnb.png`, `bob.png` (Baroda Sun).
+      - Cards: `sbi_card.png`, `icici.png`, `axis.png`, `kotak.png`, `slice.png`, `onecard.png`.
+    - No live logo APIs or full wordmarks; all marks isolated, centered, and scaled cleanly to ~240px inside 256x256 canvases.
+    - Created `LOGOS.md` with complete source URLs and attribution from official brand websites and Wikimedia Commons.
+  - **Static Registry (`logoRegistry.ts`)**:
+    - Created `app/src/constants/logoRegistry.ts` exporting `BANK_LOGOS` with explicit static `require(...)` calls compatible with the Metro bundler.
+    - Normalization helper `getBankLogo(presetId)` handling case insensitivity, hyphens, and whitespace variations.
+  - **New Design Token (`logoTileBackground`)**:
+    - Added `logoTileBackground` to `ThemeColors`, `MD3BaseTokens`, and `buildThemeTokens()` in `app/src/theme/tokens.ts`.
+    - Neutral light tone (`#FFFFFF`) designed to ensure transparent dark bank marks render with crisp contrast in both dark and light modes.
+  - **Reusable Component (`<BankLogo />`)**:
+    - Created `app/src/components/BankLogo.tsx` accepting `size`, `presetId`, `name`, `brandColor`, and optional `account`.
+    - Renders official brand mark inside a rounded tile (`borderRadius: size * 0.28`) with proportional 4-6px padding (`size * 0.12`) over `logoTileBackground`.
+    - Automatic fallback for custom accounts or unmapped presets to a bold initials avatar (1-2 letters) tinted with the brand/custom color (`brandColor + '1E'`).
+    - Handled `onError` to guarantee an empty or broken image is never rendered.
+  - **Universal Screen Integration**:
+    - Eliminated all duplicate per-screen icon logic (deleted `getAccountIconProps`).
+    - **Dashboard Money Sources**: Bank & cash accounts and credit cards render `<BankLogo />`.
+    - **Account Detail Screen**: Hero identity card, Edit modal bank preset chips, and Pay Credit Card Bill source list all render `<BankLogo />`.
+    - **Add Transaction Source Grid**: Deduction source selector renders `<BankLogo />`.
+    - **Transaction Row Source Pill**: Embedded account badges inside `<TransactionRow />` render `<BankLogo />` alongside the institution name.
+    - **Both Manage Modals**:
+      - Manage & Reorder list view (`YouTubeStyleDraggableList`) uses `<BankLogo />`.
+      - Add / Edit Money Source modal (both Bank Preset Grid and Card Issuer Grid) uses `<BankLogo />`.
+  - **Verification**:
+    - `npx tsc --noEmit`: 0 errors.
+    - `npm run lint`: 0 errors, 0 warnings.
 
+---
+
+## Architecture Summary
+All features and native capabilities are fully implemented, verified, and integrated:
+- Core Supabase backend with auto-balancing triggers, RLS, and Realtime sync.
+- 7-part Dashboard with Net Worth hero, Indian bank presets, and Category Manager.
+- Local-first bank & issuer logo system with static Metro registry and initials fallback.
+- YouTube-style drag-and-drop reordering with haptic physics.
+- Financial discipline rules: Net Worth ceiling and balance calibration audit logging.
+- Past month lock system with 4-digit security code and 30-minute auto-relock.
+- Historical closing balances snapshot & fresh budget limit rollover.
+- Fintech statement PDF export & CSV custom export with scoped storage sharing.
+- Cross-platform keyboard avoidance with fluid auto-scroll.
+- Complete 4-style MD3 dynamic theme system with Android 12+ Material You support.
+- Multimodal Gemini Flash receipt parser & Android share-sheet receiver with zero native dependencies.
+- On-demand AI Spending Overview with deterministic trigger gating ($\ge 5$ txns, $\ge 2$ categories), historical closed-period framing, budget omission, tuned prompt, and $\le 120$-word cap.
+- Dynamic Gemini model discovery and multi-generation fallback cascade.
+- Standalone Android APK build (v1.0.1, Build 2) with native share sheet receiving.
+- Self-hosted in-app update prompt system backed by Supabase `app_versions` and `app-releases` bucket.
 

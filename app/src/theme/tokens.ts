@@ -76,6 +76,7 @@ export interface ThemeColors {
   textSecondary: string;
   textMuted: string;
   textInverse: string;
+  logoTileBackground: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -142,6 +143,7 @@ export interface MD3BaseTokens {
   shadow?: string;
   scrim?: string;
   textMuted?: string;
+  logoTileBackground?: string;
 }
 
 export function buildThemeTokens(
@@ -199,6 +201,7 @@ export function buildThemeTokens(
     textSecondary: base.onSurfaceVariant,
     textMuted: mutedText,
     textInverse: base.onPrimary,
+    logoTileBackground: base.logoTileBackground || '#FFFFFF',
   };
 }
 

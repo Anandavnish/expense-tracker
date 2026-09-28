@@ -18,6 +18,9 @@ import { useSettingsStore } from '../../store/settingsStore';
 import { SPACING, TYPOGRAPHY, ThemeColors } from '../../theme/tokens';
 import { TactileButton } from '../../components/TactileButton';
 import { TransactionRow } from '../../components/TransactionRow';
+import { KeyboardAwareScrollView } from '../../components/KeyboardAwareScrollView';
+import { BankLogo } from '../../components/BankLogo';
+import { useKeyboard } from '../../hooks/useKeyboard';
 import { AccountType, BankPreset } from '../../types/database';
 
 interface AccountDetailScreenProps {
@@ -48,6 +51,7 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
   const { accent, colors } = useSettingsStore();
   const styles = useMemo(() => getStyles(colors), [colors]);
   const accountId = route?.params?.accountId;
+  const { keyboardHeight, isKeyboardVisible } = useKeyboard();
 
   const {
     accounts,
@@ -218,7 +222,6 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
   }
 
   const isCreditCard = account.type === 'credit_card';
-  const isCash = account.type === 'cash';
 
   // Credit card specific numbers
   const limit = Number(account.credit_limit || 0);
@@ -274,19 +277,7 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
         <View style={styles.heroCard}>
           <View style={styles.heroTopRow}>
             <View style={styles.accountIdentity}>
-              <View style={[styles.accountIconBadge, { backgroundColor: colors.surfaceLight }]}>
-                <Ionicons
-                  name={
-                    isCreditCard
-                      ? 'card-outline'
-                      : isCash
-                      ? 'cash-outline'
-                      : 'business-outline'
-                  }
-                  size={24}
-                  color={accent.hex}
-                />
-              </View>
+              <BankLogo account={account} name={displayTitle} size={44} />
               <View>
                 <Text style={styles.accountNameText}>{displayTitle}</Text>
                 {displaySubtitle ? (
@@ -440,7 +431,7 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
                 !isCreditCard && { color: accent.hex },
               ]}
             >
-              {isCreditCard ? '+ Expense' : 'Add Transaction'}
+              {isCreditCard ? 'Expense' : 'Add Transaction'}
             </Text>
           </TouchableOpacity>
 
@@ -554,7 +545,10 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
       >
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.modalOverlay}
+          style={[
+            styles.modalOverlay,
+            { paddingBottom: isKeyboardVisible ? Math.min(keyboardHeight * 0.75, 200) : 0 },
+          ]}
         >
           <View style={styles.modalContainer}>
             <View style={styles.modalHeaderRow}>
@@ -567,7 +561,7 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
               </TouchableOpacity>
             </View>
 
-            <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 420 }}>
+            <KeyboardAwareScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 420 }} extraScrollHeight={40}>
               <Text style={styles.inputLabel}>SOURCE NAME</Text>
               <TextInput
                 value={editName}
@@ -621,6 +615,12 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
                           },
                         ]}
                       >
+                        <BankLogo
+                          presetId={p.code}
+                          name={p.name}
+                          size={18}
+                          style={{ marginRight: 6 }}
+                        />
                         <Text
                           style={[
                             styles.presetChipText,
@@ -674,7 +674,7 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
                   <Text style={styles.deleteAccountBtnText}>Delete This Account</Text>
                 </TouchableOpacity>
               </View>
-            </ScrollView>
+            </KeyboardAwareScrollView>
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -689,7 +689,10 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
       >
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.modalOverlay}
+          style={[
+            styles.modalOverlay,
+            { paddingBottom: isKeyboardVisible ? Math.min(keyboardHeight * 0.75, 200) : 0 },
+          ]}
         >
           <View style={styles.modalContainer}>
             <View style={styles.modalHeaderRow}>
@@ -705,7 +708,7 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
               </TouchableOpacity>
             </View>
 
-            <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 420 }}>
+            <KeyboardAwareScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 420 }} extraScrollHeight={40}>
               <View style={styles.billDueSummaryBox}>
                 <Text style={styles.billDueLabel}>TOTAL OUTSTANDING DUE</Text>
                 <Text style={[styles.billDueAmount, TYPOGRAPHY.tabularText]}>
@@ -759,10 +762,10 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
                       ]}
                     >
                       <View style={styles.paySourceItemLeft}>
-                        <Ionicons
-                          name={acc.type === 'cash' ? 'cash-outline' : 'business-outline'}
-                          size={16}
-                          color={isSelected ? accent.hex : colors.textSecondary}
+                        <BankLogo
+                          account={acc}
+                          size={22}
+                          style={{ marginRight: 8 }}
                         />
                         <Text
                           style={[
@@ -800,7 +803,7 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
                   <Text style={styles.modalSecondaryBtnText}>Cancel</Text>
                 </TouchableOpacity>
               </View>
-            </ScrollView>
+            </KeyboardAwareScrollView>
           </View>
         </KeyboardAvoidingView>
       </Modal>
