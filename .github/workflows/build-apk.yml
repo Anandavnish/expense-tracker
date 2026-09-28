@@ -1,0 +1,97 @@
+name: Build Android APK & Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_notes:
+        description: 'Release notes or summary of changes'
+        required: false
+        default: 'Performance improvements and bug fixes.'
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Android Release APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: ⬇️ Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 🟢 Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: './app/package-lock.json'
+
+      - name: ☕ Setup Java 17 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: 📱 Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: 🐘 Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: 📦 Install Node Dependencies
+        working-directory: ./app
+        run: npm ci
+
+      - name: ⚙️ Configure Environment Variables (.env)
+        working-directory: ./app
+        run: |
+          cat << 'EOF' > .env
+          EXPO_PUBLIC_SUPABASE_URL=https://yqopwzkvxdxmomvvlpor.supabase.co
+          EXPO_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlxb3B3emt2eGR4bW9tdnZscG9yIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAxODkxMjcsImV4cCI6MjEwNTc2NTEyN30.2IXYJpudYU1mHsdetoC929OrrRD4Lqqp5ARTSkIcuEk
+          EOF
+
+      - name: 🔨 Expo Prebuild (Generate Native Android)
+        working-directory: ./app
+        run: npx expo prebuild --platform android --clean
+
+      - name: 🛠️ Build Android Standalone APK
+        working-directory: ./app/android
+        run: |
+          chmod +x ./gradlew
+          ./gradlew assembleRelease --no-daemon
+
+      - name: 📦 Package & Prepare Release Artifact
+        id: prep
+        run: |
+          VERSION=$(node -p "require('./app/app.json').expo.version")
+          BUILD_CODE=$(node -p "require('./app/app.json').expo.android.versionCode")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "build_code=$BUILD_CODE" >> $GITHUB_OUTPUT
+          
+          mkdir -p releases
+          APK_SOURCE=$(find app/android/app/build/outputs/apk/release/ -name "*.apk" | head -n 1)
+          cp "$APK_SOURCE" "releases/ExpenseTracker-v${VERSION}.apk"
+          echo "apk_path=releases/ExpenseTracker-v${VERSION}.apk" >> $GITHUB_OUTPUT
+          ls -lh "releases/ExpenseTracker-v${VERSION}.apk"
+
+      - name: 🚀 Publish GitHub Release with APK
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.prep.outputs.version }}
+          name: Expense Tracker v${{ steps.prep.outputs.version }} (Build ${{ steps.prep.outputs.build_code }})
+          body: |
+            ### 🚀 Expense Tracker v${{ steps.prep.outputs.version }} (Build ${{ steps.prep.outputs.build_code }})
+            
+            ${{ github.event.inputs.release_notes || 'Automated high-speed build via GitHub Actions.' }}
+
+            #### 📦 Download
+            - **[ExpenseTracker-v${{ steps.prep.outputs.version }}.apk](https://github.com/${{ github.repository }}/releases/download/v${{ steps.prep.outputs.version }}/ExpenseTracker-v${{ steps.prep.outputs.version }}.apk)**
+
+            <!-- version_code: ${{ steps.prep.outputs.build_code }} -->
+          files: ${{ steps.prep.outputs.apk_path }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
