@@ -5,10 +5,13 @@ import Constants from 'expo-constants';
 import { supabase } from './supabase';
 
 export const CURRENT_APP_VERSION =
-  Constants.expoConfig?.version || '1.0.0';
+  Constants.expoConfig?.version ||
+  (Constants as any).nativeAppVersion ||
+  '1.0.0';
 
 export const CURRENT_VERSION_CODE =
-  Constants.expoConfig?.android?.versionCode || 1;
+  Constants.expoConfig?.android?.versionCode ||
+  ((Constants as any).nativeBuildVersion ? parseInt((Constants as any).nativeBuildVersion, 10) : 1);
 
 export const GITHUB_REPO_OWNER = 'Anandavnish';
 export const GITHUB_REPO_NAME = 'expense-tracker';
