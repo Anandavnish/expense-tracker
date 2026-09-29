@@ -47,6 +47,7 @@ import { YouTubeStyleDraggableList } from '../../components/YouTubeStyleDraggabl
 import { KeyboardAwareScrollView } from '../../components/KeyboardAwareScrollView';
 import { BankLogo } from '../../components/BankLogo';
 import { EditButton } from '../../components/EditButton';
+import { CategoryDonutChart, CategoryChartItem } from '../../components/CategoryDonutChart';
 import { Account, AccountType, BankPresetCode, CreditCardIssuerCode } from '../../types/database';
 
 interface DashboardScreenProps {
@@ -426,6 +427,39 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
     ? `−₹${Math.abs(fullNetWorth).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
     : `₹${fullNetWorth.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
 
+  // Previous month string (YYYY-MM) for Net Worth delta indicator
+  const previousMonthStr = useMemo(() => {
+    const [yStr, mStr] = selectedMonth.split('-');
+    const y = parseInt(yStr, 10);
+    const m = parseInt(mStr, 10);
+    if (!y || !m) return null;
+    let prevY = y;
+    let prevM = m - 1;
+    if (prevM === 0) {
+      prevM = 12;
+      prevY -= 1;
+    }
+    return `${prevY}-${String(prevM).padStart(2, '0')}`;
+  }, [selectedMonth]);
+
+  // Net Worth delta comparing current/selected month closing against previous month's closing net worth
+  const netWorthDelta = useMemo(() => {
+    if (isFutureMonth || !previousMonthStr) return null;
+    const prevNetWorth = calculateHistoricalNetWorth(accounts, borrows, transactions, previousMonthStr);
+    if (prevNetWorth === 0 && fullNetWorth === 0) return null;
+    const diff = fullNetWorth - prevNetWorth;
+    let pct: number | null = null;
+    if (prevNetWorth !== 0) {
+      const rawPct = (diff / Math.abs(prevNetWorth)) * 100;
+      pct = Math.abs(rawPct) >= 10 ? Math.round(rawPct) : Number(rawPct.toFixed(1));
+    }
+    return {
+      diff,
+      pct,
+      prevNetWorth,
+    };
+  }, [accounts, borrows, transactions, previousMonthStr, fullNetWorth, isFutureMonth]);
+
   // This Month's Budget
   const overallBudget =
     budgetSummaries.find((b) => b.category === null) || budgetSummaries[0] || null;
@@ -469,6 +503,26 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
 
     return map;
   }, [categories, budgetSummaries, transactions, selectedMonth]);
+
+  // Data formatted specifically for the CategoryDonutChart (only categories with spend > 0)
+  const { categoryChartData, totalCategoryExpenses } = useMemo(() => {
+    let total = 0;
+    const items: CategoryChartItem[] = [];
+    Object.entries(categorySpendingMap).forEach(([cat, amt]) => {
+      if (amt > 0) {
+        total += amt;
+        items.push({
+          category: cat,
+          amount: amt,
+          color: getCategoryToken(cat).color,
+        });
+      }
+    });
+    return {
+      categoryChartData: items,
+      totalCategoryExpenses: total,
+    };
+  }, [categorySpendingMap]);
 
   // Max spend for category progress relative calculation
   const maxCategorySpend = useMemo(() => {
@@ -727,9 +781,10 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
       );
       if (account.type === 'credit_card') {
         const outstanding = Math.abs(Math.min(0, Number(account.current_balance || 0)));
-        setEditBalance(String(outstanding));
+        setEditBalance(outstanding > 0 ? String(outstanding) : '');
       } else {
-        setEditBalance(String(account.current_balance || 0));
+        const bal = Number(account.current_balance || 0);
+        setEditBalance(bal !== 0 ? String(bal) : '');
       }
       setEditCreditLimit(account.credit_limit ? String(account.credit_limit) : '');
       setIsAddingNewSource(false);
@@ -741,7 +796,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
       setEditCardIssuer('HDFC');
       setEditCustomColor(CUSTOM_COLORS[0]);
       setEditCustomIcon('business-outline');
-      setEditBalance('0');
+      setEditBalance('');
       setEditCreditLimit('');
       setIsAddingNewSource(true);
     }
@@ -1052,14 +1107,76 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
               >
                 {formattedNetWorth}
               </Text>
-              {totalCreditLimit > 0 && !isFutureMonth && (
-                <View style={[styles.availCreditPill, { borderColor: colors.border }]}>
-                  <Ionicons name="card-outline" size={12} color={accent.hex} />
-                  <Text style={styles.availCreditText}>
-                    Avail. Credit: ₹{totalAvailCredit.toLocaleString('en-IN', { maximumFractionDigits: 0 })} of ₹{totalCreditLimit.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-                  </Text>
-                </View>
-              )}
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginTop: 6 }}>
+                {netWorthDelta && !isFutureMonth && (
+                  <View
+                    style={[
+                      styles.netWorthDeltaBadge,
+                      {
+                        backgroundColor:
+                          netWorthDelta.diff > 0
+                            ? colors.success + '15'
+                            : netWorthDelta.diff < 0
+                            ? colors.alert + '15'
+                            : colors.surfaceLight,
+                        borderColor:
+                          netWorthDelta.diff > 0
+                            ? colors.success + '30'
+                            : netWorthDelta.diff < 0
+                            ? colors.alert + '30'
+                            : colors.border,
+                      },
+                    ]}
+                  >
+                    <Ionicons
+                      name={
+                        netWorthDelta.diff > 0
+                          ? 'trending-up'
+                          : netWorthDelta.diff < 0
+                          ? 'trending-down'
+                          : 'remove'
+                      }
+                      size={12}
+                      color={
+                        netWorthDelta.diff > 0
+                          ? colors.success
+                          : netWorthDelta.diff < 0
+                          ? colors.alert
+                          : colors.textMuted
+                      }
+                    />
+                    <Text
+                      style={[
+                        styles.netWorthDeltaText,
+                        TYPOGRAPHY.tabularText,
+                        {
+                          color:
+                            netWorthDelta.diff > 0
+                              ? colors.success
+                              : netWorthDelta.diff < 0
+                              ? colors.alert
+                              : colors.textMuted,
+                        },
+                      ]}
+                    >
+                      {netWorthDelta.diff > 0 ? '▲ +' : netWorthDelta.diff < 0 ? '▼ −' : '— '}₹
+                      {Math.abs(netWorthDelta.diff).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                      {netWorthDelta.pct !== null
+                        ? ` (${netWorthDelta.diff > 0 ? '+' : ''}${netWorthDelta.pct}%)`
+                        : ''}{' '}
+                      vs last month
+                    </Text>
+                  </View>
+                )}
+                {totalCreditLimit > 0 && !isFutureMonth && (
+                  <View style={[styles.availCreditPill, { borderColor: colors.border, marginTop: 0 }]}>
+                    <Ionicons name="card-outline" size={12} color={accent.hex} />
+                    <Text style={styles.availCreditText}>
+                      Avail. Credit: ₹{totalAvailCredit.toLocaleString('en-IN', { maximumFractionDigits: 0 })} of ₹{totalCreditLimit.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                    </Text>
+                  </View>
+                )}
+              </View>
             </View>
           </View>
 
@@ -1677,6 +1794,11 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
             />
           </View>
 
+          <CategoryDonutChart
+            data={categoryChartData}
+            totalAmount={totalCategoryExpenses}
+          />
+
           <View style={styles.categoriesList}>
             {categories.map((cat) => {
               const spent = categorySpendingMap[cat] || 0;
@@ -2231,11 +2353,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                 <TextInput
                   value={editName}
                   onChangeText={setEditName}
-                  onFocus={() => {
-                    setTimeout(() => {
-                      sourceModalScrollRef.current?.scrollTo({ y: 380, animated: true });
-                    }, 100);
-                  }}
                   placeholder={
                     editType === 'bank'
                       ? 'e.g. Salary A/c or •••• 4821'
@@ -2257,11 +2374,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                     <TextInput
                       value={editCreditLimit}
                       onChangeText={setEditCreditLimit}
-                      onFocus={() => {
-                        setTimeout(() => {
-                          sourceModalScrollRef.current?.scrollTo({ y: 500, animated: true });
-                        }, 100);
-                      }}
                       placeholder="e.g. 50000"
                       keyboardType="decimal-pad"
                       mode="outlined"
@@ -2282,11 +2394,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                     <TextInput
                       value={editBalance}
                       onChangeText={setEditBalance}
-                      onFocus={() => {
-                        setTimeout(() => {
-                          sourceModalScrollRef.current?.scrollToEnd({ animated: true });
-                        }, 100);
-                      }}
                       placeholder="0.00"
                       keyboardType="decimal-pad"
                       mode="outlined"
@@ -2314,11 +2421,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                     <TextInput
                       value={editBalance}
                       onChangeText={setEditBalance}
-                      onFocus={() => {
-                        setTimeout(() => {
-                          sourceModalScrollRef.current?.scrollToEnd({ animated: true });
-                        }, 100);
-                      }}
                       placeholder="0.00"
                       keyboardType="decimal-pad"
                       mode="outlined"
@@ -2991,6 +3093,19 @@ function getStyles(colors: ThemeColors) {
     fontSize: 32,
     fontWeight: '800',
     color: colors.textPrimary,
+  },
+  netWorthDeltaBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  netWorthDeltaText: {
+    fontSize: 11,
+    fontWeight: '700',
   },
   quickAddPill: {
     flexDirection: 'row',

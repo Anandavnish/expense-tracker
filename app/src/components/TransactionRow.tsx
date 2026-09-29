@@ -37,8 +37,8 @@ const TransactionRowComponent: React.FC<TransactionRowProps> = ({
 }) => {
   const navigation = useNavigation<any>();
   const { colors, accent } = useAppTheme();
-  const account = useFinanceStore((s) =>
-    s.accounts.find((a) => a.id === transaction.account_id)
+  const account = useFinanceStore(
+    React.useCallback((s) => s.accounts.find((a) => a.id === transaction.account_id), [transaction.account_id])
   );
 
   const isIncome = transaction.type === 'income';

@@ -29,7 +29,6 @@ import {
 import {
   SPACING,
   ThemeStyleId,
-  LOCKED_FINANCIAL_TOKENS,
 } from '../../theme/tokens';
 import { TransactionType } from '../../types/database';
 import { filterTransactionsForCsv } from '../../services/csvExport';
@@ -435,8 +434,6 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation, rout
     },
   ];
 
-  const financialTokens = LOCKED_FINANCIAL_TOKENS[effectiveTheme];
-
   return (
     <View style={[styles.safeArea, { paddingTop: insets.top, backgroundColor: colors.background }]}>
       {/* Top Header */}
@@ -626,35 +623,6 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation, rout
           </View>
         </View>
 
-        {/* Locked Financial Semantic Tokens Rule Explanation */}
-        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <View style={styles.sectionHeaderRow}>
-            <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>LOCKED SEMANTIC TOKENS</Text>
-            <Ionicons name="lock-closed" size={13} color={colors.textMuted} />
-          </View>
-          <Text style={[styles.sectionSub, { color: colors.textSecondary }]}>
-            Income, Expense, Lent, and Borrowed colors are strictly locked. They remain independent of brand/accent themes or dynamic wallpaper colors to preserve immediate financial recognition.
-          </Text>
-
-          <View style={styles.semanticPillsRow}>
-            <View style={[styles.semanticBadge, { backgroundColor: financialTokens.incomeMuted, borderColor: financialTokens.income }]}>
-              <View style={[styles.semanticDot, { backgroundColor: financialTokens.income }]} />
-              <Text style={[styles.semanticBadgeText, { color: financialTokens.income }]}>Income (+₹)</Text>
-            </View>
-            <View style={[styles.semanticBadge, { backgroundColor: financialTokens.expenseMuted, borderColor: financialTokens.expense }]}>
-              <View style={[styles.semanticDot, { backgroundColor: financialTokens.expense }]} />
-              <Text style={[styles.semanticBadgeText, { color: financialTokens.expense }]}>Expense (−₹)</Text>
-            </View>
-            <View style={[styles.semanticBadge, { backgroundColor: financialTokens.lentMuted, borderColor: financialTokens.lent }]}>
-              <View style={[styles.semanticDot, { backgroundColor: financialTokens.lent }]} />
-              <Text style={[styles.semanticBadgeText, { color: financialTokens.lent }]}>Lent (+₹)</Text>
-            </View>
-            <View style={[styles.semanticBadge, { backgroundColor: financialTokens.borrowedMuted, borderColor: financialTokens.borrowed }]}>
-              <View style={[styles.semanticDot, { backgroundColor: financialTokens.borrowed }]} />
-              <Text style={[styles.semanticBadgeText, { color: financialTokens.borrowed }]}>Borrowed (−₹)</Text>
-            </View>
-          </View>
-        </View>
 
         {/* Features & Integrations */}
         <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>

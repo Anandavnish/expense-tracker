@@ -121,11 +121,10 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
   // Zero defaulting: never auto-assign Cash or accounts[0]
   const [selectedAccountId, setSelectedAccountId] = useState(params?.accountId || '');
   const [category, setCategory] = useState(() => {
-    if (params?.prefillCategory) {
+    if (params?.prefillCategory && params.prefillCategory.toLowerCase() !== 'uncategorized') {
       return normalizeAndMatchCategory(params.prefillCategory, categories).category;
     }
-    const uncat = categories.find((c) => c.toLowerCase() === 'uncategorized');
-    return uncat || 'Uncategorized';
+    return categories[0] || 'Food';
   });
   const [note, setNote] = useState(
     params?.prefillNote !== undefined && params?.prefillNote !== null
@@ -539,8 +538,7 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
         BORROW_CATEGORIES.includes(category) ||
         INCOME_CATEGORIES.includes(category)
       ) {
-        const uncat = categories.find((c) => c.toLowerCase() === 'uncategorized');
-        setCategory(uncat || 'Uncategorized');
+        setCategory(categories[0] || 'Food');
       }
     } else if (newType === 'income') {
       setCategory(isCreditCard ? CREDIT_CARD_INCOME_CATEGORIES[0] : INCOME_CATEGORIES[0]);
@@ -556,7 +554,9 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
     else if (type === 'income') list = INCOME_CATEGORIES;
     else list = BORROW_CATEGORIES;
 
-    if (category && !list.some((c) => c.toLowerCase() === category.toLowerCase())) {
+    list = list.filter((c) => c.toLowerCase() !== 'uncategorized');
+
+    if (category && category.toLowerCase() !== 'uncategorized' && !list.some((c) => c.toLowerCase() === category.toLowerCase())) {
       return [category, ...list];
     }
     return list;
@@ -1136,11 +1136,11 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
               </View>
               <View style={styles.dateTextCol}>
                 <Text style={styles.dateSelectedText}>{formattedDateLabel}</Text>
-                <Text style={styles.dateMonthRestrictionHint}>
-                  {isMonthLocked(date.substring(0, 7))
-                    ? '🔒 Month Locked (Unlock on Dashboard)'
-                    : formattedDateLabel}
-                </Text>
+                {isMonthLocked(date.substring(0, 7)) ? (
+                  <Text style={styles.dateMonthRestrictionHint}>
+                    🔒 Month Locked (Unlock on Dashboard)
+                  </Text>
+                ) : null}
               </View>
               <View style={[styles.dateChangeBadge, { borderColor: accent.hex + '40' }]}>
                 <Text style={[styles.dateChangeBadgeText, { color: accent.hex }]}>Pick Date</Text>

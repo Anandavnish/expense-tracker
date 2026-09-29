@@ -1,4 +1,3 @@
-// src/screens/main/TransactionDetailScreen.tsx
 import React, { useState, useMemo, useRef } from 'react';
 import {
   View,
@@ -14,7 +13,7 @@ import { TextInput } from 'react-native-paper';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useFinanceStore } from '../../store/financeStore';
 import { useSettingsStore } from '../../store/settingsStore';
-import { COLORS, SPACING, TYPOGRAPHY } from '../../theme/tokens';
+import { SPACING, TYPOGRAPHY, ThemeColors } from '../../theme/tokens';
 import { TactileButton } from '../../components/TactileButton';
 import { InlineError } from '../../components/InlineError';
 import { KeyboardAwareScrollView } from '../../components/KeyboardAwareScrollView';
@@ -36,21 +35,19 @@ export const TransactionDetailScreen = () => {
 
   const { transactionId, initialMode } = route.params || {};
 
-  const { accent } = useSettingsStore();
-  const {
-    transactions,
-    accounts,
-    categories,
-    borrows,
-    updateTransactionOptimistic,
-    deleteTransactionOptimistic,
-    isMonthLocked,
-  } = useFinanceStore();
-
+  const { accent, colors } = useSettingsStore();
+  const styles = useMemo(() => getStyles(colors), [colors]);
+  const transactions = useFinanceStore((s) => s.transactions);
   const transaction = useMemo(
     () => transactions.find((t) => t.id === transactionId),
     [transactions, transactionId]
   );
+  const accounts = useFinanceStore((s) => s.accounts);
+  const categories = useFinanceStore((s) => s.categories);
+  const borrows = useFinanceStore((s) => s.borrows);
+  const updateTransactionOptimistic = useFinanceStore((s) => s.updateTransactionOptimistic);
+  const deleteTransactionOptimistic = useFinanceStore((s) => s.deleteTransactionOptimistic);
+  const isMonthLocked = useFinanceStore((s) => s.isMonthLocked);
 
   const txMonth = useMemo(
     () => (transaction ? transaction.date.substring(0, 7) : ''),
@@ -139,14 +136,14 @@ export const TransactionDetailScreen = () => {
             onPress={() => navigation.goBack()}
             activeOpacity={0.7}
           >
-            <Ionicons name="arrow-back" size={22} color={COLORS.textPrimary} />
+            <Ionicons name="arrow-back" size={22} color={colors.textPrimary} />
           </TouchableOpacity>
           <Text style={styles.topBarTitle}>TRANSACTION DETAILS</Text>
           <View style={{ width: 40 }} />
         </View>
 
         <View style={styles.emptyContainer}>
-          <Ionicons name="alert-circle-outline" size={48} color={COLORS.textMuted} />
+          <Ionicons name="alert-circle-outline" size={48} color={colors.textMuted} />
           <Text style={styles.emptyTitle}>Transaction Not Found</Text>
           <Text style={styles.emptySubtitle}>
             This transaction may have been deleted or does not exist.
@@ -167,17 +164,17 @@ export const TransactionDetailScreen = () => {
   const isBorrowTaken = transaction.type === 'borrow_taken';
 
   let amountPrefix = '';
-  let amountColor: string = COLORS.textPrimary;
+  let amountColor: string = colors.textPrimary;
 
   if (isIncome || isBorrowTaken) {
     amountPrefix = '+';
     amountColor = accent.hex;
   } else if (isExpense) {
     amountPrefix = '−';
-    amountColor = COLORS.alert;
+    amountColor = colors.alert;
   } else {
     amountPrefix = '−';
-    amountColor = COLORS.warning;
+    amountColor = colors.warning;
   }
 
   const formattedAmount = Number(transaction.amount).toLocaleString('en-IN', {
@@ -288,7 +285,7 @@ export const TransactionDetailScreen = () => {
           }}
           activeOpacity={0.7}
         >
-          <Ionicons name="arrow-back" size={22} color={COLORS.textPrimary} />
+          <Ionicons name="arrow-back" size={22} color={colors.textPrimary} />
         </TouchableOpacity>
 
         <Text style={styles.topBarTitle}>
@@ -304,7 +301,7 @@ export const TransactionDetailScreen = () => {
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 activeOpacity={0.7}
               >
-                <Ionicons name="lock-closed" size={13} color={COLORS.textMuted} />
+                <Ionicons name="lock-closed" size={13} color={colors.textMuted} />
                 <Text style={styles.lockedHeaderBadgeText}>Locked</Text>
               </TouchableOpacity>
             ) : (
@@ -321,7 +318,7 @@ export const TransactionDetailScreen = () => {
                   onPress={() => setDeleteModalVisible(true)}
                   activeOpacity={0.7}
                 >
-                  <Ionicons name="trash-outline" size={20} color={COLORS.alert} />
+                  <Ionicons name="trash-outline" size={20} color={colors.alert} />
                 </TouchableOpacity>
               </>
             )
@@ -356,9 +353,9 @@ export const TransactionDetailScreen = () => {
                   style={[
                     styles.heroTypeBadge,
                     isIncome && { backgroundColor: `${accent.hex}22` },
-                    isExpense && { backgroundColor: COLORS.alertMuted },
+                    isExpense && { backgroundColor: colors.alertMuted },
                     (transaction.type === 'borrow_given' || transaction.type === 'borrow_taken') && {
-                      backgroundColor: COLORS.warningMuted,
+                      backgroundColor: colors.warningMuted,
                     },
                   ]}
                 >
@@ -366,9 +363,9 @@ export const TransactionDetailScreen = () => {
                     style={[
                       styles.heroTypeBadgeText,
                       isIncome && { color: accent.hex },
-                      isExpense && { color: COLORS.alert },
+                      isExpense && { color: colors.alert },
                       (transaction.type === 'borrow_given' || transaction.type === 'borrow_taken') && {
-                        color: COLORS.warning,
+                        color: colors.warning,
                       },
                     ]}
                   >
@@ -392,7 +389,7 @@ export const TransactionDetailScreen = () => {
             {isLocked ? (
               <View style={styles.lockedNoticeCard}>
                 <View style={styles.lockedNoticeIconBadge}>
-                  <Ionicons name="lock-closed" size={20} color={COLORS.warning} />
+                  <Ionicons name="lock-closed" size={20} color={colors.warning} />
                 </View>
                 <View style={styles.lockedNoticeContent}>
                   <Text style={styles.lockedNoticeTitle}>Month Locked (View Only)</Text>
@@ -423,12 +420,12 @@ export const TransactionDetailScreen = () => {
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                  style={[styles.quickActionButton, { borderColor: COLORS.alert }]}
+                  style={[styles.quickActionButton, { borderColor: colors.alert }]}
                   onPress={() => setDeleteModalVisible(true)}
                   activeOpacity={0.7}
                 >
-                  <Ionicons name="trash-outline" size={18} color={COLORS.alert} />
-                  <Text style={[styles.quickActionText, { color: COLORS.alert }]}>Delete Entry</Text>
+                  <Ionicons name="trash-outline" size={18} color={colors.alert} />
+                  <Text style={[styles.quickActionText, { color: colors.alert }]}>Delete Entry</Text>
                 </TouchableOpacity>
               </View>
             )}
@@ -443,7 +440,7 @@ export const TransactionDetailScreen = () => {
                   {account ? (
                     <BankLogo account={account} name={account.name} size={18} />
                   ) : (
-                    <Ionicons name="wallet-outline" size={18} color={COLORS.textSecondary} />
+                    <Ionicons name="wallet-outline" size={18} color={colors.textSecondary} />
                   )}
                   <Text style={styles.infoLabel}>Money Source</Text>
                 </View>
@@ -462,7 +459,7 @@ export const TransactionDetailScreen = () => {
               {/* Category */}
               <View style={styles.infoRow}>
                 <View style={styles.infoLabelGroup}>
-                  <Ionicons name="pricetag-outline" size={18} color={COLORS.textSecondary} />
+                  <Ionicons name="pricetag-outline" size={18} color={colors.textSecondary} />
                   <Text style={styles.infoLabel}>Category</Text>
                 </View>
                 <Text style={styles.infoValuePrimary}>{transaction.category}</Text>
@@ -473,7 +470,7 @@ export const TransactionDetailScreen = () => {
               {/* Date */}
               <View style={styles.infoRow}>
                 <View style={styles.infoLabelGroup}>
-                  <Ionicons name="calendar-outline" size={18} color={COLORS.textSecondary} />
+                  <Ionicons name="calendar-outline" size={18} color={colors.textSecondary} />
                   <Text style={styles.infoLabel}>Date</Text>
                 </View>
                 <View style={styles.infoValueRight}>
@@ -487,7 +484,7 @@ export const TransactionDetailScreen = () => {
                   <View style={styles.divider} />
                   <View style={styles.infoRow}>
                     <View style={styles.infoLabelGroup}>
-                      <Ionicons name="time-outline" size={18} color={COLORS.textSecondary} />
+                      <Ionicons name="time-outline" size={18} color={colors.textSecondary} />
                       <Text style={styles.infoLabel}>Logged Time</Text>
                     </View>
                     <Text style={styles.infoValuePrimary}>{formattedTime}</Text>
@@ -500,7 +497,7 @@ export const TransactionDetailScreen = () => {
               {/* Flow Direction */}
               <View style={styles.infoRow}>
                 <View style={styles.infoLabelGroup}>
-                  <Ionicons name="swap-vertical-outline" size={18} color={COLORS.textSecondary} />
+                  <Ionicons name="swap-vertical-outline" size={18} color={colors.textSecondary} />
                   <Text style={styles.infoLabel}>Flow Direction</Text>
                 </View>
                 <Text style={styles.infoValuePrimary}>
@@ -519,7 +516,7 @@ export const TransactionDetailScreen = () => {
               {/* Source */}
               <View style={styles.infoRow}>
                 <View style={styles.infoLabelGroup}>
-                  <Ionicons name="finger-print-outline" size={18} color={COLORS.textSecondary} />
+                  <Ionicons name="finger-print-outline" size={18} color={colors.textSecondary} />
                   <Text style={styles.infoLabel}>Input Source</Text>
                 </View>
                 <Text style={styles.infoValuePrimary}>
@@ -531,7 +528,7 @@ export const TransactionDetailScreen = () => {
               <View style={styles.divider} />
               <View style={styles.noteSection}>
                 <View style={styles.infoLabelGroup}>
-                  <Ionicons name="document-text-outline" size={18} color={COLORS.textSecondary} />
+                  <Ionicons name="document-text-outline" size={18} color={colors.textSecondary} />
                   <Text style={styles.infoLabel}>Notes & Remarks</Text>
                 </View>
                 <Text style={styles.fullNoteText}>
@@ -546,7 +543,7 @@ export const TransactionDetailScreen = () => {
                 <Text style={styles.sectionHeaderTitle}>LINKED BORROW RECORD</Text>
                 <View style={styles.infoRow}>
                   <View style={styles.infoLabelGroup}>
-                    <Ionicons name="person-outline" size={18} color={COLORS.textSecondary} />
+                    <Ionicons name="person-outline" size={18} color={colors.textSecondary} />
                     <Text style={styles.infoLabel}>Contact Person</Text>
                   </View>
                   <Text style={styles.infoValuePrimary}>{linkedBorrow.person_name}</Text>
@@ -554,7 +551,7 @@ export const TransactionDetailScreen = () => {
                 <View style={styles.divider} />
                 <View style={styles.infoRow}>
                   <View style={styles.infoLabelGroup}>
-                    <Ionicons name="checkbox-outline" size={18} color={COLORS.textSecondary} />
+                    <Ionicons name="checkbox-outline" size={18} color={colors.textSecondary} />
                     <Text style={styles.infoLabel}>Status</Text>
                   </View>
                   <View
@@ -562,7 +559,7 @@ export const TransactionDetailScreen = () => {
                       styles.borrowStatusBadge,
                       {
                         backgroundColor:
-                          linkedBorrow.status === 'settled' ? `${accent.hex}22` : COLORS.warningMuted,
+                          linkedBorrow.status === 'settled' ? `${accent.hex}22` : colors.warningMuted,
                       },
                     ]}
                   >
@@ -571,7 +568,7 @@ export const TransactionDetailScreen = () => {
                         styles.borrowStatusBadgeText,
                         {
                           color:
-                            linkedBorrow.status === 'settled' ? accent.hex : COLORS.warning,
+                            linkedBorrow.status === 'settled' ? accent.hex : colors.warning,
                         },
                       ]}
                     >
@@ -589,7 +586,7 @@ export const TransactionDetailScreen = () => {
                 onPress={() => setDeleteModalVisible(true)}
                 activeOpacity={0.7}
               >
-                <Ionicons name="trash-outline" size={18} color={COLORS.alert} />
+                <Ionicons name="trash-outline" size={18} color={colors.alert} />
                 <Text style={styles.bottomDeleteBtnText}>Delete This Transaction</Text>
               </TouchableOpacity>
             )}
@@ -610,9 +607,9 @@ export const TransactionDetailScreen = () => {
                 }}
                 keyboardType="decimal-pad"
                 mode="outlined"
-                outlineColor={COLORS.border}
+                outlineColor={colors.border}
                 activeOutlineColor={accent.hex}
-                textColor={COLORS.textPrimary}
+                textColor={colors.textPrimary}
                 style={styles.formTextInput}
                 placeholder="0.00"
               />
@@ -734,9 +731,9 @@ export const TransactionDetailScreen = () => {
                   }, 150);
                 }}
                 mode="outlined"
-                outlineColor={COLORS.border}
+                outlineColor={colors.border}
                 activeOutlineColor={accent.hex}
-                textColor={COLORS.textPrimary}
+                textColor={colors.textPrimary}
                 style={styles.formTextInput}
                 placeholder="YYYY-MM-DD"
               />
@@ -754,9 +751,9 @@ export const TransactionDetailScreen = () => {
                   }, 150);
                 }}
                 mode="outlined"
-                outlineColor={COLORS.border}
+                outlineColor={colors.border}
                 activeOutlineColor={accent.hex}
-                textColor={COLORS.textPrimary}
+                textColor={colors.textPrimary}
                 style={[styles.formTextInput, { minHeight: 70 }]}
                 multiline
                 numberOfLines={3}
@@ -798,13 +795,13 @@ export const TransactionDetailScreen = () => {
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
             <View style={styles.modalAlertIcon}>
-              <Ionicons name="trash-outline" size={32} color={COLORS.alert} />
+              <Ionicons name="trash-outline" size={32} color={colors.alert} />
             </View>
 
             <Text style={styles.modalTitle}>Delete Transaction?</Text>
             <Text style={styles.modalMessage}>
               Are you sure you want to delete this transaction for{' '}
-              <Text style={{ fontWeight: '700', color: COLORS.textPrimary }}>
+              <Text style={{ fontWeight: '700', color: colors.textPrimary }}>
                 ₹{formattedAmount}
               </Text>
               ? This action will reverse your account balance and recalculate your budgets.
@@ -846,10 +843,11 @@ export const TransactionDetailScreen = () => {
   );
 };
 
-const styles = StyleSheet.create({
+const getStyles = (colors: ThemeColors) =>
+  StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: colors.background,
   },
   topBar: {
     flexDirection: 'row',
@@ -858,14 +856,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.sm,
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
+    borderBottomColor: colors.border,
   },
   backButton: {
     padding: SPACING.xs,
     borderRadius: 8,
   },
   topBarTitle: {
-    color: COLORS.textPrimary,
+    color: colors.textPrimary,
     fontSize: 15,
     fontWeight: '800',
     letterSpacing: 0.5,
@@ -885,8 +883,8 @@ const styles = StyleSheet.create({
     padding: SPACING.lg,
   },
   heroCard: {
-    backgroundColor: COLORS.surface,
-    borderColor: COLORS.border,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
     borderWidth: 1,
     borderRadius: 16,
     padding: SPACING.xl,
@@ -923,7 +921,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   heroCategoryBadge: {
-    backgroundColor: COLORS.surfaceLight,
+    backgroundColor: colors.surfaceLight,
     paddingHorizontal: SPACING.sm,
     paddingVertical: 3,
     borderRadius: 6,
@@ -933,7 +931,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   heroNoteTitle: {
-    color: COLORS.textSecondary,
+    color: colors.textSecondary,
     fontSize: 14,
     fontStyle: 'italic',
     textAlign: 'center',
@@ -946,12 +944,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 12,
-    backgroundColor: COLORS.surfaceLight,
+    backgroundColor: colors.surfaceLight,
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: colors.border,
   },
   lockedHeaderBadgeText: {
-    color: COLORS.textMuted,
+    color: colors.textMuted,
     fontSize: 11,
     fontWeight: '700',
   },
@@ -959,8 +957,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 12,
-    backgroundColor: COLORS.surface,
-    borderColor: COLORS.border,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
     borderWidth: 1,
     borderRadius: 12,
     padding: SPACING.md,
@@ -970,7 +968,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: COLORS.warning + '18',
+    backgroundColor: colors.warning + '18',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -978,13 +976,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   lockedNoticeTitle: {
-    color: COLORS.textPrimary,
+    color: colors.textPrimary,
     fontSize: 13,
     fontWeight: '700',
     marginBottom: 2,
   },
   lockedNoticeDesc: {
-    color: COLORS.textSecondary,
+    color: colors.textSecondary,
     fontSize: 12,
     lineHeight: 16,
     marginBottom: 10,
@@ -1013,7 +1011,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: COLORS.surface,
+    backgroundColor: colors.surface,
     borderWidth: 1,
     borderRadius: 10,
     paddingVertical: SPACING.md,
@@ -1024,15 +1022,15 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   sectionCard: {
-    backgroundColor: COLORS.surface,
-    borderColor: COLORS.border,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
     borderWidth: 1,
     borderRadius: 14,
     padding: SPACING.lg,
     marginBottom: SPACING.lg,
   },
   sectionHeaderTitle: {
-    color: COLORS.textMuted,
+    color: colors.textMuted,
     fontSize: 11,
     fontWeight: '800',
     letterSpacing: 0.8,
@@ -1050,7 +1048,7 @@ const styles = StyleSheet.create({
     gap: SPACING.xs,
   },
   infoLabel: {
-    color: COLORS.textSecondary,
+    color: colors.textSecondary,
     fontSize: 13,
     fontWeight: '500',
   },
@@ -1058,41 +1056,41 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
   },
   infoValuePrimary: {
-    color: COLORS.textPrimary,
+    color: colors.textPrimary,
     fontSize: 14,
     fontWeight: '700',
   },
   infoValueSecondary: {
-    color: COLORS.textMuted,
+    color: colors.textMuted,
     fontSize: 11,
     marginTop: 2,
   },
   accountTypeTag: {
-    backgroundColor: COLORS.surfaceLight,
+    backgroundColor: colors.surfaceLight,
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
     marginTop: 3,
   },
   accountTypeTagText: {
-    color: COLORS.textSecondary,
+    color: colors.textSecondary,
     fontSize: 9,
     fontWeight: '700',
   },
   divider: {
     height: 1,
-    backgroundColor: COLORS.border,
+    backgroundColor: colors.border,
     marginVertical: SPACING.sm,
   },
   noteSection: {
     paddingVertical: SPACING.xs,
   },
   fullNoteText: {
-    color: COLORS.textPrimary,
+    color: colors.textPrimary,
     fontSize: 13,
     lineHeight: 19,
     marginTop: SPACING.xs,
-    backgroundColor: COLORS.surfaceLight,
+    backgroundColor: colors.surfaceLight,
     padding: SPACING.md,
     borderRadius: 8,
   },
@@ -1109,8 +1107,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: COLORS.alertMuted,
-    borderColor: COLORS.alert,
+    backgroundColor: colors.alertMuted,
+    borderColor: colors.alert,
     borderWidth: 1,
     borderRadius: 12,
     paddingVertical: SPACING.md,
@@ -1118,7 +1116,7 @@ const styles = StyleSheet.create({
     marginTop: SPACING.xs,
   },
   bottomDeleteBtnText: {
-    color: COLORS.alert,
+    color: colors.alert,
     fontSize: 14,
     fontWeight: '700',
   },
@@ -1129,26 +1127,26 @@ const styles = StyleSheet.create({
     padding: SPACING.xl,
   },
   emptyTitle: {
-    color: COLORS.textPrimary,
+    color: colors.textPrimary,
     fontSize: 18,
     fontWeight: '700',
     marginTop: SPACING.md,
     marginBottom: SPACING.xs,
   },
   emptySubtitle: {
-    color: COLORS.textSecondary,
+    color: colors.textSecondary,
     fontSize: 13,
     textAlign: 'center',
     marginBottom: SPACING.xl,
   },
   emptyBackBtn: {
-    backgroundColor: COLORS.surfaceLight,
+    backgroundColor: colors.surfaceLight,
     paddingHorizontal: SPACING.xl,
     paddingVertical: SPACING.md,
     borderRadius: 8,
   },
   emptyBackBtnText: {
-    color: COLORS.textPrimary,
+    color: colors.textPrimary,
     fontSize: 14,
     fontWeight: '700',
   },
@@ -1160,14 +1158,14 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.xs,
   },
   formFieldLabel: {
-    color: COLORS.textSecondary,
+    color: colors.textSecondary,
     fontSize: 11,
     fontWeight: '800',
     letterSpacing: 0.5,
     marginBottom: SPACING.xs,
   },
   formTextInput: {
-    backgroundColor: COLORS.surface,
+    backgroundColor: colors.surface,
   },
   typeSelectorRow: {
     flexDirection: 'row',
@@ -1179,11 +1177,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.surface,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
   },
   typePillText: {
-    color: COLORS.textSecondary,
+    color: colors.textSecondary,
     fontSize: 12,
     fontWeight: '600',
   },
@@ -1199,11 +1197,11 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.surface,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
   },
   chipPillText: {
-    color: COLORS.textSecondary,
+    color: colors.textSecondary,
     fontSize: 12,
     fontWeight: '500',
   },
@@ -1214,16 +1212,16 @@ const styles = StyleSheet.create({
   },
   cancelButton: {
     flex: 1,
-    backgroundColor: COLORS.surfaceLight,
+    backgroundColor: colors.surfaceLight,
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: colors.border,
     borderRadius: 10,
     paddingVertical: SPACING.md,
     alignItems: 'center',
     justifyContent: 'center',
   },
   cancelButtonText: {
-    color: COLORS.textSecondary,
+    color: colors.textSecondary,
     fontSize: 14,
     fontWeight: '700',
   },
@@ -1235,7 +1233,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   saveButtonText: {
-    color: COLORS.textInverse,
+    color: colors.textInverse,
     fontSize: 14,
     fontWeight: '800',
   },
@@ -1248,8 +1246,8 @@ const styles = StyleSheet.create({
     padding: SPACING.xl,
   },
   modalCard: {
-    backgroundColor: COLORS.surface,
-    borderColor: COLORS.border,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
     borderWidth: 1,
     borderRadius: 16,
     padding: SPACING.xl,
@@ -1261,19 +1259,19 @@ const styles = StyleSheet.create({
     width: 60,
     height: 60,
     borderRadius: 30,
-    backgroundColor: COLORS.alertMuted,
+    backgroundColor: colors.alertMuted,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: SPACING.md,
   },
   modalTitle: {
-    color: COLORS.textPrimary,
+    color: colors.textPrimary,
     fontSize: 18,
     fontWeight: '800',
     marginBottom: SPACING.xs,
   },
   modalMessage: {
-    color: COLORS.textSecondary,
+    color: colors.textSecondary,
     fontSize: 13,
     textAlign: 'center',
     lineHeight: 18,
@@ -1286,19 +1284,19 @@ const styles = StyleSheet.create({
   },
   modalCancelBtn: {
     flex: 1,
-    backgroundColor: COLORS.surfaceLight,
+    backgroundColor: colors.surfaceLight,
     borderRadius: 8,
     paddingVertical: SPACING.md,
     alignItems: 'center',
   },
   modalCancelBtnText: {
-    color: COLORS.textPrimary,
+    color: colors.textPrimary,
     fontSize: 13,
     fontWeight: '700',
   },
   modalDeleteConfirmBtn: {
     flex: 1,
-    backgroundColor: COLORS.alert,
+    backgroundColor: colors.alert,
     borderRadius: 8,
     paddingVertical: SPACING.md,
     alignItems: 'center',

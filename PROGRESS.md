@@ -4,9 +4,9 @@
 Foundational architecture build for a high-performance cross-platform personal finance mobile app built for Android using Expo Dev Client, React Native Reanimated, React Native Paper, Zustand, and Supabase.
 
 - **GitHub Repository**: [https://github.com/Anandavnish/expense-tracker](https://github.com/Anandavnish/expense-tracker)
-- **Latest Release**: [Expense Tracker v1.0.13 (Build 13)](https://github.com/Anandavnish/expense-tracker/releases/tag/v1.0.13)
-- **Direct APK Download**: [ExpenseTracker-v1.0.13.apk](https://github.com/Anandavnish/expense-tracker/releases/download/v1.0.13/ExpenseTracker-v1.0.13.apk)
-- **Previous Release**: [Expense Tracker v1.0.12 (Build 12)](https://github.com/Anandavnish/expense-tracker/releases/tag/v1.0.12)
+- **Latest Release**: [Expense Tracker v1.0.14 (Build 14)](https://github.com/Anandavnish/expense-tracker/releases/tag/v1.0.14)
+- **Direct APK Download**: [ExpenseTracker-v1.0.14.apk](https://github.com/Anandavnish/expense-tracker/releases/download/v1.0.14/ExpenseTracker-v1.0.14.apk)
+- **Previous Release**: [Expense Tracker v1.0.13 (Build 13)](https://github.com/Anandavnish/expense-tracker/releases/tag/v1.0.13)
 
 ---
 
@@ -33,7 +33,7 @@ Foundational architecture build for a high-performance cross-platform personal f
         ├── utils/         # Category icon mappings and color tokens
         ├── services/      # Supabase client, statement PDF export engine
         ├── store/         # Zustand stores (authStore, financeStore, settingsStore)
-        ├── components/    # ReanimatedNumber, TactileButton, TransactionRow, YouTubeStyleDraggableList, InlineError
+        ├── components/    # ReanimatedNumber, TactileButton, TransactionRow, CategoryDonutChart, InlineError
         ├── navigation/    # RootNavigator, AuthStack, MainTabs
         └── screens/       # Auth (Login, SignUp), Main (Dashboard, Transactions, TransactionDetail, Budgets, Borrows, AddTransaction, AccountDetail, Settings)
 ```
@@ -41,6 +41,36 @@ Foundational architecture build for a high-performance cross-platform personal f
 ---
 
 ## Architectural Confirmations & System Revisions (Sept 2026)
+
+### 00. UI/UX Polishing, Category Donut Chart, Net Worth Delta, & Detail Lag Fix (v1.0.14)
+- **Status**: **Implemented & Fully Verified**.
+- **TransactionDetailScreen Theme Sync & Lag Fix**:
+  - Dynamically linked screen styling to `ThemeColors` via `useSettingsStore()`, replacing static `COLORS` constant.
+  - Replaced inline color references with dynamic theme tokens.
+  - Stabilized Zustand store selectors (`accounts`, `categories`, `borrows`, and `transactions.find`) using memoized lookup hooks to eliminate unnecessary re-renders and navigation transition stutters.
+- **Duplicate React Key Warning Resolved**:
+  - Resolved console warning (`Encountered two children with the same key, .$6dbbfb49-...`) occurring when optimistic inserts and Supabase Realtime broadcast payloads coexisted.
+  - Added robust `deduplicateTransactions` normalization in `financeStore.ts` across `loadCachedData`, `fetchInitialData`, and optimistic mutation handlers.
+- **"Uncategorized" Category Chip Removed**:
+  - Excluded `"Uncategorized"` from selectable category chips in `AddTransactionScreen.tsx`.
+  - Defaulted category selection to the user's primary category (e.g. `categories[0] || 'Food'`).
+- **Duplicate Date in Add Transaction Cleaned**:
+  - Fixed duplicate date text stacked in the Transaction Date card subtitle in `AddTransactionScreen.tsx`.
+- **Gemini API Key Account Deletion Purge**:
+  - Updated `authStore.ts` (`deleteAccount`) to wipe the encrypted Gemini API key from SecureStore and clear all persistent cache items associated with the deleted user.
+- **Money Source Modal Calibration & 0 Placeholder**:
+  - Removed jarring auto-scroll jumps when opening or modifying the Add/Edit Money Source modal.
+  - Displayed empty text inputs with a `'0.00'` placeholder when editing 0 balances, preventing annoying prepended `0` characters.
+- **Category Donut Chart (`CategoryDonutChart.tsx`)**:
+  - Implemented high-performance SVG Donut Chart using `react-native-svg` (`~15.11.2`).
+  - Positioned directly above category spend rows in the "Spending by Category" dashboard card.
+  - Renders active slices exclusively for categories with spend $> 0$, with centered total expense amount and responsive legend pills.
+- **Net Worth Delta Indicator**:
+  - Added monthly delta comparison badge (`▲ +₹X (+Y%) vs last month` / `▼ −₹X (-Y%) vs last month`) below the hero net worth figure.
+  - Utilizes `calculateHistoricalNetWorth` to compute exact closing balances from the preceding month.
+- **Google OAuth Login Diagnosis**:
+  - Identified root cause of Google OAuth rejection: Supabase Google Provider was configured with a 40-character hex hash instead of the required Google Cloud client secret (`GOCSPX-...`).
+  - Documented steps to update the secret and verify deep link redirect URIs (`expensetracker://**`).
 
 ### 0. Bank Presets Expansion (Slice & Fino) & Recalibratable Money Source Balances (v1.0.13)
 - **Status**: **Implemented & Fully Verified**.

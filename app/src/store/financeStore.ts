@@ -291,6 +291,18 @@ const deduplicateAccounts = (accounts: Account[]): Account[] => {
   return res;
 };
 
+export const deduplicateTransactions = (transactions: Transaction[]): Transaction[] => {
+  const seen = new Set<string>();
+  const res: Transaction[] = [];
+  for (const tx of transactions) {
+    if (tx && tx.id && !seen.has(tx.id)) {
+      seen.add(tx.id);
+      res.push(tx);
+    }
+  }
+  return res;
+};
+
 interface FinanceState {
   accounts: Account[];
   transactions: Transaction[];
@@ -582,8 +594,10 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
         );
         const accounts = sortAccountsByOrder(deduplicateAccounts(rawAccounts), orderIds);
 
-        const transactions = ((parsed.transactions || []) as Transaction[]).filter(
-          (t) => t.user_id === effectiveUserId
+        const transactions = deduplicateTransactions(
+          ((parsed.transactions || []) as Transaction[]).filter(
+            (t) => t.user_id === effectiveUserId
+          )
         );
         const borrows = ((parsed.borrows || []) as Borrow[]).filter(
           (b) => b.user_id === effectiveUserId
@@ -698,7 +712,7 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
 
       const rawAccounts = (accountsRes.data as Account[]) || [];
       const accounts = sortAccountsByOrder(deduplicateAccounts(rawAccounts), orderIds);
-      const transactions = (txRes.data as Transaction[]) || [];
+      const transactions = deduplicateTransactions((txRes.data as Transaction[]) || []);
       const borrows = (borrowsRes.data as Borrow[]) || [];
       let budgets = (budgetsRes.data as Budget[]) || [];
       let budgetSummaries = (summaryRes.data as BudgetSummary[]) || [];
@@ -819,7 +833,23 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
             const newTx = payload.new as Transaction;
             const exists = current.some((t) => t.id === newTx.id);
             if (!exists) {
-              set({ transactions: [newTx, ...current] });
+              const tempMatch = current.find(
+                (t) =>
+                  t.id.startsWith('temp_') &&
+                  Number(t.amount) === Number(newTx.amount) &&
+                  t.account_id === newTx.account_id &&
+                  t.type === newTx.type &&
+                  t.category === newTx.category
+              );
+              if (tempMatch) {
+                set({
+                  transactions: deduplicateTransactions(
+                    current.map((t) => (t.id === tempMatch.id ? newTx : t))
+                  ),
+                });
+              } else {
+                set({ transactions: deduplicateTransactions([newTx, ...current]) });
+              }
             }
           } else if (payload.eventType === 'UPDATE') {
             const updatedTx = payload.new as Transaction;
@@ -979,9 +1009,19 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
       if (error) throw error;
 
       const realTx = data as Transaction;
-      set((state) => ({
-        transactions: state.transactions.map((t) => (t.id === tempId ? realTx : t)),
-      }));
+      set((state) => {
+        const alreadyHasReal = state.transactions.some((t) => t.id === realTx.id);
+        if (alreadyHasReal) {
+          return {
+            transactions: state.transactions.filter((t) => t.id !== tempId),
+          };
+        }
+        return {
+          transactions: deduplicateTransactions(
+            state.transactions.map((t) => (t.id === tempId ? realTx : t))
+          ),
+        };
+      });
 
       return { success: true };
     } catch (err: any) {

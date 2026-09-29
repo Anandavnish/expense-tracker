@@ -154,9 +154,10 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
     setEditCreditLimit(account.credit_limit ? String(account.credit_limit) : '');
     if (account.type === 'credit_card') {
       const outstanding = Math.abs(Math.min(0, Number(account.current_balance || 0)));
-      setEditBalance(String(outstanding));
+      setEditBalance(outstanding > 0 ? String(outstanding) : '');
     } else {
-      setEditBalance(String(account.current_balance || 0));
+      const bal = Number(account.current_balance || 0);
+      setEditBalance(bal !== 0 ? String(bal) : '');
     }
     setEditModalVisible(true);
   };

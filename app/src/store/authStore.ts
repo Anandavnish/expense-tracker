@@ -365,6 +365,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         ]);
         await useFinanceStore.getState().clearAllLocalData();
         useMerchantRulesStore.getState().resetForSignOut();
+        await useSettingsStore.getState().removeGeminiApiKey(user.id);
         await supabase.auth.signOut();
         set({ session: null, user: null, isGuest: false });
         return { success: true };
