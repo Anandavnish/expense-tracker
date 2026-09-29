@@ -8,6 +8,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from './supabase';
 import { TransactionType } from '../types/database';
 import { useSettingsStore } from '../store/settingsStore';
+import { redactSensitiveFields } from './dataSanitizer';
 
 import { normalizeAndMatchCategory } from './smsParser';
 
@@ -646,8 +647,19 @@ Rules:
  * Classifies an unrecognized merchant or payee into an existing category using Gemini AI.
  * Results from this function are taught back into user_merchant_rules.
  */
+export interface ClassifyMerchantOptions {
+  merchantName: string;
+  rawText?: string;
+  availableCategories?: string[];
+}
+
+/**
+ * Classifies an unrecognized merchant or payee into an existing category using Gemini AI.
+ * Redacts sensitive fields (balances, account numbers, phone numbers, OTP codes) from raw text before escalation.
+ * Results from this function are taught back into user_merchant_rules.
+ */
 export async function classifyMerchantWithGemini(
-  merchantName: string,
+  inputOrMerchant: string | ClassifyMerchantOptions,
   availableCategories: string[] = []
 ): Promise<GeminiResponse<{ category: string; type: TransactionType }>> {
   try {
@@ -660,9 +672,17 @@ export async function classifyMerchantWithGemini(
       };
     }
 
+    const merchantName =
+      typeof inputOrMerchant === 'string' ? inputOrMerchant : inputOrMerchant.merchantName;
+    const rawText = typeof inputOrMerchant === 'object' ? inputOrMerchant.rawText : undefined;
+    const categoriesInput =
+      typeof inputOrMerchant === 'object' && inputOrMerchant.availableCategories
+        ? inputOrMerchant.availableCategories
+        : availableCategories;
+
     const cats =
-      availableCategories.length > 0
-        ? availableCategories
+      categoriesInput.length > 0
+        ? categoriesInput
         : [
             'Food',
             'Travel',
@@ -675,9 +695,13 @@ export async function classifyMerchantWithGemini(
             'Other',
           ];
 
+    // Redact sensitive banking fields from transaction text while keeping keywords & merchant context
+    const redactedContext = rawText ? redactSensitiveFields(rawText) : null;
+
     const prompt = `
 You are an expert financial classification assistant.
 Given this Indian merchant or person name: "${merchantName}"
+${redactedContext ? `Transaction Context (sensitive balances and account numbers redacted):\n"""\n${redactedContext}\n"""\n` : ''}
 Classify them into EXACTLY ONE category from this allowed list:
 ${cats.join(', ')}
 
@@ -718,7 +742,8 @@ Return a STRICT JSON object:
 }
 
 /**
- * Targeted amount extraction fallback using Gemini AI when deterministic OCR extraction has low confidence
+ * Targeted amount extraction fallback using Gemini AI when deterministic OCR extraction has low confidence.
+ * Redacts sensitive fields (balances, account numbers, phone numbers, OTP codes) from raw text before escalation.
  */
 export async function extractAmountWithGemini(input: {
   text?: string;
@@ -748,11 +773,14 @@ export async function extractAmountWithGemini(input: {
       }
     }
 
+    // Redact sensitive balances, account numbers, and OTP codes before sending to Gemini
+    const sanitizedText = input.text ? redactSensitiveFields(input.text) : '';
+
     const prompt = `
 You are an expert financial assistant.
 Extract ONLY the primary transaction amount (in Indian Rupees / INR) from this payment screenshot, receipt, or text.
 Ignore reference numbers (like 12-digit UTR), account numbers (like last 4 digits), dates, phone numbers, or balances.
-${input.text ? `\nText:\n"""\n${input.text}\n"""` : ''}
+${sanitizedText ? `\nText (sensitive balances & accounts redacted):\n"""\n${sanitizedText}\n"""` : ''}
 
 Return a STRICT JSON object:
 {

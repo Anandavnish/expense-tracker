@@ -21,6 +21,7 @@ import { KeyboardAwareScrollView } from '../../components/KeyboardAwareScrollVie
 import { TransactionType } from '../../types/database';
 import { MonthUnlockModal } from '../../components/MonthUnlockModal';
 import { BankLogo } from '../../components/BankLogo';
+import { EditButton, EditIcon } from '../../components/EditButton';
 import {
   getCategoryIcon,
   getCategoryColor,
@@ -308,13 +309,12 @@ export const TransactionDetailScreen = () => {
               </TouchableOpacity>
             ) : (
               <>
-                <TouchableOpacity
-                  style={styles.topActionIconBtn}
+                <EditButton
+                  size={32}
+                  iconSize={15}
                   onPress={startEditing}
-                  activeOpacity={0.7}
-                >
-                  <Ionicons name="create-outline" size={20} color={accent.hex} />
-                </TouchableOpacity>
+                  accessibilityLabel="Edit transaction"
+                />
 
                 <TouchableOpacity
                   style={styles.topActionIconBtn}
@@ -418,7 +418,7 @@ export const TransactionDetailScreen = () => {
                   onPress={startEditing}
                   activeOpacity={0.7}
                 >
-                  <Ionicons name="create-outline" size={18} color={accent.hex} />
+                  <EditIcon size={18} color={accent.hex} />
                   <Text style={[styles.quickActionText, { color: accent.hex }]}>Edit Details</Text>
                 </TouchableOpacity>
 

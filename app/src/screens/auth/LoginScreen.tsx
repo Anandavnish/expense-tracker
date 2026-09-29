@@ -22,7 +22,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
   const scrollRef = useRef<ScrollView>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const { signIn, signInWithGoogle, signInAsGuest, isLoading, error, clearError } = useAuthStore();
+  const { signIn, signInWithGoogle, isLoading, error, clearError } = useAuthStore();
 
   const handleSignIn = async () => {
     if (!email || !password) return;
@@ -131,21 +131,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
               <View style={styles.btnRow}>
                 <Ionicons name="logo-google" size={17} color={COLORS.textPrimary} />
                 <Text style={styles.oauthBtnText}>Continue with Google</Text>
-              </View>
-            </TactileButton>
-
-            {/* Guest Mode Button */}
-            <TactileButton
-              onPress={() => {
-                clearError();
-                signInAsGuest();
-              }}
-              disabled={isLoading}
-              style={styles.guestBtn}
-            >
-              <View style={styles.btnRow}>
-                <Ionicons name="person-outline" size={17} color={COLORS.textSecondary} />
-                <Text style={styles.guestBtnText}>Continue as Guest (Local Only)</Text>
               </View>
             </TactileButton>
           </View>
@@ -275,20 +260,6 @@ const styles = StyleSheet.create({
   },
   oauthBtnText: {
     color: COLORS.textPrimary,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  guestBtn: {
-    backgroundColor: COLORS.surfaceLight,
-    borderColor: COLORS.border,
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingVertical: SPACING.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  guestBtnText: {
-    color: COLORS.textSecondary,
     fontSize: 14,
     fontWeight: '600',
   },

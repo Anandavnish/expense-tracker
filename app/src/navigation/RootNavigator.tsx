@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useCallback } from 'react';
-import { View, StyleSheet, Platform } from 'react-native';
+import { View, StyleSheet, Platform, AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ActivityIndicator } from 'react-native-paper';
 import {
@@ -10,6 +10,7 @@ import {
   CommonActions,
 } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import * as Notifications from 'expo-notifications';
 import { useShareIntent } from 'expo-share-intent';
 import { useAuthStore } from '../store/authStore';
 import { useFinanceStore } from '../store/financeStore';
@@ -35,12 +36,23 @@ import {
 } from '../services/versionService';
 import { UpdatePromptModal } from '../components/UpdatePromptModal';
 
+// Configure in-app notification presentation
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+    shouldShowBanner: true,
+    shouldShowList: true,
+  }),
+});
+
 export const navigationRef = createNavigationContainerRef<any>();
 
 const AppStack = createNativeStackNavigator();
 
 export const RootNavigator = () => {
-  const { session, user, isGuest, isLoading, initializeAuth } = useAuthStore();
+  const { session, user, isLoading, initializeAuth } = useAuthStore();
   const { loadSettings, accent, effectiveTheme, colors, hasGeminiApiKey } = useSettingsStore();
   const {
     loadCachedData,
@@ -73,6 +85,49 @@ export const RootNavigator = () => {
       pendingNavRef.current = { screen, params };
     }
   }, []);
+
+  // Surface shared transactions: safely posts a tappable notification if backgrounded
+  // (compliant with Android 10+ Background Activity Launch restrictions), or directly navigates if active
+  const surfaceSharedTransaction = useCallback(
+    async (navParams: any, summaryTitle: string, summaryBody: string) => {
+      const isBackgrounded = AppState.currentState !== 'active';
+
+      if (isBackgrounded) {
+        try {
+          await Notifications.scheduleNotificationAsync({
+            content: {
+              title: summaryTitle,
+              body: summaryBody,
+              data: {
+                screen: 'AddTransaction',
+                params: navParams,
+              },
+            },
+            trigger: null,
+          });
+        } catch (e) {
+          console.warn('[RootNavigator] Failed to schedule notification:', e);
+        }
+      } else {
+        navigateOrQueue('AddTransaction', navParams);
+      }
+    },
+    [navigateOrQueue]
+  );
+
+  // Listen for user taps on the transaction notification to route cleanly from background
+  useEffect(() => {
+    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+      const data = response?.notification?.request?.content?.data;
+      if (data?.screen === 'AddTransaction') {
+        navigateOrQueue('AddTransaction', data.params);
+      }
+    });
+
+    return () => {
+      sub.remove();
+    };
+  }, [navigateOrQueue]);
 
   // Check for app releases / APK updates on launch
   useEffect(() => {
@@ -128,13 +183,15 @@ export const RootNavigator = () => {
         }
       }
 
-      // Immediately navigate with active analyzing state so user sees screen open on the go!
-      navigateOrQueue('AddTransaction', {
-        imageUri: uri,
-        prefillSource: 'screenshot',
-        isAnalyzing: true,
-        scanMessage: 'Reading receipt with on-device OCR...',
-      });
+      // If active in foreground, immediately show analyzing state
+      if (AppState.currentState === 'active') {
+        navigateOrQueue('AddTransaction', {
+          imageUri: uri,
+          prefillSource: 'screenshot',
+          isAnalyzing: true,
+          scanMessage: 'Reading receipt with on-device OCR...',
+        });
+      }
 
       try {
         const { accounts, categories } = useFinanceStore.getState();
@@ -161,7 +218,7 @@ export const RootNavigator = () => {
 
         const parsedMerchant = parsed.merchant !== 'Unknown' ? parsed.merchant : undefined;
 
-        navigateOrQueue('AddTransaction', {
+        const navParams = {
           imageUri: uri,
           prefillAmount: parsed.amount !== null ? parsed.amount : undefined,
           prefillNote: parsedMerchant || undefined,
@@ -183,16 +240,25 @@ export const RootNavigator = () => {
             : parsed.amount !== null
             ? `Extracted ₹${parsed.amount} for ${parsed.merchant} (${parsed.suggestedCategory})`
             : 'Screenshot parsed! Review details and save.',
-        });
+        };
+
+        const title = parsed.amount !== null ? `Receipt Parsed: ₹${parsed.amount}` : 'Receipt Ready';
+        const body = parsedMerchant
+          ? `${parsedMerchant} (${parsed.suggestedCategory}) — Tap to review and save`
+          : 'Receipt scanned — Tap to review and save';
+
+        surfaceSharedTransaction(navParams, title, body);
       } catch {
-        navigateOrQueue('AddTransaction', {
-          imageUri: uri,
-          isAnalyzing: false,
-          scanError: "Couldn't read that screenshot — enter it manually",
-        });
+        if (AppState.currentState === 'active') {
+          navigateOrQueue('AddTransaction', {
+            imageUri: uri,
+            isAnalyzing: false,
+            scanError: "Couldn't read that screenshot — enter it manually",
+          });
+        }
       }
     },
-    [hasGeminiApiKey, navigateOrQueue]
+    [hasGeminiApiKey, navigateOrQueue, surfaceSharedTransaction]
   );
 
   const processSharedText = useCallback(
@@ -239,8 +305,12 @@ export const RootNavigator = () => {
           : 'Message received! Review details and save.',
       };
 
-      // Immediately open AddTransaction screen on the go!
-      navigateOrQueue('AddTransaction', navParams);
+      const title = parsed.amount !== null ? `Expense Detected: ₹${parsed.amount}` : 'New Transaction Shared';
+      const body = parsedMerchant
+        ? `${parsedMerchant} (${parsed.suggestedCategory}) — Tap to review and save`
+        : 'Receipt/SMS shared — Tap to review details and save';
+
+      surfaceSharedTransaction(navParams, title, body);
 
       // 2. If Gemini escalation is needed (unrecognized merchant or low confidence amount),
       // refine in background without blocking the user
@@ -282,12 +352,12 @@ export const RootNavigator = () => {
           .catch(() => {});
       }
     },
-    [hasGeminiApiKey, navigateOrQueue]
+    [hasGeminiApiKey, surfaceSharedTransaction]
   );
 
   // Handle incoming shared screenshot / receipt or SMS text from external apps
   useEffect(() => {
-    if (hasShareIntent && (session || isGuest)) {
+    if (hasShareIntent && session) {
       if (shareIntent?.files && shareIntent.files.length > 0) {
         const file = shareIntent.files[0];
         const imagePath = file.path;
@@ -302,7 +372,7 @@ export const RootNavigator = () => {
         processSharedText(textToProcess);
       }
     }
-  }, [hasShareIntent, shareIntent, session, isGuest, resetShareIntent, processSharedImage, processSharedText]);
+  }, [hasShareIntent, shareIntent, session, resetShareIntent, processSharedImage, processSharedText]);
 
   const appNavTheme = useMemo(() => {
     const baseNavTheme = effectiveTheme === 'light' ? DefaultTheme : DarkTheme;
@@ -352,7 +422,7 @@ export const RootNavigator = () => {
         }
       }}
     >
-      {session || isGuest ? (
+      {session ? (
         <AppStack.Navigator
           screenOptions={{
             headerShown: false,

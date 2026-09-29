@@ -23,6 +23,7 @@
     "expo-image-picker": "~57.0.20",
     "expo-linear-gradient": "~57.0.2",
     "expo-mlkit-ocr": "^0.2.7",
+    "expo-notifications": "~57.0.21",
     "expo-print": "~57.0.2",
     "expo-share-intent": "^8.0.1",
     "expo-sharing": "~57.0.22",

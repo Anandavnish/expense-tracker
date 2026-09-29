@@ -20,6 +20,7 @@ import { TactileButton } from '../../components/TactileButton';
 import { TransactionRow } from '../../components/TransactionRow';
 import { KeyboardAwareScrollView } from '../../components/KeyboardAwareScrollView';
 import { BankLogo } from '../../components/BankLogo';
+import { EditButton, EditIcon } from '../../components/EditButton';
 import { useKeyboard } from '../../hooks/useKeyboard';
 import { AccountType, BankPreset } from '../../types/database';
 
@@ -252,13 +253,12 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
         </TouchableOpacity>
         <Text style={styles.headerTitle}>ACCOUNT DETAILS</Text>
         <View style={styles.headerRightActions}>
-          <TouchableOpacity
+          <EditButton
+            size={32}
+            iconSize={15}
             onPress={openEditModal}
-            style={styles.actionHeaderBtn}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          >
-            <Ionicons name="pencil-outline" size={18} color={colors.textSecondary} />
-          </TouchableOpacity>
+            accessibilityLabel="Edit money source"
+          />
         </View>
       </View>
 
@@ -434,7 +434,7 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
             onPress={openEditModal}
             activeOpacity={0.7}
           >
-            <Ionicons name="pencil-outline" size={16} color={colors.textSecondary} />
+            <EditIcon size={16} color={colors.textSecondary} />
             <Text style={styles.quickActionText}>Edit Details</Text>
           </TouchableOpacity>
         </View>

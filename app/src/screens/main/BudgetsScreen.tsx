@@ -25,6 +25,7 @@ import { InlineError } from '../../components/InlineError';
 import { TactileButton } from '../../components/TactileButton';
 import { ReanimatedNumber } from '../../components/ReanimatedNumber';
 import { KeyboardAwareScrollView } from '../../components/KeyboardAwareScrollView';
+import { EditButton, EditIcon } from '../../components/EditButton';
 import { getCategoryIcon, getCategoryColor } from '../../utils/categoryIcons';
 import { supabase } from '../../services/supabase';
 
@@ -717,11 +718,11 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
             {/* Form Header with Close Button */}
             <View style={styles.formCardHeader}>
               <View style={styles.formCardHeaderLeft}>
-                <Ionicons
-                  name={isEditingExisting ? 'create-outline' : 'options-outline'}
-                  size={16}
-                  color={accent.hex}
-                />
+                {isEditingExisting ? (
+                  <EditIcon size={16} color={accent.hex} />
+                ) : (
+                  <Ionicons name="options-outline" size={16} color={accent.hex} />
+                )}
                 <Text style={[styles.formTitle, { color: colors.textPrimary }]}>
                   {isEditingExisting ? 'EDIT MONTHLY LIMIT' : 'SET MONTHLY LIMIT'}
                 </Text>
@@ -1258,20 +1259,11 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
                   {Math.round(Number(overallSummary.spent_percentage))}%
                 </Text>
                 <View style={styles.cardActionsCluster}>
-                  <View
-                    style={[
-                      styles.cardEditPill,
-                      {
-                        borderColor: accent.hex,
-                        backgroundColor: colors.surfaceLight,
-                      },
-                    ]}
-                  >
-                    <Ionicons name="pencil-outline" size={12} color={accent.hex} />
-                    <Text style={[styles.cardEditPillText, { color: accent.hex }]}>
-                      Edit
-                    </Text>
-                  </View>
+                  <EditButton
+                    size={26}
+                    iconSize={13}
+                    onPress={() => handleOpenForm('Overall Budget')}
+                  />
                   <TouchableOpacity
                     onPress={(e) => {
                       e.stopPropagation();
@@ -1453,20 +1445,11 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
                       {Math.round(Number(catSummary.spent_percentage))}%
                     </Text>
                     <View style={styles.cardActionsCluster}>
-                      <View
-                        style={[
-                          styles.cardEditPill,
-                          {
-                            borderColor: accent.hex,
-                            backgroundColor: colors.surfaceLight,
-                          },
-                        ]}
-                      >
-                        <Ionicons name="pencil-outline" size={11} color={accent.hex} />
-                        <Text style={[styles.cardEditPillText, { color: accent.hex }]}>
-                          Edit
-                        </Text>
-                      </View>
+                      <EditButton
+                        size={26}
+                        iconSize={13}
+                        onPress={() => handleOpenForm(catName)}
+                      />
                       <TouchableOpacity
                         onPress={(e) => {
                           e.stopPropagation();

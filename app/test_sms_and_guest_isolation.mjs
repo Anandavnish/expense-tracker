@@ -280,13 +280,11 @@ function parseBankingSms(rawText, userAccounts, availableCategories) {
 }
 
 const getStorageKey = (userId) => {
-  const effective = userId && userId !== 'guest_local_user' ? userId : 'guest';
-  return `@finance_store_cache_${effective}_v3`;
+  return `@finance_store_cache_${userId || 'default'}_v3`;
 };
 
 const getCategoriesKey = (userId) => {
-  const effective = userId && userId !== 'guest_local_user' ? userId : 'guest';
-  return `@finance_categories_${effective}_v1`;
+  return `@finance_categories_${userId || 'default'}_v1`;
 };
 
 console.log('--- STARTING SMS PARSER & ISOLATION VERIFICATION ---\n');
@@ -361,25 +359,23 @@ const match4 = normalizeAndMatchCategory(undefined, categories);
 assert.strictEqual(match4.category, 'Food', 'Default should be Food');
 console.log('✅ TEST 3 PASSED: Category normalization and auto-add flags verified.\n');
 
-// 4. User and Guest Storage Key Isolation
-console.log('[TEST 4] Testing User vs Guest storage key isolation...');
-const guestStoreKey = getStorageKey(null);
-const guestStoreKey2 = getStorageKey('guest_local_user');
+// 4. User Storage Key Isolation
+console.log('[TEST 4] Testing User storage key isolation...');
+const defaultStoreKey = getStorageKey(null);
 const userAStoreKey = getStorageKey('usr_google_123');
 const userBStoreKey = getStorageKey('usr_google_456');
 
-assert.strictEqual(guestStoreKey, '@finance_store_cache_guest_v3');
-assert.strictEqual(guestStoreKey2, '@finance_store_cache_guest_v3');
+assert.strictEqual(defaultStoreKey, '@finance_store_cache_default_v3');
 assert.strictEqual(userAStoreKey, '@finance_store_cache_usr_google_123_v3');
 assert.strictEqual(userBStoreKey, '@finance_store_cache_usr_google_456_v3');
 
-assert.notStrictEqual(guestStoreKey, userAStoreKey, 'Guest and User A must not share cache key');
+assert.notStrictEqual(defaultStoreKey, userAStoreKey, 'Default and User A must not share cache key');
 assert.notStrictEqual(userAStoreKey, userBStoreKey, 'User A and User B must not share cache key');
 
-const guestCatKey = getCategoriesKey(null);
+const defaultCatKey = getCategoriesKey(null);
 const userCatKey = getCategoriesKey('usr_google_123');
-assert.notStrictEqual(guestCatKey, userCatKey, 'Guest and User A must not share categories key');
+assert.notStrictEqual(defaultCatKey, userCatKey, 'Default and User A must not share categories key');
 
-console.log('✅ TEST 4 PASSED: User and Guest storage keys are completely isolated.\n');
+console.log('✅ TEST 4 PASSED: User storage keys are completely isolated per account.\n');
 
 console.log('--- ALL SMS PARSER & ISOLATION TESTS PASSED CLEANLY ---');

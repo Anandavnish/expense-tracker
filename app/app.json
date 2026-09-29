@@ -37,7 +37,14 @@
       ],
       "expo-font",
       "expo-web-browser",
-      "expo-mlkit-ocr"
+      "expo-mlkit-ocr",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#0C0D11"
+        }
+      ]
     ],
     "extra": {
       "eas": {

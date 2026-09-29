@@ -14,18 +14,15 @@ import {
 import { RealtimeChannel } from '@supabase/supabase-js';
 
 export const getStorageKey = (userId?: string | null) => {
-  const effective = userId && userId !== 'guest_local_user' ? userId : 'guest';
-  return `@finance_store_cache_${effective}_v3`;
+  return `@finance_store_cache_${userId || 'default'}_v3`;
 };
 
 export const getCategoriesKey = (userId?: string | null) => {
-  const effective = userId && userId !== 'guest_local_user' ? userId : 'guest';
-  return `@finance_categories_${effective}_v1`;
+  return `@finance_categories_${userId || 'default'}_v1`;
 };
 
 export const getAccountOrderKey = (userId?: string | null) => {
-  const effective = userId && userId !== 'guest_local_user' ? userId : 'guest';
-  return `@finance_account_order_${effective}_v1`;
+  return `@finance_account_order_${userId || 'default'}_v1`;
 };
 
 const persistFinanceCache = (
@@ -38,30 +35,14 @@ const persistFinanceCache = (
     currentUserId?: string | null;
   }
 ) => {
-  // If there is no active user id (e.g. during sign out or transitional state),
-  // NEVER write to storage to prevent cross-account cache poisoning!
   if (!state.currentUserId) return;
 
-  const isGuest = isGuestUser(state.currentUserId) || state.currentUserId === 'guest';
   const key = getStorageKey(state.currentUserId);
 
-  // Strictly sanitize data: if saving guest cache, only save guest items.
-  // If saving authenticated user cache, only save that user's items.
-  const filteredAccounts = isGuest
-    ? state.accounts.filter((a) => a.user_id === 'guest_local_user')
-    : state.accounts.filter((a) => a.user_id === state.currentUserId);
-
-  const filteredTransactions = isGuest
-    ? state.transactions.filter((t) => t.user_id === 'guest_local_user')
-    : state.transactions.filter((t) => t.user_id === state.currentUserId);
-
-  const filteredBorrows = isGuest
-    ? state.borrows.filter((b) => b.user_id === 'guest_local_user')
-    : state.borrows.filter((b) => b.user_id === state.currentUserId);
-
-  const filteredBudgets = isGuest
-    ? state.budgets.filter((bg) => bg.user_id === 'guest_local_user')
-    : state.budgets.filter((bg) => bg.user_id === state.currentUserId);
+  const filteredAccounts = state.accounts.filter((a) => a.user_id === state.currentUserId);
+  const filteredTransactions = state.transactions.filter((t) => t.user_id === state.currentUserId);
+  const filteredBorrows = state.borrows.filter((b) => b.user_id === state.currentUserId);
+  const filteredBudgets = state.budgets.filter((bg) => bg.user_id === state.currentUserId);
 
   AsyncStorage.setItem(
     key,
@@ -75,9 +56,7 @@ const persistFinanceCache = (
   ).catch(() => {});
 };
 
-const isGuestUser = (userId?: string | null): boolean => {
-  return userId === 'guest_local_user';
-};
+const isGuestUser = (_userId?: string | null): boolean => false;
 
 export const DEFAULT_STUDENT_CATEGORIES = [
   'Food',
@@ -565,7 +544,11 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
 
   loadCachedData: async (targetUserId?: string) => {
     try {
-      const effectiveUserId = targetUserId || get().currentUserId || 'guest';
+      const effectiveUserId = targetUserId || get().currentUserId;
+      if (!effectiveUserId) {
+        set({ isInitialLoading: false });
+        return;
+      }
       set({ currentUserId: effectiveUserId });
 
       const [cached, cachedCats, cachedOrder] = await Promise.all([
@@ -593,21 +576,20 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
 
       if (cached) {
         const parsed = JSON.parse(cached);
-        const isGuest = isGuestUser(effectiveUserId) || effectiveUserId === 'guest';
 
-        const rawAccounts = ((parsed.accounts || []) as Account[]).filter((a) =>
-          isGuest ? a.user_id === 'guest_local_user' : a.user_id === effectiveUserId
+        const rawAccounts = ((parsed.accounts || []) as Account[]).filter(
+          (a) => a.user_id === effectiveUserId
         );
         const accounts = sortAccountsByOrder(deduplicateAccounts(rawAccounts), orderIds);
 
-        const transactions = ((parsed.transactions || []) as Transaction[]).filter((t) =>
-          isGuest ? t.user_id === 'guest_local_user' : t.user_id === effectiveUserId
+        const transactions = ((parsed.transactions || []) as Transaction[]).filter(
+          (t) => t.user_id === effectiveUserId
         );
-        const borrows = ((parsed.borrows || []) as Borrow[]).filter((b) =>
-          isGuest ? b.user_id === 'guest_local_user' : b.user_id === effectiveUserId
+        const borrows = ((parsed.borrows || []) as Borrow[]).filter(
+          (b) => b.user_id === effectiveUserId
         );
-        const budgets = ((parsed.budgets || []) as Budget[]).filter((bg) =>
-          isGuest ? bg.user_id === 'guest_local_user' : bg.user_id === effectiveUserId
+        const budgets = ((parsed.budgets || []) as Budget[]).filter(
+          (bg) => bg.user_id === effectiveUserId
         );
 
         set({

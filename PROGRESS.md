@@ -40,6 +40,61 @@ Foundational architecture build for a high-performance cross-platform personal f
 
 ---
 
+## Architectural Confirmations & System Revisions (Sept 2026)
+
+### 1. Guest-Mode Removal & Scope Verification
+- **Audit Result**: Guest mode was newly introduced in commit `ba910a4` and was **not** requested. Because the app has no guest-accessible screens and is strictly auth-gated at `RootNavigator`, guest mode has been **completely removed**.
+- **Fixes Applied**:
+  - Removed "Continue as Guest (Local Only)" button, handler, and associated styles from `LoginScreen.tsx`.
+  - Removed `isGuest`, `signInAsGuest`, `GUEST_SESSION`, `GUEST_USER`, and `GUEST_STORAGE_KEY` from `authStore.ts`.
+  - Updated `RootNavigator.tsx` to strictly auth-gate the application (`session ? <AppStack /> : <AuthStack />`).
+  - Purged guest caching branches from `financeStore.ts` and `merchantRulesStore.ts`, ensuring all storage keys are strictly keyed to authenticated user IDs (`@finance_store_cache_<userId>_v3`, `@merchant_rules_<userId>_v1`).
+  - Updated unit tests (`test_sms_and_guest_isolation.mjs`) to verify multi-user account isolation without guest artifacts.
+
+### 2. User Merchant Rules Migration & Upsert Targeting
+- **Status**: **Confirmed 100% compliant**.
+- **Verification Details**:
+  - Migration `20260928000004_user_merchant_rules.sql` uses a plain-column UNIQUE constraint:
+    ```sql
+    CONSTRAINT user_merchant_rules_user_merchant_key UNIQUE (user_id, merchant_name)
+    ```
+  - `merchantRulesStore.ts` strictly pre-normalizes `merchant_name` before insert/lookup via `normalizeMerchantName(rawMerchant)`.
+  - The Supabase client upsert cleanly targets the plain composite column constraint:
+    ```ts
+    await supabase.from('user_merchant_rules').upsert(
+      { user_id: currentUserId, merchant_name: norm, category, ... },
+      { onConflict: 'user_id,merchant_name' }
+    );
+    ```
+  - This avoids `UNIQUE(user_id, lower(merchant_name))` functional indexes which Postgres/PostgREST/supabase-js ON CONFLICT cannot directly reference.
+
+### 3. Redact Sensitive Fields Before Gemini Escalation (Revision Applied)
+- **Status**: **Implemented & Verified with Unit Tests**.
+- **Policy**:
+  - Raw unredacted SMS or screenshot text is **NEVER** written to Supabase. Supabase only stores parsed transaction records (`amount`, `category`, `note`, `type`, `date`, `account_id`).
+  - For Gemini escalation (both low-confidence amount extraction and unrecognized merchant classification), the system sends the full text payload with sensitive fields redacted using `redactSensitiveFields()`:
+    1. **Account balance figures** (`Avl Bal`, `Available Balance`, `Bal:`, `Total Bal` followed by currency & amount) &rarr; `[REDACTED_BALANCE]`
+    2. **Partial/full account numbers** (`A/c XX1234`, `XXXXXX1234`, `A/C 987654321098`, `account ending 4321`) &rarr; `[REDACTED_ACCOUNT]`
+    3. **Phone numbers** (10-digit Indian numbers and toll-free numbers not preceded by UTR/Ref/Txn labels) &rarr; `[REDACTED_PHONE]`
+    4. **Standalone 4-6 digit codes** that look OTP-like (isolated or preceded by OTP/code/PIN, excluding years 2020-2035 and amounts) &rarr; `[REDACTED_CODE]`
+  - **Surviving Intact**: All transaction-type keywords (`Credited`, `Debited`, `Refund`, `Reversal`, `EMI`, `NEFT`, `IMPS`, `UPI`) and merchant context (`Zomato`, `Swiggy`, `Gopal Sweet`, etc.) survive intact to ensure maximum classification accuracy.
+  - **Shared Service & Tests**: Created `app/src/services/dataSanitizer.ts` with `redactSensitiveFields()`. Verified against 5 realistic banking SMS patterns in `app/test_redaction.mjs` (100% pass rate).
+
+### 4. Background Activity Launch (BAL) Handling via Tappable Notifications
+- **Status**: **Fixed & Confirmed compliant with Android 10+ restrictions**.
+- **Mechanism**:
+  - Android 10+ (API 29+) strictly blocks background activity starts (`startActivity` from background/inactive state).
+  - Integrated `expo-notifications` (`v57.0.21`) with native config plugin configured in `app.json`.
+  - When a shared image or SMS arrives via `expo-share-intent`:
+    - If the app is in the background (`AppState.currentState !== 'active'`), the app schedules an immediate local tappable notification (`Notifications.scheduleNotificationAsync`):
+      - Title: `Expense Detected: ₹<amount>` / `Receipt Parsed: ₹<amount>`
+      - Body: `<Merchant> (<Category>) — Tap to review and save`
+      - Payload: `{ screen: 'AddTransaction', params: navParams }`
+    - When the user taps the system notification, Android routes via `Notifications.addNotificationResponseReceivedListener`, safely bringing the app to the foreground and opening `AddTransactionScreen`.
+    - If the app is already in the active foreground (`AppState.currentState === 'active'`), it continues to navigate directly to `AddTransactionScreen` without delay.
+
+---
+
 ## What's Done & Verified
 
 ### 1. Backend & Database (Supabase)

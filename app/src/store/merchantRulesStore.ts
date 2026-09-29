@@ -8,8 +8,7 @@ import { LearnedMerchantRule, TransactionType } from '../types/database';
 import { normalizeMerchantName } from '../services/smsParser';
 
 export const getMerchantRulesStorageKey = (userId?: string | null) => {
-  const effective = userId && userId !== 'guest_local_user' ? userId : 'guest';
-  return `@merchant_rules_${effective}_v1`;
+  return `@merchant_rules_${userId || 'default'}_v1`;
 };
 
 interface MerchantRulesState {
@@ -62,8 +61,8 @@ export const useMerchantRulesStore = create<MerchantRulesState>((set, get) => ({
       // Local cache read failed, continue
     }
 
-    // 2. If logged in (not guest), sync from Supabase
-    if (userId && userId !== 'guest_local_user') {
+    // 2. If logged in, sync from Supabase
+    if (userId) {
       try {
         const { data, error } = await supabase
           .from('user_merchant_rules')
@@ -105,7 +104,7 @@ export const useMerchantRulesStore = create<MerchantRulesState>((set, get) => ({
 
     const now = new Date().toISOString();
     const newRule: LearnedMerchantRule = {
-      user_id: currentUserId || 'guest_local_user',
+      user_id: currentUserId || '',
       merchant_name: norm,
       category,
       transaction_type: transactionType,
@@ -127,7 +126,7 @@ export const useMerchantRulesStore = create<MerchantRulesState>((set, get) => ({
     persistLocalRules(currentUserId, updatedRules);
 
     // Sync to Supabase if authenticated
-    if (currentUserId && currentUserId !== 'guest_local_user') {
+    if (currentUserId) {
       try {
         await supabase.from('user_merchant_rules').upsert(
           {
@@ -166,7 +165,7 @@ export const useMerchantRulesStore = create<MerchantRulesState>((set, get) => ({
 
     const now = new Date().toISOString();
     const newRule: LearnedMerchantRule = {
-      user_id: currentUserId || 'guest_local_user',
+      user_id: currentUserId || '',
       merchant_name: norm,
       category,
       transaction_type: transactionType,
@@ -189,7 +188,7 @@ export const useMerchantRulesStore = create<MerchantRulesState>((set, get) => ({
     persistLocalRules(currentUserId, updatedRules);
 
     // Sync to Supabase if authenticated
-    if (currentUserId && currentUserId !== 'guest_local_user') {
+    if (currentUserId) {
       try {
         await supabase.from('user_merchant_rules').upsert(
           {
@@ -223,7 +222,7 @@ export const useMerchantRulesStore = create<MerchantRulesState>((set, get) => ({
     set({ rules: updatedRules });
     persistLocalRules(currentUserId, updatedRules);
 
-    if (currentUserId && currentUserId !== 'guest_local_user') {
+    if (currentUserId) {
       try {
         await supabase
           .from('user_merchant_rules')
@@ -247,7 +246,7 @@ export const useMerchantRulesStore = create<MerchantRulesState>((set, get) => ({
     set({ rules: updatedRules });
     persistLocalRules(currentUserId, updatedRules);
 
-    if (currentUserId && currentUserId !== 'guest_local_user') {
+    if (currentUserId) {
       try {
         await supabase
           .from('user_merchant_rules')

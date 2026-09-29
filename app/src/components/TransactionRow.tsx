@@ -8,6 +8,7 @@ import { SPACING, TYPOGRAPHY } from '../theme/tokens';
 import { useAppTheme } from '../theme/useAppTheme';
 import { getCategoryIcon, getCategoryColor } from '../utils/categoryIcons';
 import { BankLogo } from './BankLogo';
+import { EditButton } from './EditButton';
 import { useFinanceStore } from '../store/financeStore';
 
 export interface TransactionRowProps {

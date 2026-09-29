@@ -3,6 +3,7 @@
 // Runs 100% deterministic local extraction and rule-based classification first before any AI escalation.
 
 import { TransactionType, LearnedMerchantRule } from '../types/database';
+export { redactSensitiveFields } from './dataSanitizer';
 
 export type ConfidenceLevel = 'high' | 'medium' | 'low';
 
@@ -1096,10 +1097,11 @@ export async function parseTransactionWithPipeline(
   // Step 3: Escalate merchant classification if genuinely unrecognized
   if (result.needsGeminiMerchant) {
     try {
-      const clsRes = await classifyMerchantWithGemini(
-        result.merchant,
-        input.availableCategories
-      );
+      const clsRes = await classifyMerchantWithGemini({
+        merchantName: result.merchant,
+        rawText: input.rawText,
+        availableCategories: input.availableCategories,
+      });
 
       if (clsRes.success && clsRes.data) {
         result.suggestedCategory = clsRes.data.category;

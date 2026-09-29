@@ -46,6 +46,7 @@ import { InlineError } from '../../components/InlineError';
 import { YouTubeStyleDraggableList } from '../../components/YouTubeStyleDraggableList';
 import { KeyboardAwareScrollView } from '../../components/KeyboardAwareScrollView';
 import { BankLogo } from '../../components/BankLogo';
+import { EditButton } from '../../components/EditButton';
 import { Account, AccountType, BankPresetCode, CreditCardIssuerCode } from '../../types/database';
 
 interface DashboardScreenProps {
@@ -1136,26 +1137,35 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                 <Text style={styles.budgetLockedTagText}>LOCKED</Text>
               </View>
             ) : budgetLimit > 0 ? (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                <TouchableOpacity
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <EditButton
+                  size={26}
+                  iconSize={13}
                   onPress={() =>
                     navigation.navigate('Budgets', {
                       editCategory: 'Overall Budget',
                       currentLimit: String(budgetLimit),
                     })
                   }
-                  hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
-                >
-                  <Text style={[styles.cardHeaderAction, { color: accent.hex }]}>Edit</Text>
-                </TouchableOpacity>
+                />
                 <TouchableOpacity
                   onPress={() => {
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
                     setDeleteBudgetModalVisible(true);
                   }}
+                  style={{
+                    width: 26,
+                    height: 26,
+                    borderRadius: 7,
+                    backgroundColor: `${colors.alert}15`,
+                    borderColor: `${colors.alert}30`,
+                    borderWidth: 1,
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                  }}
                   hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
                 >
-                  <Ionicons name="trash-outline" size={14} color={colors.alert} />
+                  <Ionicons name="trash-outline" size={13} color={colors.alert} />
                 </TouchableOpacity>
               </View>
             ) : (
@@ -1342,13 +1352,11 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
               )}
             </View>
             {isPastMonth || isFutureMonth ? null : (
-              <TouchableOpacity
+              <EditButton
+                size={26}
+                iconSize={13}
                 onPress={() => setSourcesManageVisible(true)}
-                style={styles.manageIconBtn}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              >
-                <Ionicons name="pencil-outline" size={15} color={colors.textSecondary} />
-              </TouchableOpacity>
+              />
             )}
           </View>
 
@@ -1659,13 +1667,11 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
         <View style={styles.card}>
           <View style={styles.cardHeaderWithAction}>
             <Text style={styles.cardHeaderLabel}>Spending by Category</Text>
-            <TouchableOpacity
+            <EditButton
+              size={26}
+              iconSize={13}
               onPress={() => setCategoriesManageVisible(true)}
-              style={styles.manageIconBtn}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <Ionicons name="pencil-outline" size={15} color={colors.textSecondary} />
-            </TouchableOpacity>
+            />
           </View>
 
           <View style={styles.categoriesList}>
@@ -2417,13 +2423,11 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                     }}
                     renderActions={(acc) => (
                       <View style={styles.managerItemActions}>
-                        <TouchableOpacity
+                        <EditButton
+                          size={28}
+                          iconSize={14}
                           onPress={() => handleOpenEditSource(acc)}
-                          style={styles.managerCircleBtn}
-                          hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
-                        >
-                          <Ionicons name="pencil-outline" size={14} color={colors.textSecondary} />
-                        </TouchableOpacity>
+                        />
 
                         <TouchableOpacity
                           onPress={() => handleOpenDeleteAccount(acc)}
@@ -2643,13 +2647,11 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                   }}
                   renderActions={(cat) => (
                     <View style={styles.managerItemActions}>
-                      <TouchableOpacity
+                      <EditButton
+                        size={28}
+                        iconSize={14}
                         onPress={() => handleStartEditCategory(cat)}
-                        style={styles.managerCircleBtn}
-                        hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
-                      >
-                        <Ionicons name="pencil-outline" size={14} color={colors.textSecondary} />
-                      </TouchableOpacity>
+                      />
 
                       <TouchableOpacity
                         onPress={() => setCategoryDeleteTarget(cat)}
