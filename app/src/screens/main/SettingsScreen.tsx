@@ -113,6 +113,8 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) =>
       if (result.hasUpdate && result.release) {
         setUpdateRelease(result.release);
         setShowUpdateModal(true);
+      } else if (result.error) {
+        Alert.alert('Update Check', result.error, [{ text: 'OK' }]);
       } else {
         Alert.alert(
           'Up to Date',

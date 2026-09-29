@@ -77,15 +77,66 @@ function parseVersionCodeFromBody(body: string | undefined): number | null {
 }
 
 /**
+ * Check GitHub latest release via unthrottled web redirect.
+ * Bypasses GitHub API's 60 req/hr rate limits and User-Agent blocks on mobile networks.
+ */
+async function checkGitHubWebRedirect(): Promise<AppReleaseInfo | null> {
+  try {
+    const webUrl = `https://github.com/${GITHUB_REPO_OWNER}/${GITHUB_REPO_NAME}/releases/latest`;
+    const response = await fetch(webUrl, {
+      method: 'GET',
+      headers: {
+        'Cache-Control': 'no-cache',
+      },
+    });
+
+    const finalUrl = response.url || '';
+    const match = finalUrl.match(/\/releases\/tag\/(v?[0-9.]+)/i);
+    if (!match || !match[1]) {
+      return null;
+    }
+
+    const rawTag = match[1];
+    const releaseVersion = rawTag.replace(/^v/i, '').trim();
+    const downloadUrl = `https://github.com/${GITHUB_REPO_OWNER}/${GITHUB_REPO_NAME}/releases/download/${rawTag}/ExpenseTracker-${rawTag}.apk`;
+
+    // Estimate versionCode from SemVer patch / minor (e.g. 1.0.6 -> 6)
+    const semParts = releaseVersion.split('.').map(p => parseInt(p, 10) || 0);
+    const estimatedCode = semParts[2] || semParts[1] || 1;
+
+    return {
+      id: rawTag,
+      version: releaseVersion,
+      version_code: estimatedCode,
+      title: `Expense Tracker v${releaseVersion} (Build ${estimatedCode})`,
+      release_notes: `Latest release v${releaseVersion} with performance improvements and bug fixes.`,
+      download_url: downloadUrl,
+      is_critical: false,
+      source: 'github',
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Checks GitHub Releases for a newer version with an attached .apk asset
  */
 async function checkGitHubReleases(): Promise<AppReleaseInfo | null> {
+  // 1. Try unthrottled web redirect first (immune to CGNAT mobile IP rate limits)
+  const webRedirectRelease = await checkGitHubWebRedirect();
+  if (webRedirectRelease) {
+    return webRedirectRelease;
+  }
+
+  // 2. Fall back to GitHub REST API
   try {
     const url = `https://api.github.com/repos/${GITHUB_REPO_OWNER}/${GITHUB_REPO_NAME}/releases/latest`;
     const response = await fetch(url, {
       headers: {
         Accept: 'application/vnd.github.v3+json',
         'User-Agent': 'ExpenseTracker-MobileApp',
+        'Cache-Control': 'no-cache',
       },
     });
 
@@ -211,7 +262,11 @@ export async function checkForAppUpdate(): Promise<UpdateCheckResult> {
       }
     }
 
-    return defaultResult;
+    // If neither server could be reached, report error rather than false positive
+    return {
+      ...defaultResult,
+      error: 'Could not reach update servers. Please check your internet connection.',
+    };
   } catch (err: any) {
     return {
       ...defaultResult,
