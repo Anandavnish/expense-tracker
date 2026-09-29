@@ -226,12 +226,15 @@ export const RootNavigator = () => {
           smartNote = parsedMerchant;
         }
 
-        const tierBadge =
-          parsed.resolutionTier === 'tier1_local'
-            ? '⚡ Resolved locally via on-device ML Kit (Tier 1)'
-            : parsed.resolutionTier === 'tier2_gemini_spatial'
-            ? '🤖 Resolved via Gemini Spatial Layout (Tier 2)'
-            : '👁️ Resolved via Gemini Vision Fallback (Tier 3)';
+        const cleanSummary = parsed.isCategoryLearned
+          ? `Matched rule: ${parsed.merchant} ➔ ${parsed.suggestedCategory}`
+          : parsed.amount !== null && parsed.suggestedCategory && parsed.suggestedCategory !== 'Uncategorized'
+          ? `Extracted ₹${parsed.amount} • ${parsed.suggestedCategory}`
+          : parsed.amount !== null && parsed.merchant !== 'Unknown'
+          ? `Extracted ₹${parsed.amount} for ${parsed.merchant}`
+          : parsed.amount !== null
+          ? `Extracted ₹${parsed.amount}`
+          : 'Receipt scanned — review details and save';
 
         const navParams = {
           imageUri: uri,
@@ -250,11 +253,7 @@ export const RootNavigator = () => {
           isAnalyzing: false,
           resolutionTier: parsed.resolutionTier,
           dispatchTimestamp: Date.now(),
-          scanMessage: parsed.isCategoryLearned
-            ? `${tierBadge}: Matched learned rule: ${parsed.merchant} ➔ ${parsed.suggestedCategory}`
-            : parsed.amount !== null
-            ? `${tierBadge}: Extracted ₹${parsed.amount} for ${parsed.merchant} (${parsed.suggestedCategory})`
-            : `${tierBadge}: Screenshot parsed! Review details and save.`,
+          scanMessage: cleanSummary,
         };
 
         const title = parsed.amount !== null ? `Receipt Parsed: ₹${parsed.amount}` : 'Receipt Ready';
@@ -322,10 +321,14 @@ export const RootNavigator = () => {
         resolutionTier: 'tier1_local',
         dispatchTimestamp: Date.now(),
         scanMessage: parsed.isCategoryLearned
-          ? `Matched learned rule: ${parsed.merchant} ➔ ${parsed.suggestedCategory}`
+          ? `Matched rule: ${parsed.merchant} ➔ ${parsed.suggestedCategory}`
+          : parsed.amount !== null && parsed.suggestedCategory && parsed.suggestedCategory !== 'Uncategorized'
+          ? `Extracted ₹${parsed.amount} • ${parsed.suggestedCategory}`
+          : parsed.amount !== null && parsed.merchant !== 'Unknown'
+          ? `Extracted ₹${parsed.amount} for ${parsed.merchant}`
           : parsed.amount !== null
-          ? `Extracted ₹${parsed.amount} for ${parsed.merchant} (${parsed.suggestedCategory})`
-          : 'Message received! Review details and save.',
+          ? `Extracted ₹${parsed.amount}`
+          : 'Message received — review details and save',
       };
 
       const title = parsed.amount !== null ? `Expense Detected: ₹${parsed.amount}` : 'New Transaction Shared';
@@ -375,8 +378,8 @@ export const RootNavigator = () => {
                     resolutionTier: refined.resolutionTier,
                     dispatchTimestamp: Date.now(),
                     scanMessage: refined.isCategoryLearned
-                      ? `Matched learned rule: ${refined.merchant} ➔ ${refined.suggestedCategory}`
-                      : `Gemini AI identified: ${refined.merchant} (${refined.suggestedCategory})`,
+                      ? `Matched rule: ${refined.merchant} ➔ ${refined.suggestedCategory}`
+                      : `Extracted: ${refined.merchant} • ${refined.suggestedCategory}`,
                   },
                 })
               );

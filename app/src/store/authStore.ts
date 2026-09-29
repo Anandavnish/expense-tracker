@@ -72,7 +72,17 @@ const handleAuthUrl = async (url: string) => {
 
     const authError = params.get('error_description') || params.get('error');
     if (authError) {
-      useAuthStore.setState({ isLoading: false, error: authError });
+      let decodedError = authError;
+      try {
+        decodedError = decodeURIComponent(authError);
+      } catch {
+        // ignore
+      }
+      if (decodedError.includes('Unable to exchange external code')) {
+        decodedError =
+          'Google Sign-In configuration error: Please check your Google OAuth Web Client ID and Secret in Supabase, and ensure https://yqopwzkvxdxmomvvlpor.supabase.co/auth/v1/callback is added to Authorized redirect URIs in Google Cloud.';
+      }
+      useAuthStore.setState({ isLoading: false, error: decodedError });
       return;
     }
 

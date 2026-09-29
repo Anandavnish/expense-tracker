@@ -4,9 +4,9 @@
 Foundational architecture build for a high-performance cross-platform personal finance mobile app built for Android using Expo Dev Client, React Native Reanimated, React Native Paper, Zustand, and Supabase.
 
 - **GitHub Repository**: [https://github.com/Anandavnish/expense-tracker](https://github.com/Anandavnish/expense-tracker)
-- **Latest Release**: [Expense Tracker v1.0.9 (Build 9)](https://github.com/Anandavnish/expense-tracker/releases/tag/v1.0.9)
-- **Direct APK Download**: [ExpenseTracker-v1.0.9.apk](https://github.com/Anandavnish/expense-tracker/releases/download/v1.0.9/ExpenseTracker-v1.0.9.apk)
-- **Previous Release**: [Expense Tracker v1.0.8 (Build 8)](https://github.com/Anandavnish/expense-tracker/releases/tag/v1.0.8)
+- **Latest Release**: [Expense Tracker v1.0.10 (Build 10)](https://github.com/Anandavnish/expense-tracker/releases/tag/v1.0.10)
+- **Direct APK Download**: [ExpenseTracker-v1.0.10.apk](https://github.com/Anandavnish/expense-tracker/releases/download/v1.0.10/ExpenseTracker-v1.0.10.apk)
+- **Previous Release**: [Expense Tracker v1.0.9 (Build 9)](https://github.com/Anandavnish/expense-tracker/releases/tag/v1.0.9)
 
 ---
 
@@ -922,6 +922,41 @@ Foundational architecture build for a high-performance cross-platform personal f
       - Test Suite 7: VPA Handle Filtering in SMS & OCR (`user9876543210@upi` & `merchant123@okhdfcbank` exclusion).
       - Test Suite 8: Tier 1 vs Tier 2 vs Tier 3 Resolution Cascade (Local vs Spatial JSON vs Multimodal Vision).
       - Test Suite 9: Zero-Defaulting on Source Accounts & `'Uncategorized'` Category Fallback.
+    - TypeScript typecheck (`npx tsc --noEmit`): 0 errors.
+    - ESLint (`npm run lint`): 0 errors, 0 warnings.
+
+- [x] **v1.0.10 (Build 10): Intelligent Date Extraction Normalization, Multi-Tier Bank Matching, Minimal Scan UI, & Google OAuth Fix**:
+  - **Date Normalization & "Invalid Date" UI Elimination**:
+    - *Root Cause*: In Tier 2 resolution, Gemini spatial extraction returned natural language or locale date strings (e.g., `"29 Sep 2026, 8:46 PM"` or `"Today, 8:46 PM"`). In `AddTransactionScreen.tsx`, date display executed `const [y, m, d] = date.split('-').map(Number); const dObj = new Date(y, m - 1, d);`. Lacking hyphens, this produced `[NaN, NaN, NaN]` &rarr; `new Date(NaN, NaN, NaN)` &rarr; `dObj.toLocaleDateString()` returned literal `"Invalid Date"`.
+    - *Solution*: 
+      - Created `normalizeDateToIso(rawDate)` in `transactionParser.ts`, strictly transforming arbitrary strings, ISO timestamps (`2026-09-29T...`), relative expressions (`Today`, `Yesterday`), slashed/hyphenated formats (`29/09/2026`, `29-09-26`), and JS `Date.parse()` into strict `YYYY-MM-DD`.
+      - Updated Tier 1, Tier 2, and Tier 3 resolution pathways to always normalize dates and fallback to today's ISO date.
+      - Sanitized `AddTransactionScreen.tsx` date parser with `isNaN(dObj.getTime())` check, guaranteeing the UI never displays `"Invalid Date"`.
+  - **Multi-Tier Intelligent Bank Matching Algorithm (Source Selection)**:
+    - *Root Cause*: Previously, receipts containing full bank names like "State Bank of India" or "Fino Payments Bank" failed to match user accounts named "SBI" or "Fino" because of rigid mutual substring checks. Furthermore, recipient UPI handles (e.g. `@okhdfcbank` in `Paid to Gopal Sweet gopalsweet@okhdfcbank`) contaminated whole-text scans, falsely triggering the recipient's bank over the payer's source bank.
+    - *Solution*:
+      - Implemented comprehensive `BANK_ALIASES` canonical map covering SBI, Fino, Slice, HDFC, ICICI, Axis, Kotak, PNB, BOB, Canara, Paytm, Airtel, Union Bank, Federal Bank, IDFC, IndusInd, Yes Bank, RBL, Jupiter, Fi, Cred, Cash, etc.
+      - Designed two-phase extraction in `matchAccountToSource`:
+        - **Phase A (Explicit Source Prioritization)**: Checks labeled source patterns (`From: ...`, `Paid using: ...`, `Debited from: ...`, `Transferred from: ...`) first.
+        - **Phase B (Recipient VPA Stripping & Account Scoring)**: Strips recipient UPI/email handles (`gopalsweet@okhdfcbank`), filters generic financial stop-words (`bank`, `account`, `card`, `salary`), and scores accounts on:
+          1. Explicit 3-4 digit account numbers (e.g. `XX0186`, `(....0186)`, `ending 4521`).
+          2. Exact matching.
+          3. Alias family matching with card vs. bank differentiation (e.g., detects "State Bank of India" and chooses user account "SBI" over "SBI Card"; chooses "SBI Card" if "credit card" is present; matches "Fino Payments Bank" to user account "Fino").
+      - Zero-defaulting preserved: Unmatched receipts leave source unselected (`• Select source`), preventing unintentional deductions.
+  - **Minimal Scan Feedback Banner (UI Clean-up via `/grill-me`)**:
+    - Replaced technical jargon and verbose tier badges (`⚡ Tier 1`, `🤖 Tier 2`, `👁️ Tier 3`, "Resolved via Gemini Spatial Layout") with minimal, clean feedback:
+      - `✔ Extracted ₹${amount} • ${category}`
+      - `Extracted ₹${amount} for ${merchant}`
+      - `Matched rule: ${merchant} ➔ ${category}`
+  - **Google OAuth Diagnostics & Troubleshooting**:
+    - Decoded error strings (`Unable to exchange external code: 4/0A...`) in `authStore.ts`.
+    - Documented the 3 required external configuration steps in Google Cloud Console & Supabase Dashboard to resolve Supabase GoTrue token exchange errors.
+  - **Verification & Testing**:
+    - Expanded `app/test_unified_pipeline.mjs` to **10 test suites** with Test Suite 10 validating:
+      - Relative date normalization ("Today", "Today, 8:46 PM", "Yesterday", ISO timestamps).
+      - Multi-tier bank matching ("State Bank of India" ➔ "SBI", "SBI Credit Card" ➔ "SBI Card", "Fino Payments Bank" ➔ "Fino", "Slice Super Card" ➔ "Slice", account digit matching `...4521` ➔ "HDFC Bank", unmatched Deutsche Bank ➔ `undefined`).
+    - All 10 test suites passed cleanly with 100% assertions satisfied.
+    - Automated E2E verification (`npm run test:e2e`): all 6 steps passed.
     - TypeScript typecheck (`npx tsc --noEmit`): 0 errors.
     - ESLint (`npm run lint`): 0 errors, 0 warnings.
 

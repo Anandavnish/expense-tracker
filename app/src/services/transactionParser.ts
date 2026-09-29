@@ -362,13 +362,31 @@ export function extractUpiReference(text: string): string | null {
 }
 
 /**
- * Parses date string in various Indian banking & receipt formats:
+  * Parses date string in various Indian banking & receipt formats:
  * - 29 Sep 2026, 29-Sep-2026, 29Sep26, Sep 29, 2026, 29 September 2026
  * - 29/09/2026, 29-09-2026, 29-09-26, 2026-09-29
+ * - Today, Today at 8:46 PM, Yesterday
  */
 export function extractTransactionDate(text: string): string | null {
   if (!text) return null;
   const currentYear = new Date().getFullYear();
+  const today = new Date();
+
+  // Pattern 0: Relative dates ("Today", "Today, 8:46 PM", "Yesterday")
+  const lower = text.toLowerCase();
+  if (/\btoday\b/i.test(lower)) {
+    const y = today.getFullYear();
+    const m = String(today.getMonth() + 1).padStart(2, '0');
+    const d = String(today.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  if (/\byesterday\b/i.test(lower)) {
+    const yest = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
+    const y = yest.getFullYear();
+    const m = String(yest.getMonth() + 1).padStart(2, '0');
+    const d = String(yest.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
 
   const monthMap: Record<string, number> = {
     jan: 1, january: 1,
@@ -433,6 +451,48 @@ export function extractTransactionDate(text: string): string | null {
     if (month >= 1 && month <= 12 && day >= 1 && day <= 31 && year >= 2020 && year <= currentYear + 1) {
       return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     }
+  }
+
+  return null;
+}
+
+/**
+ * Normalizes any arbitrary date string into strict YYYY-MM-DD format.
+ * Gracefully handles ISO timestamps, relative strings ("Today"), and locale formats.
+ */
+export function normalizeDateToIso(rawDate: string | null | undefined): string | null {
+  if (!rawDate) return null;
+  const trimmed = rawDate.trim();
+  if (!trimmed) return null;
+
+  // 1. Strict YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return trimmed;
+  }
+
+  // 2. ISO timestamp with T (e.g., "2026-09-29T14:30:00.000Z")
+  const isoPrefix = trimmed.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (isoPrefix) {
+    return isoPrefix[1];
+  }
+
+  // 3. Relative or explicit date extraction
+  const fromExtractor = extractTransactionDate(trimmed);
+  if (fromExtractor) {
+    return fromExtractor;
+  }
+
+  // 4. Fallback to JavaScript Date.parse
+  try {
+    const parsed = new Date(trimmed);
+    if (!isNaN(parsed.getTime()) && parsed.getFullYear() >= 2020 && parsed.getFullYear() <= new Date().getFullYear() + 1) {
+      const y = parsed.getFullYear();
+      const m = String(parsed.getMonth() + 1).padStart(2, '0');
+      const d = String(parsed.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    }
+  } catch {
+    // ignore
   }
 
   return null;
@@ -870,7 +930,171 @@ export function extractAmountWithProminence(
 }
 
 // ---------------------------------------------------------------------------
-// 5. Unified Transaction Parsing Function (Sync & Pure)
+// 5. Bank Aliases & Multi-Tiered Account Matching Engine
+// ---------------------------------------------------------------------------
+
+export const BANK_ALIASES: Record<string, string[]> = {
+  sbi: ['sbi', 'state bank of india', 'state bank', 'sbiref', 'sbi upi', 'state bank of'],
+  'sbi card': ['sbi card', 'sbi credit card', 'sbicard'],
+  fino: ['fino', 'fino payments bank', 'fino bank', 'fino pay', 'finobank'],
+  slice: ['slice', 'slice card', 'slice credit', 'slice super card'],
+  hdfc: ['hdfc', 'hdfc bank', 'hdfc credit card'],
+  icici: ['icici', 'icici bank', 'icici credit card'],
+  axis: ['axis', 'axis bank'],
+  kotak: ['kotak', 'kotak mahindra', 'kotak 811', '811'],
+  pnb: ['pnb', 'punjab national bank', 'punjab national'],
+  bob: ['bob', 'bank of baroda', 'baroda'],
+  canara: ['canara', 'canara bank'],
+  paytm: ['paytm', 'paytm payments bank', 'paytm bank', 'paytm wallet'],
+  airtel: ['airtel', 'airtel payments bank', 'airtel bank', 'airtel money'],
+  union: ['union bank', 'union bank of india', 'ubi'],
+  idfc: ['idfc', 'idfc first', 'idfc first bank', 'idfc bank'],
+  indusind: ['indusind', 'indusind bank'],
+  federal: ['federal', 'federal bank'],
+  yes: ['yes bank', 'yesbank'],
+  rbl: ['rbl', 'rbl bank'],
+  boi: ['bank of india', 'boi'],
+  central: ['central bank of india', 'central bank', 'cbi'],
+  indian: ['indian bank'],
+  iob: ['indian overseas bank', 'iob'],
+  uco: ['uco bank', 'uco'],
+  bandhan: ['bandhan bank', 'bandhan'],
+  au: ['au small finance', 'au bank', 'aubank'],
+  jupiter: ['jupiter', 'jupiter money'],
+  fi: ['fi money', 'fi bank', 'federal fi'],
+  cred: ['cred', 'cred pay', 'cred cash'],
+  cash: ['cash', 'cash wallet', 'physical cash', 'pocket cash'],
+};
+
+/**
+ * Intelligent account matching algorithm:
+ * Matches user's registered accounts (e.g. "SBI", "Fino", "SBI Card", "HDFC")
+ * against detected bank name, OCR text, or account number digits.
+ */
+export interface AccountInput {
+  id?: string;
+  name: string;
+  type?: string;
+}
+
+const GENERIC_ACCOUNT_WORDS = new Set([
+  'bank',
+  'account',
+  'acct',
+  'card',
+  'salary',
+  'savings',
+  'current',
+  'wallet',
+  'money',
+  'credit',
+  'debit',
+  'pay',
+  'payments',
+]);
+
+function matchSingleAccountSource(
+  targetText: string,
+  userAccounts: AccountInput[]
+): string | undefined {
+  const rawLower = targetText.toLowerCase().trim();
+
+  // 1. Account number digits matching (e.g. "XX0186", "....0186", "A/c 4521", "ending in 4521")
+  const digitMatch = rawLower.match(
+    /\b(?:a\/[cC]|acct|account|card)\s*(?:no\.?)?\s*([x\*•\.]*(\d{3,4}))\b|(?:\.{2,}|[x\*•]{2,}|\bending\s+)(\d{3,4})\b/i
+  );
+  if (digitMatch) {
+    const digits = digitMatch[3] || digitMatch[2] || digitMatch[1]?.replace(/\D/g, '');
+    if (digits && digits.length >= 3) {
+      const digitMatchAcc = userAccounts.find((acc) => acc.name.includes(digits));
+      if (digitMatchAcc) return digitMatchAcc.id;
+    }
+  }
+
+  // 2. Direct exact match
+  const exactMatch = userAccounts.find((acc) => {
+    const nameLower = acc.name.toLowerCase().trim();
+    return nameLower === rawLower;
+  });
+  if (exactMatch) return exactMatch.id;
+
+  // 3. Match using BANK_ALIASES with scoring
+  let bestCandidateId: string | undefined;
+  let highestScore = 0;
+
+  const detectedIsCard = /\b(?:card|credit)\b/i.test(rawLower);
+
+  for (const acc of userAccounts) {
+    const accLower = acc.name.toLowerCase().trim();
+    const accountIsCard = acc.type === 'credit_card' || /\b(?:card|credit)\b/i.test(accLower);
+    let score = 0;
+
+    // Check alias families
+    for (const [canonical, aliases] of Object.entries(BANK_ALIASES)) {
+      const detectedMatchesFamily = aliases.some((alias) => rawLower.includes(alias));
+      const accountMatchesFamily = aliases.some((alias) => accLower.includes(alias));
+
+      if (detectedMatchesFamily && accountMatchesFamily) {
+        score += 100;
+
+        // Card vs Bank differentiation
+        if (detectedIsCard === accountIsCard) {
+          score += 50;
+        } else {
+          score -= 30;
+        }
+
+        // Specificity boost (e.g., "sbi card" match is more specific than just "sbi")
+        if (canonical === 'sbi card' && accountIsCard) {
+          score += 20;
+        }
+      }
+    }
+
+    // Direct token overlap scoring for non-generic words (e.g. "fino" in "fino payments bank")
+    const accWords = accLower.split(/\s+/).filter((w: string) => w.length > 2 && !GENERIC_ACCOUNT_WORDS.has(w));
+    for (const word of accWords) {
+      if (rawLower.includes(word)) {
+        score += 30;
+      }
+    }
+
+    if (score > highestScore && score >= 50) {
+      highestScore = score;
+      bestCandidateId = acc.id;
+    }
+  }
+
+  return bestCandidateId;
+}
+
+export function matchAccountToSource(
+  detectedTextOrBank: string,
+  userAccounts: AccountInput[]
+): string | undefined {
+  if (!detectedTextOrBank || !userAccounts || userAccounts.length === 0) {
+    return undefined;
+  }
+
+  // Phase A: Check if there is an explicit source line ("From: ...", "Paid using: ...", "Debited from: ...")
+  const sourceLineMatch = detectedTextOrBank.match(
+    /(?:from|paid\s+using|debited\s+from|transferred\s+from|source\s+account|payment\s+method)\s*[:]?\s*([^\n\r]+)/i
+  );
+  if (sourceLineMatch && sourceLineMatch[1]) {
+    const matched = matchSingleAccountSource(sourceLineMatch[1], userAccounts);
+    if (matched) return matched;
+  }
+
+  // Phase B: Clean recipient VPAs (e.g. gopalsweet@okhdfcbank) so payee routing handles don't masquerade as source
+  const cleanedText = detectedTextOrBank
+    .replace(/\b[a-zA-Z0-9._]+@\w+\b/gi, ' ')
+    .replace(/@\w+/gi, ' ');
+
+  return matchSingleAccountSource(cleanedText, userAccounts);
+}
+
+// ---------------------------------------------------------------------------
+// 6. Unified Transaction Parsing Function (Sync & Pure)
 // ---------------------------------------------------------------------------
 
 /**
@@ -907,76 +1131,29 @@ export function parseTransaction(input: TransactionParserInput): ParsedTransacti
   // 3. UPI Reference / UTR
   const upiRef = extractUpiReference(text);
 
-  // 4. Date Extraction
-  const date = extractTransactionDate(text);
+  // 4. Date Extraction (strictly normalized to ISO YYYY-MM-DD or defaults to today)
+  const date = extractTransactionDate(text) || normalizeDateToIso('today');
 
   // 5. Merchant Extraction & Canonical Normalization
   const merchant = extractMerchant(text);
   const normalizedMerchant = normalizeMerchantName(merchant);
 
-  // 6. Account Matching & Hint
+  // 6. Account Matching & Hint using multi-tiered engine
   let accountHint: string | undefined;
   let matchedAccountId: string | undefined;
 
   const acctMatch = text.match(
     /\b(?:A\/[cC]|Acct|Account|Card)\s*(?:no\.?)?\s*([X\*•\.]*\d{3,4})\b|(?:\.{2,}|[X\*•]{2,}|\bending\s+)(\d{3,4})\b/i
   );
-  const bankMatch = text.match(
-    /\b(SBI|State\s*Bank|HDFC|ICICI|Axis|Kotak|PNB|BOB|Canara|IndusInd|Yes\s*Bank|Paytm\s*Bank)\b/i
-  );
-
   if (acctMatch) {
     accountHint = acctMatch[1] || acctMatch[2];
-  } else if (bankMatch && bankMatch[1]) {
-    accountHint = bankMatch[1];
   }
 
   if (userAccounts.length > 0) {
-    if (accountHint) {
-      const cleanDigits = accountHint.replace(/\D/g, '');
-      const cleanHintUpper = accountHint.toUpperCase();
-
-      const found = userAccounts.find((acc) => {
-        const accNameUpper = acc.name.toUpperCase();
-        if (cleanDigits && cleanDigits.length >= 3 && acc.name.includes(cleanDigits)) return true;
-        if (accNameUpper.includes(cleanHintUpper)) return true;
-        return false;
-      });
-
-      if (found) {
-        matchedAccountId = found.id;
-      }
-    }
-
-    if (!matchedAccountId && bankMatch) {
-      const detectedBank = bankMatch[1].toLowerCase();
-      const BANK_ALIASES: Record<string, string[]> = {
-        sbi: ['sbi', 'state bank'],
-        hdfc: ['hdfc'],
-        icici: ['icici'],
-        axis: ['axis'],
-        kotak: ['kotak'],
-        pnb: ['pnb', 'punjab national'],
-        bob: ['bob', 'bank of baroda'],
-        canara: ['canara'],
-        paytm: ['paytm'],
-      };
-
-      const foundBank = userAccounts.find((acc) => {
-        const accLower = acc.name.toLowerCase();
-        for (const aliases of Object.values(BANK_ALIASES)) {
-          const matchDetected = aliases.some((a) => detectedBank.includes(a));
-          const matchAccount = aliases.some((a) => accLower.includes(a));
-          if (matchDetected && matchAccount) {
-            return true;
-          }
-        }
-        return accLower.includes(detectedBank);
-      });
-
-      if (foundBank) {
-        matchedAccountId = foundBank.id;
-      }
+    matchedAccountId = matchAccountToSource(text, userAccounts);
+    if (matchedAccountId) {
+      const found = userAccounts.find((a) => a.id === matchedAccountId);
+      if (found) accountHint = found.name;
     }
   }
 
@@ -1102,11 +1279,11 @@ export async function parseTransactionWithPipeline(
             : '';
 
         let matchedAccountId: string | undefined;
-        if (input.userAccounts && input.userAccounts.length > 0 && normMerchant) {
-          const matchAcc = input.userAccounts.find((a) =>
-            a.name.toLowerCase().includes(normMerchant.toLowerCase())
+        if (input.userAccounts && input.userAccounts.length > 0) {
+          matchedAccountId = matchAccountToSource(
+            `${vData.merchant_or_person || ''} ${rawTextTrimmed}`,
+            input.userAccounts
           );
-          if (matchAcc) matchedAccountId = matchAcc.id;
         }
 
         const tier3Result: ParsedTransactionResult = {
@@ -1114,7 +1291,7 @@ export async function parseTransactionWithPipeline(
           amountConfidence: vData.amount !== null ? 'high' : 'low',
           amountExtractionMethod: vData.amount !== null ? 'currency_regex' : 'none',
           upiRef: null,
-          date: vData.date_if_present,
+          date: normalizeDateToIso(vData.date_if_present) || normalizeDateToIso('today'),
           merchant: vData.merchant_or_person || 'Unknown',
           normalizedMerchant: normMerchant,
           merchantConfidence: vData.merchant_or_person !== 'Unknown' ? 'high' : 'low',
@@ -1226,7 +1403,13 @@ export async function parseTransactionWithPipeline(
       }
 
       if (sData.transaction_datetime) {
-        result.date = sData.transaction_datetime;
+        const normDate = normalizeDateToIso(sData.transaction_datetime);
+        if (normDate) {
+          result.date = normDate;
+        }
+      }
+      if (!result.date) {
+        result.date = extractTransactionDate(input.rawText) || normalizeDateToIso('today');
       }
 
       if (sData.suggested_category) {
@@ -1241,15 +1424,12 @@ export async function parseTransactionWithPipeline(
 
       if (sData.detected_bank_or_source) {
         result.detectedBankOrSource = sData.detected_bank_or_source;
-        if (input.userAccounts && input.userAccounts.length > 0) {
-          const detectedLower = sData.detected_bank_or_source.toLowerCase();
-          const matchedAcc = input.userAccounts.find((acc) => {
-            const accNameLower = acc.name.toLowerCase();
-            return accNameLower.includes(detectedLower) || detectedLower.includes(accNameLower);
-          });
-          if (matchedAcc) {
-            result.matchedAccountId = matchedAcc.id;
-          }
+      }
+      if (input.userAccounts && input.userAccounts.length > 0) {
+        const bankQuery = `${sData.detected_bank_or_source || ''} ${input.rawText || ''}`.trim();
+        const matched = matchAccountToSource(bankQuery, input.userAccounts);
+        if (matched) {
+          result.matchedAccountId = matched;
         }
       }
     }

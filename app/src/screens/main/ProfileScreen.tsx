@@ -516,7 +516,12 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ navigation }) => {
           </Text>
 
           <TouchableOpacity
-            onPress={() => navigation.navigate('MainTabs', { screen: 'Settings' })}
+            onPress={() =>
+              navigation.navigate('MainTabs', {
+                screen: 'Settings',
+                params: { openGeminiKey: Date.now() },
+              })
+            }
             style={[styles.geminiSettingsLink, { borderColor: colors.border }]}
             activeOpacity={0.7}
           >

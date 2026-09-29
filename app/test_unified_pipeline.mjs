@@ -162,6 +162,24 @@ function extractUpiReference(text) {
 function extractTransactionDate(text) {
   if (!text) return null;
   const currentYear = new Date().getFullYear();
+  const today = new Date();
+
+  // Pattern 0: Relative dates ("Today", "Today, 8:46 PM", "Yesterday")
+  const lower = text.toLowerCase();
+  if (/\btoday\b/i.test(lower)) {
+    const y = today.getFullYear();
+    const m = String(today.getMonth() + 1).padStart(2, '0');
+    const d = String(today.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  if (/\byesterday\b/i.test(lower)) {
+    const yest = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
+    const y = yest.getFullYear();
+    const m = String(yest.getMonth() + 1).padStart(2, '0');
+    const d = String(yest.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
   const monthMap = {
     jan: 1, january: 1, feb: 2, february: 2, mar: 3, march: 3,
     apr: 4, april: 4, may: 5, jun: 6, june: 6, jul: 7, july: 7,
@@ -200,6 +218,50 @@ function extractTransactionDate(text) {
     if (month >= 1 && month <= 12 && day >= 1 && day <= 31 && year >= 2020 && year <= currentYear + 1) {
       return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     }
+  }
+
+  const isoMatch = text.match(/\b(\d{4})[-/](\d{1,2})[-/](\d{1,2})\b/);
+  if (isoMatch) {
+    const year = parseInt(isoMatch[1], 10);
+    const month = parseInt(isoMatch[2], 10);
+    const day = parseInt(isoMatch[3], 10);
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31 && year >= 2020 && year <= currentYear + 1) {
+      return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    }
+  }
+
+  return null;
+}
+
+function normalizeDateToIso(rawDate) {
+  if (!rawDate) return null;
+  const trimmed = rawDate.trim();
+  if (!trimmed) return null;
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return trimmed;
+  }
+
+  const isoPrefix = trimmed.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (isoPrefix) {
+    return isoPrefix[1];
+  }
+
+  const fromExtractor = extractTransactionDate(trimmed);
+  if (fromExtractor) {
+    return fromExtractor;
+  }
+
+  try {
+    const parsed = new Date(trimmed);
+    if (!isNaN(parsed.getTime()) && parsed.getFullYear() >= 2020 && parsed.getFullYear() <= new Date().getFullYear() + 1) {
+      const y = parsed.getFullYear();
+      const m = String(parsed.getMonth() + 1).padStart(2, '0');
+      const d = String(parsed.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    }
+  } catch {
+    // ignore
   }
 
   return null;
@@ -548,6 +610,145 @@ function extractAmountWithProminence(text, ocrBlocks) {
   };
 }
 
+const BANK_ALIASES = {
+  sbi: ['sbi', 'state bank of india', 'state bank', 'sbiref', 'sbi upi', 'state bank of'],
+  'sbi card': ['sbi card', 'sbi credit card', 'sbicard'],
+  fino: ['fino', 'fino payments bank', 'fino bank', 'fino pay', 'finobank'],
+  slice: ['slice', 'slice card', 'slice credit', 'slice super card'],
+  hdfc: ['hdfc', 'hdfc bank', 'hdfc credit card'],
+  icici: ['icici', 'icici bank', 'icici credit card'],
+  axis: ['axis', 'axis bank'],
+  kotak: ['kotak', 'kotak mahindra', 'kotak 811', '811'],
+  pnb: ['pnb', 'punjab national bank', 'punjab national'],
+  bob: ['bob', 'bank of baroda', 'baroda'],
+  canara: ['canara', 'canara bank'],
+  paytm: ['paytm', 'paytm payments bank', 'paytm bank', 'paytm wallet'],
+  airtel: ['airtel', 'airtel payments bank', 'airtel bank', 'airtel money'],
+  union: ['union bank', 'union bank of india', 'ubi'],
+  idfc: ['idfc', 'idfc first', 'idfc first bank', 'idfc bank'],
+  indusind: ['indusind', 'indusind bank'],
+  federal: ['federal', 'federal bank'],
+  yes: ['yes bank', 'yesbank'],
+  rbl: ['rbl', 'rbl bank'],
+  boi: ['bank of india', 'boi'],
+  central: ['central bank of india', 'central bank', 'cbi'],
+  indian: ['indian bank'],
+  iob: ['indian overseas bank', 'iob'],
+  uco: ['uco bank', 'uco'],
+  bandhan: ['bandhan bank', 'bandhan'],
+  au: ['au small finance', 'au bank', 'aubank'],
+  jupiter: ['jupiter', 'jupiter money'],
+  fi: ['fi money', 'fi bank', 'federal fi'],
+  cred: ['cred', 'cred pay', 'cred cash'],
+  cash: ['cash', 'cash wallet', 'physical cash', 'pocket cash'],
+};
+
+const GENERIC_ACCOUNT_WORDS = new Set([
+  'bank',
+  'account',
+  'acct',
+  'card',
+  'salary',
+  'savings',
+  'current',
+  'wallet',
+  'money',
+  'credit',
+  'debit',
+  'pay',
+  'payments',
+]);
+
+function matchSingleAccountSource(targetText, userAccounts) {
+  const rawLower = targetText.toLowerCase().trim();
+
+  // 1. Account number digits matching (e.g. "XX0186", "....0186", "A/c 4521", "ending in 4521")
+  const digitMatch = rawLower.match(
+    /\b(?:a\/[cC]|acct|account|card)\s*(?:no\.?)?\s*([x\*•\.]*(\d{3,4}))\b|(?:\.{2,}|[x\*•]{2,}|\bending\s+)(\d{3,4})\b/i
+  );
+  if (digitMatch) {
+    const digits = digitMatch[3] || digitMatch[2] || digitMatch[1]?.replace(/\D/g, '');
+    if (digits && digits.length >= 3) {
+      const digitMatchAcc = userAccounts.find((acc) => acc.name.includes(digits));
+      if (digitMatchAcc) return digitMatchAcc.id;
+    }
+  }
+
+  // 2. Direct exact match
+  const exactMatch = userAccounts.find((acc) => {
+    const nameLower = acc.name.toLowerCase().trim();
+    return nameLower === rawLower;
+  });
+  if (exactMatch) return exactMatch.id;
+
+  // 3. Match using BANK_ALIASES with scoring
+  let bestCandidateId;
+  let highestScore = 0;
+
+  const detectedIsCard = /\b(?:card|credit)\b/i.test(rawLower);
+
+  for (const acc of userAccounts) {
+    const accLower = acc.name.toLowerCase().trim();
+    const accountIsCard = acc.type === 'credit_card' || /\b(?:card|credit)\b/i.test(accLower);
+    let score = 0;
+
+    for (const [canonical, aliases] of Object.entries(BANK_ALIASES)) {
+      const detectedMatchesFamily = aliases.some((alias) => rawLower.includes(alias));
+      const accountMatchesFamily = aliases.some((alias) => accLower.includes(alias));
+
+      if (detectedMatchesFamily && accountMatchesFamily) {
+        score += 100;
+
+        if (detectedIsCard === accountIsCard) {
+          score += 50;
+        } else {
+          score -= 30;
+        }
+
+        if (canonical === 'sbi card' && accountIsCard) {
+          score += 20;
+        }
+      }
+    }
+
+    const accWords = accLower.split(/\s+/).filter((w) => w.length > 2 && !GENERIC_ACCOUNT_WORDS.has(w));
+    for (const word of accWords) {
+      if (rawLower.includes(word)) {
+        score += 30;
+      }
+    }
+
+    if (score > highestScore && score >= 50) {
+      highestScore = score;
+      bestCandidateId = acc.id;
+    }
+  }
+
+  return bestCandidateId;
+}
+
+function matchAccountToSource(detectedTextOrBank, userAccounts) {
+  if (!detectedTextOrBank || !userAccounts || userAccounts.length === 0) {
+    return undefined;
+  }
+
+  // Phase A: Check if there is an explicit source line ("From: ...", "Paid using: ...", "Debited from: ...")
+  const sourceLineMatch = detectedTextOrBank.match(
+    /(?:from|paid\s+using|debited\s+from|transferred\s+from|source\s+account|payment\s+method)\s*[:]?\s*([^\n\r]+)/i
+  );
+  if (sourceLineMatch && sourceLineMatch[1]) {
+    const matched = matchSingleAccountSource(sourceLineMatch[1], userAccounts);
+    if (matched) return matched;
+  }
+
+  // Phase B: Clean recipient VPAs (e.g. gopalsweet@okhdfcbank) so payee routing handles don't masquerade as source
+  const cleanedText = detectedTextOrBank
+    .replace(/\b[a-zA-Z0-9._]+@\w+\b/gi, ' ')
+    .replace(/@\w+/gi, ' ');
+
+  return matchSingleAccountSource(cleanedText, userAccounts);
+}
+
 function parseTransaction(input) {
   const text = (input.rawText || '').trim();
   const learnedRules = input.learnedRules || [];
@@ -565,7 +766,7 @@ function parseTransaction(input) {
   const amount = amountResult.amount;
   const amountConfidence = amountResult.confidence;
   const upiRef = extractUpiReference(text);
-  const date = extractTransactionDate(text);
+  const date = extractTransactionDate(text) || normalizeDateToIso('today');
   const merchant = extractMerchant(text);
   const normalizedMerchant = normalizeMerchantName(merchant);
 
@@ -574,59 +775,15 @@ function parseTransaction(input) {
   const acctMatch = text.match(
     /\b(?:A\/[cC]|Acct|Account|Card)\s*(?:no\.?)?\s*([X\*•\.]*\d{3,4})\b|(?:\.{2,}|[X\*•]{2,}|\bending\s+)(\d{3,4})\b/i
   );
-  const bankMatch = text.match(
-    /\b(SBI|State\s*Bank|HDFC|ICICI|Axis|Kotak|PNB|BOB|Canara|IndusInd|Yes\s*Bank|Paytm\s*Bank)\b/i
-  );
-
   if (acctMatch) {
     accountHint = acctMatch[1] || acctMatch[2];
-  } else if (bankMatch && bankMatch[1]) {
-    accountHint = bankMatch[1];
   }
 
   if (userAccounts.length > 0) {
-    if (accountHint) {
-      const cleanDigits = accountHint.replace(/\D/g, '');
-      const cleanHintUpper = accountHint.toUpperCase();
-      const found = userAccounts.find((acc) => {
-        const accNameUpper = acc.name.toUpperCase();
-        if (cleanDigits && cleanDigits.length >= 3 && acc.name.includes(cleanDigits)) return true;
-        if (accNameUpper.includes(cleanHintUpper)) return true;
-        return false;
-      });
-      if (found) {
-        matchedAccountId = found.id;
-      }
-    }
-    if (!matchedAccountId && bankMatch) {
-      const detectedBank = bankMatch[1].toLowerCase();
-      const BANK_ALIASES = {
-        sbi: ['sbi', 'state bank'],
-        hdfc: ['hdfc'],
-        icici: ['icici'],
-        axis: ['axis'],
-        kotak: ['kotak'],
-        pnb: ['pnb', 'punjab national'],
-        bob: ['bob', 'bank of baroda'],
-        canara: ['canara'],
-        paytm: ['paytm'],
-      };
-
-      const foundBank = userAccounts.find((acc) => {
-        const accLower = acc.name.toLowerCase();
-        for (const [key, aliases] of Object.entries(BANK_ALIASES)) {
-          const matchDetected = aliases.some((a) => detectedBank.includes(a));
-          const matchAccount = aliases.some((a) => accLower.includes(a));
-          if (matchDetected && matchAccount) {
-            return true;
-          }
-        }
-        return accLower.includes(detectedBank);
-      });
-
-      if (foundBank) {
-        matchedAccountId = foundBank.id;
-      }
+    matchedAccountId = matchAccountToSource(text, userAccounts);
+    if (matchedAccountId) {
+      const found = userAccounts.find((a) => a.id === matchedAccountId);
+      if (found) accountHint = found.name;
     }
   }
 
@@ -721,11 +878,11 @@ async function parseTransactionWithPipeline(input, options = {}) {
             : '';
 
         let matchedAccountId;
-        if (input.userAccounts && input.userAccounts.length > 0 && normMerchant) {
-          const matchAcc = input.userAccounts.find((a) =>
-            a.name.toLowerCase().includes(normMerchant.toLowerCase())
+        if (input.userAccounts && input.userAccounts.length > 0) {
+          matchedAccountId = matchAccountToSource(
+            `${vData.merchant_or_person || ''} ${rawTextTrimmed}`,
+            input.userAccounts
           );
-          if (matchAcc) matchedAccountId = matchAcc.id;
         }
 
         return {
@@ -733,7 +890,7 @@ async function parseTransactionWithPipeline(input, options = {}) {
           amountConfidence: vData.amount !== null ? 'high' : 'low',
           amountExtractionMethod: vData.amount !== null ? 'currency_regex' : 'none',
           upiRef: null,
-          date: vData.date_if_present,
+          date: normalizeDateToIso(vData.date_if_present) || normalizeDateToIso('today'),
           merchant: vData.merchant_or_person || 'Unknown',
           normalizedMerchant: normMerchant,
           merchantConfidence: vData.merchant_or_person !== 'Unknown' ? 'high' : 'low',
@@ -802,7 +959,13 @@ async function parseTransactionWithPipeline(input, options = {}) {
       }
 
       if (sData.transaction_datetime) {
-        result.date = sData.transaction_datetime;
+        const normDate = normalizeDateToIso(sData.transaction_datetime);
+        if (normDate) {
+          result.date = normDate;
+        }
+      }
+      if (!result.date) {
+        result.date = extractTransactionDate(input.rawText) || normalizeDateToIso('today');
       }
 
       if (sData.suggested_category) {
@@ -813,15 +976,12 @@ async function parseTransactionWithPipeline(input, options = {}) {
 
       if (sData.detected_bank_or_source) {
         result.detectedBankOrSource = sData.detected_bank_or_source;
-        if (input.userAccounts && input.userAccounts.length > 0) {
-          const detectedLower = sData.detected_bank_or_source.toLowerCase();
-          const matchedAcc = input.userAccounts.find((acc) => {
-            const accNameLower = acc.name.toLowerCase();
-            return accNameLower.includes(detectedLower) || detectedLower.includes(accNameLower);
-          });
-          if (matchedAcc) {
-            result.matchedAccountId = matchedAcc.id;
-          }
+      }
+      if (input.userAccounts && input.userAccounts.length > 0) {
+        const bankQuery = `${sData.detected_bank_or_source || ''} ${input.rawText || ''}`.trim();
+        const matched = matchAccountToSource(bankQuery, input.userAccounts);
+        if (matched) {
+          result.matchedAccountId = matched;
         }
       }
     }
@@ -1467,7 +1627,82 @@ assert.strictEqual(resUncategorizedDefault.suggestedCategory, 'Uncategorized');
 
 console.log('✔ [TEST SUITE 9 PASSED]: Zero-defaulting and Uncategorized fallback verified.\n');
 
+// ===========================================================================
+// [TEST SUITE 10] Intelligent Date Normalization & Multi-Tier Bank Matching
+// ===========================================================================
+console.log('▶ [TEST SUITE 10] Testing Date Normalization & Multi-Tier Bank Matching...');
+
+// Case 10A: Relative & Multi-format Date Normalization
+const todayObj = new Date();
+const expToday = `${todayObj.getFullYear()}-${String(todayObj.getMonth() + 1).padStart(2, '0')}-${String(todayObj.getDate()).padStart(2, '0')}`;
+const yestObj = new Date(todayObj.getFullYear(), todayObj.getMonth(), todayObj.getDate() - 1);
+const expYest = `${yestObj.getFullYear()}-${String(yestObj.getMonth() + 1).padStart(2, '0')}-${String(yestObj.getDate()).padStart(2, '0')}`;
+
+const dateToday = normalizeDateToIso('Today');
+const dateTodayTime = normalizeDateToIso('Today, 8:46 PM');
+const dateYest = normalizeDateToIso('Yesterday');
+const dateAlphaWithTime = normalizeDateToIso('29 Sep 2026, 8:46 PM');
+const dateIsoTimestamp = normalizeDateToIso('2026-09-29T14:30:00.000Z');
+const dateInvalid = normalizeDateToIso('non-date garbage text');
+
+console.log('  10A. Date Extraction & Normalization:');
+console.log(`      'Today' ➔ ${dateToday} (expected: ${expToday})`);
+console.log(`      'Today, 8:46 PM' ➔ ${dateTodayTime} (expected: ${expToday})`);
+console.log(`      'Yesterday' ➔ ${dateYest} (expected: ${expYest})`);
+console.log(`      '29 Sep 2026, 8:46 PM' ➔ ${dateAlphaWithTime} (expected: 2026-09-29)`);
+console.log(`      '2026-09-29T14:30:00.000Z' ➔ ${dateIsoTimestamp} (expected: 2026-09-29)`);
+
+assert.strictEqual(dateToday, expToday, "normalizeDateToIso('Today') must equal today's ISO date");
+assert.strictEqual(dateTodayTime, expToday, "normalizeDateToIso('Today, 8:46 PM') must equal today's ISO date");
+assert.strictEqual(dateYest, expYest, "normalizeDateToIso('Yesterday') must equal yesterday's ISO date");
+assert.strictEqual(dateAlphaWithTime, '2026-09-29', "normalizeDateToIso('29 Sep 2026, 8:46 PM') must extract 2026-09-29");
+assert.strictEqual(dateIsoTimestamp, '2026-09-29', "normalizeDateToIso(ISO timestamp) must extract 2026-09-29");
+assert.strictEqual(dateInvalid, null, "Invalid date strings must return null and never produce 'Invalid Date'");
+
+// Case 10B: Multi-Tier Bank Matching Algorithm
+const accountsForBankMatching = [
+  { id: 'acc-sbi-bank', name: 'SBI', type: 'bank' },
+  { id: 'acc-sbi-card', name: 'SBI Card', type: 'credit_card' },
+  { id: 'acc-fino-bank', name: 'Fino', type: 'bank' },
+  { id: 'acc-slice-card', name: 'Slice', type: 'credit_card' },
+  { id: 'acc-hdfc-bank', name: 'HDFC Bank (4521)', type: 'bank' },
+];
+
+// 1. "State Bank of India" ➔ matches user account "SBI" (NOT "SBI Card")
+const sbiMatch = matchAccountToSource('Paid using State Bank of India UPI', accountsForBankMatching);
+console.log('  10B. Bank Matching:');
+console.log(`      'State Bank of India UPI' ➔ ${sbiMatch} (expected: acc-sbi-bank)`);
+assert.strictEqual(sbiMatch, 'acc-sbi-bank', 'Full bank name "State Bank of India" must map to "SBI" bank account');
+
+// 2. "SBI Credit Card" ➔ matches "SBI Card"
+const sbiCardMatch = matchAccountToSource('Charged to SBI Credit Card for ₹1,200', accountsForBankMatching);
+console.log(`      'SBI Credit Card' ➔ ${sbiCardMatch} (expected: acc-sbi-card)`);
+assert.strictEqual(sbiCardMatch, 'acc-sbi-card', 'Credit card receipt must map to "SBI Card", not basic SBI account');
+
+// 3. "Fino Payments Bank" ➔ matches user account "Fino"
+const finoMatch = matchAccountToSource('Debited from Fino Payments Bank A/c', accountsForBankMatching);
+console.log(`      'Fino Payments Bank' ➔ ${finoMatch} (expected: acc-fino-bank)`);
+assert.strictEqual(finoMatch, 'acc-fino-bank', 'Full official name "Fino Payments Bank" must map to "Fino" account');
+
+// 4. "Slice Super Card" ➔ matches user account "Slice"
+const sliceMatch = matchAccountToSource('Transaction on Slice Super Card', accountsForBankMatching);
+console.log(`      'Slice Super Card' ➔ ${sliceMatch} (expected: acc-slice-card)`);
+assert.strictEqual(sliceMatch, 'acc-slice-card', '"Slice Super Card" must map to "Slice"');
+
+// 5. Account number digits matching (A/c ending 4521)
+const digitMatchResult = matchAccountToSource('Paid via Netbanking A/c ending 4521', accountsForBankMatching);
+console.log(`      'A/c ending 4521' ➔ ${digitMatchResult} (expected: acc-hdfc-bank)`);
+assert.strictEqual(digitMatchResult, 'acc-hdfc-bank', 'Matching by 4 digits must resolve to HDFC Bank');
+
+// 6. Unknown bank returns undefined (no false positive / zero defaulting)
+const unknownBankMatch = matchAccountToSource('Paid from Deutsche Bank Account', accountsForBankMatching);
+console.log(`      'Deutsche Bank' ➔ ${unknownBankMatch} (expected: undefined)`);
+assert.strictEqual(unknownBankMatch, undefined, 'Unmatched bank must return undefined without defaulting');
+
+console.log('✔ [TEST SUITE 10 PASSED]: Date normalization and multi-tier bank matching verified.\n');
+
 console.log('================================================================');
-console.log(' 🎉 ALL 9 TEST SUITES PASSED! UNIFIED PIPELINE IS 100% OPERATIONAL');
+console.log(' 🎉 ALL 10 TEST SUITES PASSED! UNIFIED PIPELINE IS 100% OPERATIONAL');
 console.log('================================================================');
+
 

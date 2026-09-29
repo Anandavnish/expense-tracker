@@ -10,10 +10,10 @@ import { SettingsScreen } from '../screens/main/SettingsScreen';
 import { useSettingsStore } from '../store/settingsStore';
 
 export type MainTabsParamList = {
-  Dashboard: undefined;
+  Dashboard: { openManageCategories?: boolean } | undefined;
   Transactions: undefined;
   Budgets: undefined;
-  Settings: undefined;
+  Settings: { openGeminiKey?: boolean | number } | undefined;
 };
 
 const Tab = createBottomTabNavigator<MainTabsParamList>();

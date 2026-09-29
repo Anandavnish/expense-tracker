@@ -23,7 +23,11 @@ import { KeyboardAwareScrollView } from '../../components/KeyboardAwareScrollVie
 import { BankLogo } from '../../components/BankLogo';
 import { TransactionType, TransactionSource } from '../../types/database';
 import { extractTextFromImage } from '../../services/ocrService';
-import { parseTransactionWithPipeline, normalizeAndMatchCategory } from '../../services/transactionParser';
+import {
+  parseTransactionWithPipeline,
+  normalizeAndMatchCategory,
+  normalizeDateToIso,
+} from '../../services/transactionParser';
 import { useMerchantRulesStore } from '../../store/merchantRulesStore';
 import { MonthUnlockModal } from '../../components/MonthUnlockModal';
 
@@ -134,7 +138,10 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
       : ''
   );
   const [date, setDate] = useState(() => {
-    if (params?.prefillDate) return String(params.prefillDate);
+    if (params?.prefillDate) {
+      const normalized = normalizeDateToIso(String(params.prefillDate));
+      if (normalized) return normalized;
+    }
     if (params?.initialMonth) {
       const [yStr, mStr] = params.initialMonth.split('-').map(Number);
       const lastDay = new Date(yStr, mStr, 0).getDate();
@@ -175,14 +182,15 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
   // Helper to validate and enforce locked month redirect
   const applyPrefillDate = (rawDateStr: string) => {
     if (!rawDateStr) return;
-    const txMonth = rawDateStr.substring(0, 7);
+    const normalized = normalizeDateToIso(rawDateStr) || formatLocalDate(today);
+    const txMonth = normalized.substring(0, 7);
     if (isMonthLocked(txMonth)) {
       const [yStr, mStr] = txMonth.split('-');
       const d = new Date(parseInt(yStr, 10), parseInt(mStr, 10) - 1, 1);
       const lockedName = d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-      let formattedRaw = rawDateStr;
+      let formattedRaw = normalized;
       try {
-        formattedRaw = new Date(rawDateStr + 'T12:00:00').toLocaleDateString('en-IN', {
+        formattedRaw = new Date(normalized + 'T12:00:00').toLocaleDateString('en-IN', {
           day: 'numeric',
           month: 'short',
           year: 'numeric',
@@ -193,12 +201,12 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
       // Write record to current active month
       setDate(formatLocalDate(today));
       setLockedMonthRedirect({
-        originalDate: rawDateStr,
+        originalDate: normalized,
         lockedMonth: txMonth,
         bannerText: `This looks like it's from ${formattedRaw} — ${lockedName} is locked. Logged to this month instead.`,
       });
     } else {
-      setDate(rawDateStr);
+      setDate(normalized);
       setLockedMonthRedirect(null);
     }
   };
@@ -298,20 +306,11 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
       setSource(params.prefillSource);
     }
 
-    if (params.resolutionTier) {
-      const tierBadge =
-        params.resolutionTier === 'tier1_local'
-          ? '⚡ Resolved locally via on-device ML Kit (Tier 1)'
-          : params.resolutionTier === 'tier2_gemini_spatial'
-          ? '🤖 Resolved via Gemini Spatial Layout (Tier 2)'
-          : '👁️ Resolved via Gemini Vision Fallback (Tier 3)';
-
+    if (params.scanMessage) {
       setScanToast({
         type: 'success',
-        message: params.scanMessage || tierBadge,
+        message: params.scanMessage,
       });
-    } else if (params.scanMessage) {
-      setScanToast({ type: 'success', message: params.scanMessage });
     } else if (params.scanError) {
       setScanToast({ type: 'error', message: params.scanError });
     }
@@ -431,35 +430,21 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
 
       setSource('screenshot');
 
-      // 5. User-facing feedback toast with tier indicator
-      const tierBadge =
-        parsed.resolutionTier === 'tier1_local'
-          ? '⚡ Resolved locally via on-device ML Kit (Tier 1)'
-          : parsed.resolutionTier === 'tier2_gemini_spatial'
-          ? '🤖 Resolved via Gemini Spatial Layout (Tier 2)'
-          : '👁️ Resolved via Gemini Vision Fallback (Tier 3)';
+      // 5. User-facing feedback toast with minimal clean summary
+      const summaryMsg = parsed.isCategoryLearned
+        ? `Matched rule: ${parsed.merchant} ➔ ${parsed.suggestedCategory}`
+        : parsed.amount !== null && parsed.suggestedCategory && parsed.suggestedCategory !== 'Uncategorized'
+        ? `Extracted ₹${parsed.amount} • ${parsed.suggestedCategory}`
+        : parsed.amount !== null && parsed.merchant !== 'Unknown'
+        ? `Extracted ₹${parsed.amount} for ${parsed.merchant}`
+        : parsed.amount !== null
+        ? `Extracted ₹${parsed.amount}`
+        : 'Receipt scanned — review details and save';
 
-      if (parsed.isCategoryLearned) {
-        setScanToast({
-          type: 'success',
-          message: `${tierBadge}: Matched rule ${parsed.merchant} ➔ ${parsed.suggestedCategory}`,
-        });
-      } else if (parsed.amount !== null && parsed.merchant !== 'Unknown') {
-        setScanToast({
-          type: 'success',
-          message: `${tierBadge}: ₹${parsed.amount} for ${parsed.merchant} (${parsed.suggestedCategory})`,
-        });
-      } else if (parsed.amount !== null) {
-        setScanToast({
-          type: 'success',
-          message: `${tierBadge}: Extracted ₹${parsed.amount}! Review details and save.`,
-        });
-      } else {
-        setScanToast({
-          type: 'info',
-          message: `${tierBadge}: Screenshot parsed! Please verify details and tap Save.`,
-        });
-      }
+      setScanToast({
+        type: 'success',
+        message: summaryMsg,
+      });
     } catch (err: any) {
       setIsScanning(false);
       setScanToast({
@@ -495,9 +480,14 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
 
   const parsedDateObj = useMemo(() => {
     try {
-      const [y, m, d] = date.split('-').map(Number);
-      if (y && m && d) {
-        return new Date(y, m - 1, d);
+      if (date) {
+        if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+          const [y, m, d] = date.split('-').map(Number);
+          const dt = new Date(y, m - 1, d);
+          if (!isNaN(dt.getTime())) return dt;
+        }
+        const parsed = new Date(date);
+        if (!isNaN(parsed.getTime())) return parsed;
       }
       return today;
     } catch {
@@ -507,11 +497,23 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
 
   const formattedDateLabel = useMemo(() => {
     try {
-      const [y, m, d] = date.split('-').map(Number);
-      const dObj = new Date(y, m - 1, d);
-      const isToday = date === formatLocalDate(today);
+      let dObj: Date;
+      if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        const [y, m, d] = date.split('-').map(Number);
+        dObj = new Date(y, m - 1, d);
+      } else if (date) {
+        dObj = new Date(date);
+      } else {
+        dObj = today;
+      }
+
+      if (isNaN(dObj.getTime())) {
+        dObj = today;
+      }
+
+      const isToday = formatLocalDate(dObj) === formatLocalDate(today);
       const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
-      const isYesterday = date === formatLocalDate(yesterday);
+      const isYesterday = formatLocalDate(dObj) === formatLocalDate(yesterday);
 
       const baseStr = dObj.toLocaleDateString('en-IN', {
         day: 'numeric',
@@ -522,7 +524,7 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
       if (isYesterday) return `${baseStr} • Yesterday`;
       return baseStr;
     } catch {
-      return date;
+      return formatLocalDate(today);
     }
   }, [date, today]);
 

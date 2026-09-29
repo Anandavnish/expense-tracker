@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -50,9 +50,10 @@ import { UpdatePromptModal } from '../../components/UpdatePromptModal';
 
 interface SettingsScreenProps {
   navigation: any;
+  route?: any;
 }
 
-export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) => {
+export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation, route }) => {
   const insets = useSafeAreaInsets();
   const { user, isGuest } = useAuthStore();
   const {
@@ -82,6 +83,25 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) =>
   const [isSavingByokKey, setIsSavingByokKey] = useState(false);
   const [byokError, setByokError] = useState<string | null>(null);
   const [byokSuccessMsg, setByokSuccessMsg] = useState<string | null>(null);
+
+  // Auto-handle openGeminiKey route param (e.g. navigated from Profile Screen)
+  const [prevOpenGeminiKeyParam, setPrevOpenGeminiKeyParam] = useState(route?.params?.openGeminiKey);
+  if (route?.params?.openGeminiKey && route.params.openGeminiKey !== prevOpenGeminiKeyParam) {
+    setPrevOpenGeminiKeyParam(route.params.openGeminiKey);
+    setByokKeyInput(geminiApiKey || '');
+    setByokError(null);
+    setByokSuccessMsg(null);
+    setByokModalVisible(true);
+  }
+
+  useEffect(() => {
+    if (route?.params?.openGeminiKey) {
+      if (!geminiApiKey && user?.id) {
+        fetchGeminiApiKey(user.id).catch(() => {});
+      }
+      navigation.setParams({ openGeminiKey: undefined });
+    }
+  }, [route?.params?.openGeminiKey, geminiApiKey, user?.id, fetchGeminiApiKey, navigation]);
 
   // App Release / In-App Update State
   const [isCheckingUpdates, setIsCheckingUpdates] = useState(false);
@@ -722,34 +742,6 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) =>
             <View style={[styles.actionBadge, { backgroundColor: colors.primaryContainer, borderColor: colors.primary }]}>
               <Ionicons name="download-outline" size={12} color={colors.primary} style={{ marginRight: 3 }} />
               <Text style={[styles.actionBadgeText, { color: colors.primary }]}>STATEMENT</Text>
-            </View>
-          </TouchableOpacity>
-
-          <View style={[styles.divider, { backgroundColor: colors.border }]} />
-
-          {/* Manage Categories - Direct Navigation */}
-          <TouchableOpacity
-            onPress={() =>
-              navigation.navigate('MainTabs', {
-                screen: 'Dashboard',
-                params: { openManageCategories: true },
-              })
-            }
-            style={styles.placeholderRow}
-            activeOpacity={0.7}
-          >
-            <View style={styles.placeholderTextCol}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <Text style={[styles.placeholderTitle, { color: colors.textPrimary }]}>Manage Categories</Text>
-                <Ionicons name="pricetags-outline" size={14} color={colors.primary} />
-              </View>
-              <Text style={[styles.placeholderSub, { color: colors.textMuted }]}>
-                Custom categories, icons, and drag-and-drop ordering
-              </Text>
-            </View>
-            <View style={[styles.actionBadge, { backgroundColor: colors.surfaceVariant, borderColor: colors.border }]}>
-              <Text style={[styles.actionBadgeText, { color: colors.textSecondary }]}>MANAGE</Text>
-              <Ionicons name="chevron-forward" size={12} color={colors.textSecondary} style={{ marginLeft: 2 }} />
             </View>
           </TouchableOpacity>
 
