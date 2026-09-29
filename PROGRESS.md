@@ -4,9 +4,9 @@
 Foundational architecture build for a high-performance cross-platform personal finance mobile app built for Android using Expo Dev Client, React Native Reanimated, React Native Paper, Zustand, and Supabase.
 
 - **GitHub Repository**: [https://github.com/Anandavnish/expense-tracker](https://github.com/Anandavnish/expense-tracker)
-- **Latest Release**: [Expense Tracker v1.0.7 (Build 7)](https://github.com/Anandavnish/expense-tracker/releases/tag/v1.0.7)
-- **Direct APK Download**: [ExpenseTracker-v1.0.7.apk](https://github.com/Anandavnish/expense-tracker/releases/download/v1.0.7/ExpenseTracker-v1.0.7.apk)
-- **Previous Release**: [Expense Tracker v1.0.6 (Build 6)](https://github.com/Anandavnish/expense-tracker/releases/tag/v1.0.6)
+- **Latest Release**: [Expense Tracker v1.0.8 (Build 8)](https://github.com/Anandavnish/expense-tracker/releases/tag/v1.0.8)
+- **Direct APK Download**: [ExpenseTracker-v1.0.8.apk](https://github.com/Anandavnish/expense-tracker/releases/download/v1.0.8/ExpenseTracker-v1.0.8.apk)
+- **Previous Release**: [Expense Tracker v1.0.7 (Build 7)](https://github.com/Anandavnish/expense-tracker/releases/tag/v1.0.7)
 
 ---
 
