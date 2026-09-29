@@ -10,7 +10,7 @@ import {
   CommonActions,
 } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import * as Notifications from 'expo-notifications';
+import { isRunningInExpoGo } from 'expo';
 import { useShareIntent } from 'expo-share-intent';
 import { useAuthStore } from '../store/authStore';
 import { useFinanceStore } from '../store/financeStore';
@@ -36,16 +36,27 @@ import {
 } from '../services/versionService';
 import { UpdatePromptModal } from '../components/UpdatePromptModal';
 
-// Configure in-app notification presentation
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
-});
+// Lazily and conditionally load expo-notifications only outside Expo Go.
+// Expo SDK 53+ throws a fatal error in Expo Go on Android if expo-notifications is evaluated
+// because remote push functionality was removed from Expo Go.
+let Notifications: typeof import('expo-notifications') | null = null;
+if (!isRunningInExpoGo()) {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    Notifications = require('expo-notifications');
+    Notifications?.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowAlert: true,
+        shouldPlaySound: true,
+        shouldSetBadge: false,
+        shouldShowBanner: true,
+        shouldShowList: true,
+      }),
+    });
+  } catch (err) {
+    console.warn('[RootNavigator] expo-notifications unavailable in this runtime:', err);
+  }
+}
 
 export const navigationRef = createNavigationContainerRef<any>();
 
@@ -92,7 +103,7 @@ export const RootNavigator = () => {
     async (navParams: any, summaryTitle: string, summaryBody: string) => {
       const isBackgrounded = AppState.currentState !== 'active';
 
-      if (isBackgrounded) {
+      if (isBackgrounded && Notifications) {
         try {
           await Notifications.scheduleNotificationAsync({
             content: {
@@ -117,6 +128,7 @@ export const RootNavigator = () => {
 
   // Listen for user taps on the transaction notification to route cleanly from background
   useEffect(() => {
+    if (!Notifications) return;
     const sub = Notifications.addNotificationResponseReceivedListener((response) => {
       const data = response?.notification?.request?.content?.data;
       if (data?.screen === 'AddTransaction') {

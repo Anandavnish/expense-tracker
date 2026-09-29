@@ -4,9 +4,9 @@
 Foundational architecture build for a high-performance cross-platform personal finance mobile app built for Android using Expo Dev Client, React Native Reanimated, React Native Paper, Zustand, and Supabase.
 
 - **GitHub Repository**: [https://github.com/Anandavnish/expense-tracker](https://github.com/Anandavnish/expense-tracker)
-- **Latest Release**: [Expense Tracker v1.0.10 (Build 10)](https://github.com/Anandavnish/expense-tracker/releases/tag/v1.0.10)
-- **Direct APK Download**: [ExpenseTracker-v1.0.10.apk](https://github.com/Anandavnish/expense-tracker/releases/download/v1.0.10/ExpenseTracker-v1.0.10.apk)
-- **Previous Release**: [Expense Tracker v1.0.9 (Build 9)](https://github.com/Anandavnish/expense-tracker/releases/tag/v1.0.9)
+- **Latest Release**: [Expense Tracker v1.0.11 (Build 11)](https://github.com/Anandavnish/expense-tracker/releases/tag/v1.0.11)
+- **Direct APK Download**: [ExpenseTracker-v1.0.11.apk](https://github.com/Anandavnish/expense-tracker/releases/download/v1.0.11/ExpenseTracker-v1.0.11.apk)
+- **Previous Release**: [Expense Tracker v1.0.10 (Build 10)](https://github.com/Anandavnish/expense-tracker/releases/tag/v1.0.10)
 
 ---
 
@@ -959,6 +959,19 @@ Foundational architecture build for a high-performance cross-platform personal f
     - Automated E2E verification (`npm run test:e2e`): all 6 steps passed.
     - TypeScript typecheck (`npx tsc --noEmit`): 0 errors.
     - ESLint (`npm run lint`): 0 errors, 0 warnings.
+
+- [x] **v1.0.11 (Build 11): Expo Go Runtime Guard for `expo-notifications` on Android**:
+  - **Expo SDK 53+ Runtime Guard**:
+    - *Issue*: In Expo SDK 53+, remote push notification support was removed from the Expo Go sandbox application. When `expo-notifications` was imported at the module level in `RootNavigator.tsx`, its auto-registration side effect (`DevicePushTokenAutoRegistration.fx`) called `warnOfExpoGoPushUsage()`, which immediately threw a fatal unhandled error on Android (`[runtime not ready]: Error: expo-notifications: Android Push notifications functionality was removed from Expo Go...`). This caused a red-screen crash on startup when developers connected to `expo start` via Expo Go.
+    - *Resolution*:
+      - Replaced top-level static import with conditional, lazy runtime loading via `isRunningInExpoGo()` from `expo`.
+      - When running in Expo Go (`isRunningInExpoGo() === true`), `expo-notifications` is never required or evaluated, completely preventing the fatal crash while allowing hot-reloading and development in Expo Go.
+      - When running in a production standalone APK or custom Development Build (`isRunningInExpoGo() === false`), `expo-notifications` is loaded normally with full support for Android background shared intent notifications, notification handler presentation, and tap-to-open routing.
+      - Added null-safety checks in `surfaceSharedTransaction` and the notification response listener.
+  - **Verification & Testing**:
+    - TypeScript typecheck (`npx tsc --noEmit`): 0 errors.
+    - ESLint (`npm run lint`): 0 errors, 0 warnings.
+    - Full unified pipeline test suite (`node test_unified_pipeline.mjs`): 10/10 test suites passed.
 
 ---
 
