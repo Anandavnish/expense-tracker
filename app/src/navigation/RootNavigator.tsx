@@ -218,16 +218,29 @@ export const RootNavigator = () => {
 
         const parsedMerchant = parsed.merchant !== 'Unknown' ? parsed.merchant : undefined;
 
+        // Smart Note Prefill: Income -> counterparty name or UPI ID, Expense -> merchant name
+        let smartNote: string | undefined;
+        if (parsed.suggestedType === 'income') {
+          smartNote = parsedMerchant || (parsed.upiRef ? `UPI: ${parsed.upiRef}` : undefined);
+        } else {
+          smartNote = parsedMerchant;
+        }
+
+        const tierBadge =
+          parsed.resolutionTier === 'tier1_local'
+            ? '⚡ Resolved locally via on-device ML Kit (Tier 1)'
+            : parsed.resolutionTier === 'tier2_gemini_spatial'
+            ? '🤖 Resolved via Gemini Spatial Layout (Tier 2)'
+            : '👁️ Resolved via Gemini Vision Fallback (Tier 3)';
+
         const navParams = {
           imageUri: uri,
           prefillAmount: parsed.amount !== null ? parsed.amount : undefined,
-          prefillNote: parsedMerchant || undefined,
+          prefillNote: smartNote,
           parsedMerchant,
           prefillPersonName:
             parsed.suggestedType === 'borrow_given' || parsed.suggestedType === 'borrow_taken'
-              ? parsed.merchant !== 'Unknown'
-                ? parsed.merchant
-                : undefined
+              ? parsedMerchant
               : undefined,
           prefillType: parsed.suggestedType,
           prefillCategory: parsed.suggestedCategory,
@@ -235,11 +248,13 @@ export const RootNavigator = () => {
           accountId: parsed.matchedAccountId,
           prefillSource: 'screenshot',
           isAnalyzing: false,
+          resolutionTier: parsed.resolutionTier,
+          dispatchTimestamp: Date.now(),
           scanMessage: parsed.isCategoryLearned
-            ? `Matched learned rule: ${parsed.merchant} ➔ ${parsed.suggestedCategory}`
+            ? `${tierBadge}: Matched learned rule: ${parsed.merchant} ➔ ${parsed.suggestedCategory}`
             : parsed.amount !== null
-            ? `Extracted ₹${parsed.amount} for ${parsed.merchant} (${parsed.suggestedCategory})`
-            : 'Screenshot parsed! Review details and save.',
+            ? `${tierBadge}: Extracted ₹${parsed.amount} for ${parsed.merchant} (${parsed.suggestedCategory})`
+            : `${tierBadge}: Screenshot parsed! Review details and save.`,
         };
 
         const title = parsed.amount !== null ? `Receipt Parsed: ₹${parsed.amount}` : 'Receipt Ready';
@@ -288,16 +303,24 @@ export const RootNavigator = () => {
 
       const parsedMerchant = parsed.merchant !== 'Unknown' ? parsed.merchant : undefined;
 
+      let smartNote: string | undefined;
+      if (parsed.suggestedType === 'income') {
+        smartNote = parsedMerchant || (parsed.upiRef ? `UPI: ${parsed.upiRef}` : undefined);
+      } else {
+        smartNote = parsedMerchant || (rawText.length > 80 ? rawText.substring(0, 77) + '...' : rawText);
+      }
+
       const navParams: any = {
         prefillAmount: parsed.amount !== null ? parsed.amount : undefined,
-        prefillNote:
-          parsedMerchant || (rawText.length > 80 ? rawText.substring(0, 77) + '...' : rawText),
+        prefillNote: smartNote,
         parsedMerchant,
         prefillType: parsed.suggestedType,
         prefillCategory: parsed.suggestedCategory,
         prefillDate: parsed.date || undefined,
         accountId: parsed.matchedAccountId,
         prefillSource: 'sms',
+        resolutionTier: 'tier1_local',
+        dispatchTimestamp: Date.now(),
         scanMessage: parsed.isCategoryLearned
           ? `Matched learned rule: ${parsed.merchant} ➔ ${parsed.suggestedCategory}`
           : parsed.amount !== null
@@ -330,17 +353,27 @@ export const RootNavigator = () => {
           .then((refined) => {
             if (navigationRef.isReady()) {
               const refinedMerchant = refined.merchant !== 'Unknown' ? refined.merchant : undefined;
+              let refinedSmartNote: string | undefined;
+              if (refined.suggestedType === 'income') {
+                refinedSmartNote = refinedMerchant || (refined.upiRef ? `UPI: ${refined.upiRef}` : undefined);
+              } else {
+                refinedSmartNote = refinedMerchant;
+              }
+
               navigationRef.dispatch(
                 CommonActions.navigate({
                   name: 'AddTransaction',
                   params: {
                     prefillAmount: refined.amount !== null ? refined.amount : undefined,
-                    prefillNote: refinedMerchant,
+                    prefillNote: refinedSmartNote,
                     parsedMerchant: refinedMerchant,
                     prefillType: refined.suggestedType,
                     prefillCategory: refined.suggestedCategory,
                     prefillDate: refined.date || undefined,
+                    accountId: refined.matchedAccountId,
                     prefillSource: 'sms',
+                    resolutionTier: refined.resolutionTier,
+                    dispatchTimestamp: Date.now(),
                     scanMessage: refined.isCategoryLearned
                       ? `Matched learned rule: ${refined.merchant} ➔ ${refined.suggestedCategory}`
                       : `Gemini AI identified: ${refined.merchant} (${refined.suggestedCategory})`,

@@ -259,28 +259,27 @@ const TransactionRowComponent: React.FC<TransactionRowProps> = ({
       {showActions && (
         <View style={[styles.footerRow, { borderTopColor: colors.border }]}>
           <View style={styles.footerActionsGroup}>
-            <TouchableOpacity
-              activeOpacity={0.7}
+            <EditButton
+              size={26}
+              iconSize={13}
               onPress={handleEditPress}
-              style={[styles.actionBtn, { backgroundColor: colors.surfaceLight }]}
-            >
-              <Ionicons name="create-outline" size={13} color={colors.textSecondary} />
-              <Text style={[styles.actionBtnText, { color: colors.textSecondary }]}>
-                Edit
-              </Text>
-            </TouchableOpacity>
-
-            <View style={[styles.actionDivider, { backgroundColor: colors.border }]} />
+              accessibilityLabel="Edit transaction"
+            />
 
             <TouchableOpacity
               activeOpacity={0.7}
               onPress={handleDeletePress}
-              style={[styles.actionBtn, { backgroundColor: colors.surfaceLight }]}
+              style={[
+                styles.actionIconBtn,
+                {
+                  backgroundColor: `${colors.alert}15`,
+                  borderColor: `${colors.alert}30`,
+                },
+              ]}
+              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+              accessibilityLabel="Delete transaction"
             >
-              <Ionicons name="trash-outline" size={13} color={colors.textMuted} />
-              <Text style={[styles.actionBtnText, { color: colors.textMuted }]}>
-                Delete
-              </Text>
+              <Ionicons name="trash-outline" size={13} color={colors.alert} />
             </TouchableOpacity>
           </View>
 
@@ -401,6 +400,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: SPACING.xs,
+  },
+  actionIconBtn: {
+    width: 26,
+    height: 26,
+    borderRadius: 7,
+    borderWidth: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   actionBtn: {
     flexDirection: 'row',

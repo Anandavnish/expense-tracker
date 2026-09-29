@@ -131,10 +131,10 @@ function inferCategoryFromText(text, availableCategories) {
       }
     }
   }
-  if (availableCategories && availableCategories.includes('Food')) {
-    return 'Food';
+  if (availableCategories && availableCategories.some((c) => c.toLowerCase() === 'uncategorized')) {
+    return availableCategories.find((c) => c.toLowerCase() === 'uncategorized');
   }
-  return availableCategories?.[0] || 'Other';
+  return 'Uncategorized';
 }
 
 function extractUpiReference(text) {
@@ -306,12 +306,20 @@ function extractAmountWithProminence(text, ocrBlocks) {
   }
 
   const upiRef = extractUpiReference(text);
+  const vpaHandles = text.match(/\b[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\b/g) || [];
+  const textWithoutVpas = text.replace(/\b[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\b/gi, ' ');
   const candidates = [];
 
   const isPlausibleAmount = (n, raw) => {
     if (isNaN(n) || n <= 0 || n > 10000000) return false;
     if (raw.replace(/\D/g, '').length === 12 || (upiRef && raw.includes(upiRef))) {
       return false;
+    }
+    const cleanRaw = raw.replace(/[,\s]/g, '');
+    for (const vpa of vpaHandles) {
+      if (vpa.includes(cleanRaw)) {
+        return false;
+      }
     }
     if (raw.replace(/\D/g, '').length === 10 && /^[6-9]/.test(raw.trim())) {
       return false;
@@ -330,7 +338,7 @@ function extractAmountWithProminence(text, ocrBlocks) {
 
   for (const regex of currencyPrefixRegexes) {
     let match;
-    while ((match = regex.exec(text)) !== null) {
+    while ((match = regex.exec(textWithoutVpas)) !== null) {
       const rawNum = match[1];
       const parsed = parseFloat(rawNum.replace(/,/g, ''));
       if (isPlausibleAmount(parsed, rawNum)) {
@@ -350,7 +358,7 @@ function extractAmountWithProminence(text, ocrBlocks) {
     /(?:debited|credited|spent|paid|transferred|sent|received|withdrawn|deposit(?:ed)?|amount|amt|total)\s+(?:by|of|for|is)?\s*[:=]?\s*(?:₹|Rs\.?|INR)?\s*([0-9]{1,3}(?:,[0-9]{2,3})*(?:\.[0-9]{1,2})?|[0-9]+(?:\.[0-9]{1,2})?)/gi;
 
   let verbMatch;
-  while ((verbMatch = verbRegex.exec(text)) !== null) {
+  while ((verbMatch = verbRegex.exec(textWithoutVpas)) !== null) {
     const rawNum = verbMatch[1];
     const parsed = parseFloat(rawNum.replace(/,/g, ''));
     if (isPlausibleAmount(parsed, rawNum)) {
@@ -460,7 +468,7 @@ function extractAmountWithProminence(text, ocrBlocks) {
   }
 
   // Step 3: Text-Only Standalone Numeric Heuristic
-  const standaloneDecimals = text.match(/\b([0-9]{1,3}(?:,[0-9]{2,3})*\.[0-9]{2})\b/g);
+  const standaloneDecimals = textWithoutVpas.match(/\b([0-9]{1,3}(?:,[0-9]{2,3})*\.[0-9]{2})\b/g);
   if (standaloneDecimals && standaloneDecimals.length > 0) {
     const validDecimals = [];
     for (const d of standaloneDecimals) {
@@ -486,7 +494,7 @@ function extractAmountWithProminence(text, ocrBlocks) {
   }
 
   // 3B: Standalone integers (e.g. 350)
-  const allNumbers = text.match(/\b([1-9][0-9]{1,6})\b/g);
+  const allNumbers = textWithoutVpas.match(/\b([1-9][0-9]{1,6})\b/g);
   if (allNumbers && allNumbers.length > 0) {
     const validIntegers = [];
     const txDate = extractTransactionDate(text);
@@ -686,7 +694,140 @@ function parseTransaction(input) {
     rawText: text,
     needsGeminiAmount,
     needsGeminiMerchant,
+    resolutionTier: 'tier1_local',
   };
+}
+
+async function parseTransactionWithPipeline(input, options = {}) {
+  const rawTextTrimmed = (input.rawText || '').trim();
+  const hasBlocks = Boolean(input.ocrBlocks && input.ocrBlocks.length > 0);
+  const isCorruptedOrBlank = rawTextTrimmed.length < 15 && !hasBlocks;
+
+  // TIER 3: Multimodal Vision Fallback — Strictly invoked ONLY when Tier 1 returns empty or near-empty text
+  if (isCorruptedOrBlank && options.imageUri && options.enableGeminiEscalation) {
+    if (options.mockGeminiVision) {
+      const fullVisionRes = await options.mockGeminiVision({
+        imageUri: options.imageUri,
+        base64: options.base64,
+        mimeType: options.mimeType,
+        availableCategories: input.availableCategories,
+      });
+
+      if (fullVisionRes.success && fullVisionRes.data) {
+        const vData = fullVisionRes.data;
+        const normMerchant =
+          vData.merchant_or_person && vData.merchant_or_person !== 'Unknown'
+            ? normalizeMerchantName(vData.merchant_or_person)
+            : '';
+
+        let matchedAccountId;
+        if (input.userAccounts && input.userAccounts.length > 0 && normMerchant) {
+          const matchAcc = input.userAccounts.find((a) =>
+            a.name.toLowerCase().includes(normMerchant.toLowerCase())
+          );
+          if (matchAcc) matchedAccountId = matchAcc.id;
+        }
+
+        return {
+          amount: vData.amount,
+          amountConfidence: vData.amount !== null ? 'high' : 'low',
+          amountExtractionMethod: vData.amount !== null ? 'currency_regex' : 'none',
+          upiRef: null,
+          date: vData.date_if_present,
+          merchant: vData.merchant_or_person || 'Unknown',
+          normalizedMerchant: normMerchant,
+          merchantConfidence: vData.merchant_or_person !== 'Unknown' ? 'high' : 'low',
+          suggestedCategory: vData.suggested_category || 'Uncategorized',
+          suggestedType: vData.suggested_type || 'expense',
+          isCategoryLearned: false,
+          classificationSource: 'gemini_rule',
+          matchedAccountId,
+          rawText: rawTextTrimmed,
+          needsGeminiAmount: vData.amount === null,
+          needsGeminiMerchant: vData.merchant_or_person === 'Unknown',
+          resolutionTier: 'tier3_vision_fallback',
+        };
+      }
+    }
+  }
+
+  // TIER 1: Run deterministic on-device parser (0ms, 0 network, 0 API calls)
+  const result = parseTransaction(input);
+  result.resolutionTier = 'tier1_local';
+
+  if (!options.enableGeminiEscalation) {
+    return result;
+  }
+
+  const isTier1HighConfidence =
+    result.amount !== null &&
+    (result.amountConfidence === 'high' || result.amountConfidence === 'medium') &&
+    result.merchant !== 'Unknown' &&
+    !result.needsGeminiMerchant &&
+    (!input.userAccounts?.length || Boolean(result.matchedAccountId));
+
+  if (isTier1HighConfidence) {
+    return result;
+  }
+
+  // TIER 2: Structured Text + Spatial Coordinates Escalation
+  // Sends structured JSON array of text blocks with spatial coordinates (y-pos, width, height) — NEVER raw pixels!
+  if (options.mockGeminiSpatial) {
+    const spatialRes = await options.mockGeminiSpatial({
+      blocks: input.ocrBlocks,
+      rawText: input.rawText,
+      availableCategories: input.availableCategories,
+      userAccounts: input.userAccounts,
+    });
+
+    if (spatialRes.success && spatialRes.data) {
+      const sData = spatialRes.data;
+      result.resolutionTier = 'tier2_gemini_spatial';
+
+      if (sData.amount !== null) {
+        result.amount = sData.amount;
+        result.amountConfidence = 'high';
+        result.needsGeminiAmount = false;
+        result.amountExtractionMethod = 'prominence_heuristic';
+      }
+
+      if (sData.merchant_or_person && sData.merchant_or_person !== 'Unknown') {
+        result.merchant = sData.merchant_or_person;
+        result.normalizedMerchant = normalizeMerchantName(sData.merchant_or_person);
+        result.merchantConfidence = 'high';
+      }
+
+      if (sData.direction) {
+        result.suggestedType = sData.direction === 'received' ? 'income' : 'expense';
+      }
+
+      if (sData.transaction_datetime) {
+        result.date = sData.transaction_datetime;
+      }
+
+      if (sData.suggested_category) {
+        result.suggestedCategory = sData.suggested_category;
+        result.classificationSource = 'gemini_rule';
+        result.needsGeminiMerchant = false;
+      }
+
+      if (sData.detected_bank_or_source) {
+        result.detectedBankOrSource = sData.detected_bank_or_source;
+        if (input.userAccounts && input.userAccounts.length > 0) {
+          const detectedLower = sData.detected_bank_or_source.toLowerCase();
+          const matchedAcc = input.userAccounts.find((acc) => {
+            const accNameLower = acc.name.toLowerCase();
+            return accNameLower.includes(detectedLower) || detectedLower.includes(accNameLower);
+          });
+          if (matchedAcc) {
+            result.matchedAccountId = matchedAcc.id;
+          }
+        }
+      }
+    }
+  }
+
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -1103,6 +1244,230 @@ console.log('  6B. Ambiguous numbers flagged for Gemini escalation instead of si
 
 console.log('✔ [TEST SUITE 6 PASSED]: Amount confidence and fallback escalation verified.\n');
 
+// ===========================================================================
+// [TEST SUITE 7] VPA / UPI ID Handle Filtering in SMS and Screenshots
+// ===========================================================================
+console.log('▶ [TEST SUITE 7] Testing VPA / UPI ID Filtering (Handle Number Exclusion)...');
+
+// Case 7A: SMS with phone number inside VPA handle (e.g. user9876543210@upi)
+const smsVpaPhone = 'Sent Rs.150.00 from SBI A/c 0186 to user9876543210@upi on 29-09-2026 Ref 427189024819';
+const resVpa1 = parseTransaction({
+  rawText: smsVpaPhone,
+  userAccounts: mockAccounts,
+  availableCategories: mockCategories,
+});
+
+console.log('  7A. SMS with phone number VPA:');
+console.log(`      Extracted Amount: ₹${resVpa1.amount} (Confidence: ${resVpa1.amountConfidence})`);
+assert.strictEqual(resVpa1.amount, 150);
+assert.strictEqual(resVpa1.amountConfidence, 'high');
+assert.notStrictEqual(resVpa1.amount, 9876543210);
+
+// Case 7B: SMS with numeric suffix inside merchant VPA handle (e.g. merchant123@okhdfcbank)
+const smsVpaAlpha = 'Paid Rs.499 to merchant123@okhdfcbank Ref 427189024819';
+const resVpa2 = parseTransaction({
+  rawText: smsVpaAlpha,
+  userAccounts: mockAccounts,
+  availableCategories: mockCategories,
+});
+
+console.log('  7B. SMS with alphanumeric VPA handle:');
+console.log(`      Extracted Amount: ₹${resVpa2.amount}`);
+assert.strictEqual(resVpa2.amount, 499);
+assert.notStrictEqual(resVpa2.amount, 123);
+
+// Case 7C: Screenshot text with VPA handle and amount without explicit Rs symbol
+const ocrVpaNoCurrency = `
+Paid to
+user9998887776@paytm
+250
+UTR 427189024819
+`;
+const resVpa3 = parseTransaction({
+  rawText: ocrVpaNoCurrency,
+  userAccounts: mockAccounts,
+  availableCategories: mockCategories,
+});
+
+console.log('  7C. OCR text with VPA handle without currency prefix:');
+console.log(`      Extracted Amount: ₹${resVpa3.amount}`);
+assert.strictEqual(resVpa3.amount, 250);
+assert.notStrictEqual(resVpa3.amount, 9998887776);
+
+console.log('✔ [TEST SUITE 7 PASSED]: VPA handles excluded from amount candidates successfully.\n');
+
+// ===========================================================================
+// [TEST SUITE 8] Tier 1 vs Tier 2 vs Tier 3 Resolution Cascade
+// ===========================================================================
+console.log('▶ [TEST SUITE 8] Testing Unified 3-Tier Resolution Pipeline...');
+
+// Case 8A: Tier 1 - High Confidence match resolved locally with 0 AI calls
+let tier2Invoked = false;
+let tier3Invoked = false;
+
+const resCascadeTier1 = await parseTransactionWithPipeline(
+  {
+    rawText: gpayText1,
+    userAccounts: mockAccounts,
+    availableCategories: mockCategories,
+    learnedRules: mockLearnedRules,
+  },
+  {
+    enableGeminiEscalation: true,
+    mockGeminiSpatial: async () => {
+      tier2Invoked = true;
+      return { success: true, data: {} };
+    },
+    mockGeminiVision: async () => {
+      tier3Invoked = true;
+      return { success: true, data: {} };
+    },
+  }
+);
+
+console.log('  8A. Tier 1 Local Deterministic:');
+console.log(`      Resolution Tier: ${resCascadeTier1.resolutionTier}`);
+console.log(`      Amount: ₹${resCascadeTier1.amount}, Merchant: "${resCascadeTier1.merchant}"`);
+assert.strictEqual(resCascadeTier1.resolutionTier, 'tier1_local');
+assert.strictEqual(tier2Invoked, false, 'Tier 2 should NOT be called for high confidence match');
+assert.strictEqual(tier3Invoked, false, 'Tier 3 should NOT be called for high confidence match');
+assert.strictEqual(resCascadeTier1.amount, 450);
+
+// Case 8B: Tier 2 - Unrecognized merchant / low confidence escalates via spatial text geometry
+tier2Invoked = false;
+tier3Invoked = false;
+
+const resCascadeTier2 = await parseTransactionWithPipeline(
+  {
+    rawText: 'Paid ₹800 to Mohan Woodwork on 29-09-2026',
+    ocrBlocks: [
+      { text: 'Paid to', boundingBox: { x: 50, y: 50, width: 100, height: 20 } },
+      { text: 'Mohan Woodwork', boundingBox: { x: 50, y: 80, width: 250, height: 30 } },
+      { text: '₹800.00', boundingBox: { x: 50, y: 140, width: 200, height: 60 } },
+    ],
+    userAccounts: mockAccounts,
+    availableCategories: mockCategories,
+    learnedRules: mockLearnedRules,
+  },
+  {
+    enableGeminiEscalation: true,
+    mockGeminiSpatial: async (options) => {
+      tier2Invoked = true;
+      assert.ok(options.blocks && options.blocks.length > 0, 'Spatial escalation must send blocks');
+      return {
+        success: true,
+        data: {
+          amount: 800,
+          merchant_or_person: 'Mohan Woodwork',
+          direction: 'sent',
+          suggested_category: 'Other',
+          detected_bank_or_source: 'SBI',
+          transaction_datetime: '2026-09-29',
+        },
+      };
+    },
+    mockGeminiVision: async () => {
+      tier3Invoked = true;
+      return { success: true, data: {} };
+    },
+  }
+);
+
+console.log('  8B. Tier 2 Spatial Coordinates Escalation:');
+console.log(`      Resolution Tier: ${resCascadeTier2.resolutionTier}`);
+console.log(`      Merchant: "${resCascadeTier2.merchant}", Category: ${resCascadeTier2.suggestedCategory}`);
+console.log(`      Type: ${resCascadeTier2.suggestedType}, Matched Account: ${resCascadeTier2.matchedAccountId}`);
+assert.strictEqual(resCascadeTier2.resolutionTier, 'tier2_gemini_spatial');
+assert.strictEqual(tier2Invoked, true, 'Tier 2 MUST be called for unrecognized merchant');
+assert.strictEqual(tier3Invoked, false, 'Tier 3 should NOT be called when text blocks are present');
+assert.strictEqual(resCascadeTier2.merchant, 'Mohan Woodwork');
+assert.strictEqual(resCascadeTier2.suggestedType, 'expense');
+assert.strictEqual(resCascadeTier2.matchedAccountId, 'acc-sbi-1');
+
+// Case 8C: Tier 3 - Blank/Corrupted OCR text falls back to Multimodal Vision
+tier2Invoked = false;
+tier3Invoked = false;
+
+const resCascadeTier3 = await parseTransactionWithPipeline(
+  {
+    rawText: '   ',
+    ocrBlocks: [],
+    availableCategories: mockCategories,
+  },
+  {
+    imageUri: 'file:///mock/receipt_scenery.jpg',
+    enableGeminiEscalation: true,
+    mockGeminiSpatial: async () => {
+      tier2Invoked = true;
+      return { success: true, data: {} };
+    },
+    mockGeminiVision: async (options) => {
+      tier3Invoked = true;
+      assert.strictEqual(options.imageUri, 'file:///mock/receipt_scenery.jpg');
+      return {
+        success: true,
+        data: {
+          amount: 250,
+          merchant_or_person: 'Cafe Coffee Day',
+          suggested_type: 'expense',
+          suggested_category: 'Food',
+          date_if_present: '2026-09-29',
+        },
+      };
+    },
+  }
+);
+
+console.log('  8C. Tier 3 Multimodal Vision Fallback:');
+console.log(`      Resolution Tier: ${resCascadeTier3.resolutionTier}`);
+console.log(`      Amount: ₹${resCascadeTier3.amount}, Merchant: "${resCascadeTier3.merchant}"`);
+assert.strictEqual(resCascadeTier3.resolutionTier, 'tier3_vision_fallback');
+assert.strictEqual(tier3Invoked, true, 'Tier 3 MUST be invoked when OCR text is empty/corrupt');
+assert.strictEqual(tier2Invoked, false, 'Tier 2 should NOT be called when text is corrupt/empty');
+assert.strictEqual(resCascadeTier3.amount, 250);
+assert.strictEqual(resCascadeTier3.merchant, 'Cafe Coffee Day');
+
+console.log('✔ [TEST SUITE 8 PASSED]: Tier 1, Tier 2, and Tier 3 resolution cascade verified.\n');
+
+// ===========================================================================
+// [TEST SUITE 9] Zero-Defaulting on Source Accounts & 'Uncategorized' Fallback
+// ===========================================================================
+console.log('▶ [TEST SUITE 9] Testing Zero-Defaulting & Category Fallbacks...');
+
+// Case 9A: When no bank or account is mentioned, matchedAccountId MUST BE undefined (never default to Cash or accounts[0])
+const resNoAccount = parseTransaction({
+  rawText: 'Paid ₹300 to Chai Wala on 29-09-2026',
+  userAccounts: mockAccounts,
+  availableCategories: mockCategories,
+});
+
+console.log('  9A. Zero-Defaulting on Unmatched Account:');
+console.log(`      Matched Account ID: ${resNoAccount.matchedAccountId}`);
+console.log(`      Account Hint: ${resNoAccount.accountHint}`);
+assert.strictEqual(resNoAccount.matchedAccountId, undefined, 'Must not default to accounts[0] or Cash Wallet');
+assert.strictEqual(resNoAccount.accountHint, undefined);
+
+// Case 9B: Unknown merchant category fallback defaults to 'Uncategorized' (never 'Food')
+const resUncategorized = parseTransaction({
+  rawText: 'Paid ₹500 to Xylophone Software Services on 29-09-2026',
+  availableCategories: ['Food', 'Travel', 'Shopping', 'Uncategorized'],
+});
+
+console.log('  9B. Category Fallback:');
+console.log(`      Suggested Category: "${resUncategorized.suggestedCategory}"`);
+assert.strictEqual(resUncategorized.suggestedCategory, 'Uncategorized', 'Fallback must be Uncategorized');
+assert.notStrictEqual(resUncategorized.suggestedCategory, 'Food', 'Must never default to Food');
+
+// Case 9C: When availableCategories list doesn't include Uncategorized explicitly, it still returns Uncategorized
+const resUncategorizedDefault = parseTransaction({
+  rawText: 'Paid ₹500 to Random Vendor 12345',
+  availableCategories: ['Food', 'Travel', 'Shopping'],
+});
+assert.strictEqual(resUncategorizedDefault.suggestedCategory, 'Uncategorized');
+
+console.log('✔ [TEST SUITE 9 PASSED]: Zero-defaulting and Uncategorized fallback verified.\n');
+
 console.log('================================================================');
-console.log(' 🎉 ALL TESTS PASSED! UNIFIED PIPELINE IS 100% OPERATIONAL');
+console.log(' 🎉 ALL 9 TEST SUITES PASSED! UNIFIED PIPELINE IS 100% OPERATIONAL');
 console.log('================================================================');
+

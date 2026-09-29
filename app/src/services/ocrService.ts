@@ -23,14 +23,24 @@ export async function extractTextFromImage(imageUri: string): Promise<OcrResult>
     const mlkitOcr = require('expo-mlkit-ocr');
     if (mlkitOcr && typeof mlkitOcr.recognizeText === 'function') {
       const result = await mlkitOcr.recognizeText(imageUri);
+      const text = result?.text || '';
+      const blocks = result?.blocks || [];
+
+      console.log('[Boundary 1: ocrService] extractTextFromImage completed successfully:', {
+        success: true,
+        textLength: text.length,
+        blockCount: blocks.length,
+        preview: text.substring(0, 100).replace(/\n/g, ' '),
+      });
+
       return {
         success: true,
-        text: result?.text || '',
-        blocks: result?.blocks || [],
+        text,
+        blocks,
       };
     }
   } catch (err: any) {
-    console.warn('[ocrService] expo-mlkit-ocr extraction failed or unavailable:', err?.message);
+    console.warn('[Boundary 1: ocrService] expo-mlkit-ocr extraction failed or unavailable:', err?.message);
     return {
       success: false,
       text: '',
@@ -38,6 +48,7 @@ export async function extractTextFromImage(imageUri: string): Promise<OcrResult>
     };
   }
 
+  console.warn('[Boundary 1: ocrService] expo-mlkit-ocr module not available in this environment');
   return {
     success: false,
     text: '',

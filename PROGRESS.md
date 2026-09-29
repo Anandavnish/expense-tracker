@@ -4,9 +4,9 @@
 Foundational architecture build for a high-performance cross-platform personal finance mobile app built for Android using Expo Dev Client, React Native Reanimated, React Native Paper, Zustand, and Supabase.
 
 - **GitHub Repository**: [https://github.com/Anandavnish/expense-tracker](https://github.com/Anandavnish/expense-tracker)
-- **Latest Release**: [Expense Tracker v1.0.8 (Build 8)](https://github.com/Anandavnish/expense-tracker/releases/tag/v1.0.8)
-- **Direct APK Download**: [ExpenseTracker-v1.0.8.apk](https://github.com/Anandavnish/expense-tracker/releases/download/v1.0.8/ExpenseTracker-v1.0.8.apk)
-- **Previous Release**: [Expense Tracker v1.0.7 (Build 7)](https://github.com/Anandavnish/expense-tracker/releases/tag/v1.0.7)
+- **Latest Release**: [Expense Tracker v1.0.9 (Build 9)](https://github.com/Anandavnish/expense-tracker/releases/tag/v1.0.9)
+- **Direct APK Download**: [ExpenseTracker-v1.0.9.apk](https://github.com/Anandavnish/expense-tracker/releases/download/v1.0.9/ExpenseTracker-v1.0.9.apk)
+- **Previous Release**: [Expense Tracker v1.0.8 (Build 8)](https://github.com/Anandavnish/expense-tracker/releases/tag/v1.0.8)
 
 ---
 
@@ -890,6 +890,40 @@ Foundational architecture build for a high-performance cross-platform personal f
       - Low-confidence amount escalation.
     - Ran and passed all existing test suites: `test_sms_learning_system.mjs`, `test_sms_and_guest_isolation.mjs`, `test_ai_overview_gating.mjs`, `test_version_service.mjs`, and `npm run test:e2e` (all 6 E2E steps passed).
     - Passed TypeScript typecheck (`npx tsc --noEmit`: 0 errors) and ESLint (`npm run lint`: 0 errors, 0 warnings).
+
+- [x] **v1.0.9 (Build 9): Unified Tiered OCR Pipeline, Form State Hand-Off Diagnostics, & Business Logic Enforcement**:
+  - **Root Cause Analysis of Hand-Off and State Dropping**:
+    1. *Render-Phase State Mutation Dropping*: In `AddTransactionScreen.tsx`, navigation state syncing was previously executed via `setPrevParams(params)` during the render phase. In React Navigation, async navigation completion from `RootNavigator` updated `route.params`, but render-time `setState` collided with active renders, while `amountTouched` checks prevented updates. Moving to a dedicated `useEffect` keyed on a serialized param signature (`paramsSignature`) completely eliminated dropped state.
+    2. *Silent Date Loss*: `AddTransactionScreen.tsx` previously had `if (parseInt(yStr, 10) === today.getFullYear() && parseInt(mStr, 10) === today.getMonth() + 1) setDate(parsed.date);`. Any receipt from a past week or prior month was silently discarded and replaced with today's date. Now `applyPrefillDate` preserves the date or triggers the month-lock redirect banner with an unlock action.
+    3. *Cash Auto-Defaulting*: `selectedAccountId` previously initialized to `params?.accountId || accounts[0]?.id || ''`, and `effectiveAccountId` fell back to `accounts[0]?.id`. This forced unmatched receipts to silently charge Primary Bank or Cash. Now it initializes to `''` (`effectiveAccountId = selectedAccountId`) and requires explicit user selection (`• Select source`), blocking submission if no account is selected.
+    4. *Hardcoded Category Fallback*: `inferCategoryFromText` and `normalizeAndMatchCategory` had `return availableCategories.includes('Food') ? 'Food' : 'Other'`. This has been replaced with `'Uncategorized'`.
+  - **3-Tier Cascade Architecture**:
+    - **Tier 1 (On-Device ML Kit)**: `expo-mlkit-ocr` extracts text + spatial bounding boxes (`x, y, width, height`). Deterministic regex and bank-alias matching run locally. High confidence prefills directly (0 API calls, 0 network).
+    - **Tier 2 (Text + Spatial Geometry Escalation via Gemini)**: When local confidence is low (`needsGeminiAmount`, `needsGeminiMerchant`, or unmatched bank), escalates structured JSON array of text blocks + spatial coordinates (`[{ text, x, y, width, height }]`) to Gemini with sensitive balances and account numbers redacted. **Never sends raw pixels or flat text strings.** Gemini resolves: `amount`, `merchant_or_person`, `direction` (`'sent'` | `'received'`), `transaction_datetime`, and `detected_bank_or_source`.
+    - **Tier 3 (Direct Vision Fallback)**: Multimodal call on raw image bytes strictly constrained to corrupted/empty OCR text (`< 15` chars and no blocks).
+  - **Boundary Diagnostics (Boundary 1, 2, 3)**:
+    - *Boundary 1 (`ocrService.ts`)*: Logs ML Kit extraction success, raw text character length, total block count, and a text preview.
+    - *Boundary 2 (`transactionParser.ts`)*: Logs tier resolution (`tier1_local`, `tier2_gemini_spatial`, `tier3_vision_fallback`), extracted amount, confidence, merchant, category, type, date, and matched account ID.
+    - *Boundary 3 (`AddTransactionScreen.tsx`)*: Logs param arrival signature, prefill values, and triggers toast badges (`⚡ Tier 1`, `🤖 Tier 2`, `👁️ Tier 3`).
+  - **Financial Business Logic & Zero-Defaulting**:
+    - *Smart Note Prefill*: Income (`received`) &rarr; counterparty/UPI ID note; Expense (`sent`) &rarr; merchant note.
+    - *Month-Lock & Date Enforcement*: Parse explicit receipt date. If in a locked month, do not block or overwrite: write to current active month (today) and render a persistent banner (*"This looks like it's from [Date] — [Month] is locked. Logged to this month instead."*) with a one-tap unlock shortcut that opens `MonthUnlockModal` and relocates the transaction date upon code entry.
+    - *Zero Defaulting on Source*: If unmatched, leave unselected (`"• Select source"`); never default to Cash or `accounts[0]`. Form submission is blocked until a money source is explicitly chosen.
+    - *Category Fallback*: Defaults to `'Uncategorized'` instead of `'Food'`.
+    - *VPA Filtering*: Excludes alphanumeric VPA handles from amount candidates (`user9876543210@upi` ignores `9876543210`).
+  - **Verification & Testing**:
+    - Expanded `app/test_unified_pipeline.mjs` to 9 comprehensive test suites:
+      - Test Suite 1: Google Pay (Standard, No currency prominence, OCR bounding box font height).
+      - Test Suite 2: PhonePe (Standard layout, comma formats, fallback amounts, UTR extraction).
+      - Test Suite 3: Paytm (Money Sent, decimal format, Chai Point learned rule matching).
+      - Test Suite 4: Indian Banking SMS (SBI, HDFC debit alerts).
+      - Test Suite 5: Merchant Rules Lookup & Zero-AI Invocations (Gopal Sweet local match, Gopal Medical exact rejection).
+      - Test Suite 6: Low Confidence Amount Escalation (Missing amount, ambiguous numbers).
+      - Test Suite 7: VPA Handle Filtering in SMS & OCR (`user9876543210@upi` & `merchant123@okhdfcbank` exclusion).
+      - Test Suite 8: Tier 1 vs Tier 2 vs Tier 3 Resolution Cascade (Local vs Spatial JSON vs Multimodal Vision).
+      - Test Suite 9: Zero-Defaulting on Source Accounts & `'Uncategorized'` Category Fallback.
+    - TypeScript typecheck (`npx tsc --noEmit`): 0 errors.
+    - ESLint (`npm run lint`): 0 errors, 0 warnings.
 
 ---
 

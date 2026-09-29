@@ -25,6 +25,7 @@ import { TransactionType, TransactionSource } from '../../types/database';
 import { extractTextFromImage } from '../../services/ocrService';
 import { parseTransactionWithPipeline, normalizeAndMatchCategory } from '../../services/transactionParser';
 import { useMerchantRulesStore } from '../../store/merchantRulesStore';
+import { MonthUnlockModal } from '../../components/MonthUnlockModal';
 
 interface AddTransactionScreenProps {
   navigation: any;
@@ -113,14 +114,14 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
       ? String(params.prefillAmount)
       : ''
   );
-  const [selectedAccountId, setSelectedAccountId] = useState(
-    params?.accountId || accounts[0]?.id || ''
-  );
+  // Zero defaulting: never auto-assign Cash or accounts[0]
+  const [selectedAccountId, setSelectedAccountId] = useState(params?.accountId || '');
   const [category, setCategory] = useState(() => {
     if (params?.prefillCategory) {
       return normalizeAndMatchCategory(params.prefillCategory, categories).category;
     }
-    return categories[0] || 'Food';
+    const uncat = categories.find((c) => c.toLowerCase() === 'uncategorized');
+    return uncat || 'Uncategorized';
   });
   const [note, setNote] = useState(
     params?.prefillNote !== undefined && params?.prefillNote !== null
@@ -144,6 +145,14 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
+  // Month-lock redirect state and unlock modal
+  const [lockedMonthRedirect, setLockedMonthRedirect] = useState<{
+    originalDate: string;
+    lockedMonth: string;
+    bannerText: string;
+  } | null>(null);
+  const [showUnlockModal, setShowUnlockModal] = useState(false);
+
   // OCR and Screenshot states
   const [source, setSource] = useState<TransactionSource>(params?.prefillSource || 'manual');
   const [isScanning, setIsScanning] = useState(Boolean(params?.isAnalyzing));
@@ -163,6 +172,37 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
   const [typeTouched, setTypeTouched] = useState(false);
   const [parsedMerchant, setParsedMerchant] = useState<string | undefined>(params?.parsedMerchant);
 
+  // Helper to validate and enforce locked month redirect
+  const applyPrefillDate = (rawDateStr: string) => {
+    if (!rawDateStr) return;
+    const txMonth = rawDateStr.substring(0, 7);
+    if (isMonthLocked(txMonth)) {
+      const [yStr, mStr] = txMonth.split('-');
+      const d = new Date(parseInt(yStr, 10), parseInt(mStr, 10) - 1, 1);
+      const lockedName = d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+      let formattedRaw = rawDateStr;
+      try {
+        formattedRaw = new Date(rawDateStr + 'T12:00:00').toLocaleDateString('en-IN', {
+          day: 'numeric',
+          month: 'short',
+          year: 'numeric',
+        });
+      } catch {
+        // ignore
+      }
+      // Write record to current active month
+      setDate(formatLocalDate(today));
+      setLockedMonthRedirect({
+        originalDate: rawDateStr,
+        lockedMonth: txMonth,
+        bannerText: `This looks like it's from ${formattedRaw} — ${lockedName} is locked. Logged to this month instead.`,
+      });
+    } else {
+      setDate(rawDateStr);
+      setLockedMonthRedirect(null);
+    }
+  };
+
   // Automatically add newly detected category if it doesn't exist
   React.useEffect(() => {
     if (params?.prefillCategory) {
@@ -174,52 +214,110 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Adjust state during render if route.params changes after initial mount (React recommended pattern)
-  const [prevParams, setPrevParams] = useState(params);
-  if (params && params !== prevParams) {
-    setPrevParams(params);
+  // Boundary 3: Reactive state binding for route params
+  const lastParamsRef = useRef<string>('');
+  /* eslint-disable react-hooks/set-state-in-effect */
+  React.useEffect(() => {
+    if (!params) return;
+
+    const paramSignature = JSON.stringify({
+      amount: params.prefillAmount,
+      note: params.prefillNote,
+      category: params.prefillCategory,
+      type: params.prefillType,
+      accountId: params.accountId,
+      date: params.prefillDate,
+      source: params.prefillSource,
+      isAnalyzing: params.isAnalyzing,
+      tier: params.resolutionTier,
+      stamp: params.dispatchTimestamp || params.scanMessage,
+    });
+
+    if (paramSignature === lastParamsRef.current) return;
+    lastParamsRef.current = paramSignature;
+
+    console.log('[Boundary 3: AddTransactionScreen] Received and applying prefill params:', {
+      resolutionTier: params.resolutionTier,
+      amount: params.prefillAmount,
+      note: params.prefillNote,
+      category: params.prefillCategory,
+      type: params.prefillType,
+      date: params.prefillDate,
+      accountId: params.accountId,
+      isAnalyzing: params.isAnalyzing,
+    });
+
     if (params.parsedMerchant) {
       setParsedMerchant(params.parsedMerchant);
     }
-    // Only update fields the user has NOT actively touched
-    if (!amountTouched && params.prefillAmount !== undefined && params.prefillAmount !== null) {
+
+    if (params.isAnalyzing !== undefined) {
+      setIsScanning(Boolean(params.isAnalyzing));
+    }
+
+    if (params.prefillAmount !== undefined && params.prefillAmount !== null) {
       setAmount(String(params.prefillAmount));
+      setAmountTouched(false);
     }
-    if (!noteTouched && params.prefillNote !== undefined && params.prefillNote !== null) {
+
+    if (params.prefillNote !== undefined && params.prefillNote !== null) {
       setNote(String(params.prefillNote));
+      setNoteTouched(false);
     }
+
     if (params.prefillPersonName !== undefined && params.prefillPersonName !== null) {
       setPersonName(String(params.prefillPersonName));
     }
-    if (!typeTouched && params.prefillType !== undefined && params.prefillType !== null) {
+
+    if (params.prefillType) {
       setType(params.prefillType);
+      setTypeTouched(false);
     }
-    if (!categoryTouched && params.prefillCategory !== undefined && params.prefillCategory !== null) {
+
+    if (params.prefillCategory) {
       const match = normalizeAndMatchCategory(params.prefillCategory, categories);
       if (match.isNew) {
         useFinanceStore.getState().addCategory(match.category);
       }
       setCategory(match.category);
+      setCategoryTouched(false);
     }
+
     if (params.accountId) {
       setSelectedAccountId(params.accountId);
+    } else {
+      // Zero defaulting: never auto-assign Cash or accounts[0]
+      setSelectedAccountId('');
     }
-    if (params.isAnalyzing !== undefined) {
-      setIsScanning(Boolean(params.isAnalyzing));
+
+    if (params.prefillDate) {
+      applyPrefillDate(params.prefillDate);
     }
-    if (params.prefillDate !== undefined && params.prefillDate !== null) {
-      setDate(params.prefillDate);
-    }
-    if (params.prefillSource !== undefined && params.prefillSource !== null) {
+
+    if (params.prefillSource) {
       setSource(params.prefillSource);
     }
-    if (params.scanMessage) {
+
+    if (params.resolutionTier) {
+      const tierBadge =
+        params.resolutionTier === 'tier1_local'
+          ? '⚡ Resolved locally via on-device ML Kit (Tier 1)'
+          : params.resolutionTier === 'tier2_gemini_spatial'
+          ? '🤖 Resolved via Gemini Spatial Layout (Tier 2)'
+          : '👁️ Resolved via Gemini Vision Fallback (Tier 3)';
+
+      setScanToast({
+        type: 'success',
+        message: params.scanMessage || tierBadge,
+      });
+    } else if (params.scanMessage) {
       setScanToast({ type: 'success', message: params.scanMessage });
-    }
-    if (params.scanError) {
+    } else if (params.scanError) {
       setScanToast({ type: 'error', message: params.scanError });
     }
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params, categories]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const handlePickAndScanImage = async () => {
     try {
@@ -241,10 +339,10 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
       setIsScanning(true);
       setScanToast({ type: 'info', message: 'Reading receipt with on-device OCR...' });
 
-      // 2. Perform on-device text & bounding box extraction via expo-mlkit-ocr
+      // 2. Perform on-device text & bounding box extraction via expo-mlkit-ocr (Boundary 1)
       const ocrRes = await extractTextFromImage(imageUri);
 
-      // 3. Run shared transactionParser pipeline (deterministic extraction first, rules lookup, selective Gemini escalation)
+      // 3. Run shared transactionParser pipeline (Boundary 2)
       const { rules, recordGeminiRule } = useMerchantRulesStore.getState();
       const parsed = await parseTransactionWithPipeline(
         {
@@ -273,6 +371,16 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
         return;
       }
 
+      console.log('[Boundary 3: AddTransactionScreen] handlePickAndScanImage applying prefill:', {
+        resolutionTier: parsed.resolutionTier,
+        amount: parsed.amount,
+        merchant: parsed.merchant,
+        category: parsed.suggestedCategory,
+        type: parsed.suggestedType,
+        date: parsed.date,
+        matchedAccountId: parsed.matchedAccountId,
+      });
+
       // 4. Pre-fill form values for user review
       if (parsed.amount !== null && !amountTouched) {
         setAmount(String(parsed.amount));
@@ -283,12 +391,25 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
           setPersonName(parsed.merchant !== 'Unknown' ? parsed.merchant : '');
         }
       }
-      if (parsed.merchant && parsed.merchant !== 'Unknown') {
+
+      // Smart note prefill: Income -> counterparty/UPI, Expense -> merchant
+      if (parsed.suggestedType === 'income') {
+        const smartNote =
+          parsed.merchant !== 'Unknown'
+            ? parsed.merchant
+            : parsed.upiRef
+            ? `UPI: ${parsed.upiRef}`
+            : '';
+        if (!noteTouched && smartNote) {
+          setNote(smartNote);
+        }
+      } else if (parsed.merchant && parsed.merchant !== 'Unknown') {
         if (!noteTouched) {
           setNote(parsed.merchant);
         }
         setParsedMerchant(parsed.merchant);
       }
+
       if (parsed.suggestedCategory && !categoryTouched) {
         const match = normalizeAndMatchCategory(parsed.suggestedCategory, categories);
         if (match.isNew) {
@@ -296,40 +417,47 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
         }
         setCategory(match.category);
       }
+
       if (parsed.date) {
-        const [yStr, mStr] = parsed.date.split('-');
-        if (
-          parseInt(yStr, 10) === today.getFullYear() &&
-          parseInt(mStr, 10) === today.getMonth() + 1
-        ) {
-          setDate(parsed.date);
-        }
+        applyPrefillDate(parsed.date);
       }
+
+      // Zero defaulting: leave unselected if unmatched
       if (parsed.matchedAccountId) {
         setSelectedAccountId(parsed.matchedAccountId);
+      } else {
+        setSelectedAccountId('');
       }
+
       setSource('screenshot');
 
-      // 5. User-facing feedback toast
+      // 5. User-facing feedback toast with tier indicator
+      const tierBadge =
+        parsed.resolutionTier === 'tier1_local'
+          ? '⚡ Resolved locally via on-device ML Kit (Tier 1)'
+          : parsed.resolutionTier === 'tier2_gemini_spatial'
+          ? '🤖 Resolved via Gemini Spatial Layout (Tier 2)'
+          : '👁️ Resolved via Gemini Vision Fallback (Tier 3)';
+
       if (parsed.isCategoryLearned) {
         setScanToast({
           type: 'success',
-          message: `Matched learned rule: ${parsed.merchant} ➔ ${parsed.suggestedCategory}`,
+          message: `${tierBadge}: Matched rule ${parsed.merchant} ➔ ${parsed.suggestedCategory}`,
         });
       } else if (parsed.amount !== null && parsed.merchant !== 'Unknown') {
         setScanToast({
           type: 'success',
-          message: `Extracted ₹${parsed.amount} for ${parsed.merchant} (${parsed.suggestedCategory})`,
+          message: `${tierBadge}: ₹${parsed.amount} for ${parsed.merchant} (${parsed.suggestedCategory})`,
         });
       } else if (parsed.amount !== null) {
         setScanToast({
           type: 'success',
-          message: `Extracted ₹${parsed.amount}! Review category and save.`,
+          message: `${tierBadge}: Extracted ₹${parsed.amount}! Review details and save.`,
         });
       } else {
         setScanToast({
           type: 'info',
-          message: 'Screenshot parsed! Please verify amount and tap Save.',
+          message: `${tierBadge}: Screenshot parsed! Please verify details and tap Save.`,
         });
       }
     } catch (err: any) {
@@ -341,7 +469,7 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
     }
   };
 
-  const effectiveAccountId = selectedAccountId || route?.params?.accountId || accounts[0]?.id || '';
+  const effectiveAccountId = selectedAccountId;
   const selectedAccount = accounts.find((a) => a.id === effectiveAccountId);
   const isCreditCard = selectedAccount?.type === 'credit_card';
 
@@ -403,7 +531,15 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
   const handleTypeChange = (newType: TransactionType) => {
     setType(newType);
     if (newType === 'expense') {
-      setCategory(categories[0] || 'Food');
+      if (
+        !category ||
+        category === 'Credit Card Payment' ||
+        BORROW_CATEGORIES.includes(category) ||
+        INCOME_CATEGORIES.includes(category)
+      ) {
+        const uncat = categories.find((c) => c.toLowerCase() === 'uncategorized');
+        setCategory(uncat || 'Uncategorized');
+      }
     } else if (newType === 'income') {
       setCategory(isCreditCard ? CREDIT_CARD_INCOME_CATEGORIES[0] : INCOME_CATEGORIES[0]);
     } else {
@@ -537,6 +673,33 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
         contentContainerStyle={styles.scrollContent}
         extraScrollHeight={60}
       >
+        {/* Persistent Locked Month Redirect Banner with One-Tap Unlock Action */}
+        {lockedMonthRedirect && (
+          <View style={styles.lockedMonthBanner}>
+            <Ionicons name="lock-closed" size={18} color={colors.alert} style={{ marginTop: 2 }} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.lockedMonthBannerText}>
+                {lockedMonthRedirect.bannerText}
+              </Text>
+              <TouchableOpacity
+                onPress={() => setShowUnlockModal(true)}
+                style={styles.unlockBannerActionBtn}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.unlockBannerActionText, { color: accent.hex }]}>
+                  Unlock Month & Relocate Date
+                </Text>
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity
+              onPress={() => setLockedMonthRedirect(null)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name="close" size={16} color={colors.textMuted} />
+            </TouchableOpacity>
+          </View>
+        )}
+
         {/* Scan Status Toast Banner */}
         {scanToast && (
           <View
@@ -669,7 +832,9 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
 
           {/* 3. Account / Money Source Picker (Source to deduct from - Wrapping Grid) */}
           <View style={styles.section}>
-            <Text style={styles.sectionLabel}>MONEY SOURCE (DEDUCT FROM)</Text>
+            <Text style={styles.sectionLabel}>
+              MONEY SOURCE (DEDUCT FROM){!selectedAccountId ? ' • Select source' : ''}
+            </Text>
             <View style={styles.moneySourcesGrid}>
               {accounts.map((acc) => {
                 const active = effectiveAccountId === acc.id;
@@ -1058,6 +1223,26 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
             <Text style={styles.submitBtnText}>Save Transaction</Text>
           </TactileButton>
         </KeyboardAwareScrollView>
+
+        {/* Month Unlock Modal for Locked Month Redirection */}
+        {lockedMonthRedirect && (
+          <MonthUnlockModal
+            visible={showUnlockModal}
+            month={lockedMonthRedirect.lockedMonth}
+            onClose={() => setShowUnlockModal(false)}
+            onUnlockSuccess={() => {
+              const orig = lockedMonthRedirect.originalDate;
+              setDate(orig);
+              setLockedMonthRedirect(null);
+              setFormError(null);
+              setShowUnlockModal(false);
+              setScanToast({
+                type: 'success',
+                message: `Month unlocked! Transaction date restored to ${orig}.`,
+              });
+            }}
+          />
+        )}
       </View>
   );
 };
@@ -1174,6 +1359,37 @@ function getStyles(colors: ThemeColors) {
     errorBannerText: {
       color: colors.alert,
       fontSize: 13,
+    },
+    lockedMonthBanner: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      backgroundColor: colors.alertMuted || `${colors.alert}15`,
+      borderColor: colors.alert,
+      borderWidth: 1,
+      borderRadius: 10,
+      padding: SPACING.md,
+      marginBottom: SPACING.md,
+      gap: 10,
+    },
+    lockedMonthBannerText: {
+      color: colors.textPrimary,
+      fontSize: 13,
+      lineHeight: 18,
+      fontWeight: '500',
+    },
+    unlockBannerActionBtn: {
+      marginTop: 8,
+      alignSelf: 'flex-start',
+      paddingVertical: 5,
+      paddingHorizontal: 12,
+      borderRadius: 6,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+    },
+    unlockBannerActionText: {
+      fontSize: 12,
+      fontWeight: '700',
     },
     typeSelector: {
       flexDirection: 'row',

@@ -817,6 +817,211 @@ Return a STRICT JSON object:
   }
 }
 
+export interface OcrSpatialBlock {
+  text: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export function extractOcrSpatialBlocks(blocks?: any[]): OcrSpatialBlock[] {
+  if (!blocks || !Array.isArray(blocks) || blocks.length === 0) return [];
+
+  const results: OcrSpatialBlock[] = [];
+
+  for (const block of blocks) {
+    if (!block) continue;
+    // If lines exist, extract lines for higher vertical resolution
+    if (block.lines && Array.isArray(block.lines) && block.lines.length > 0) {
+      for (const line of block.lines) {
+        if (!line || !line.text || !line.text.trim()) continue;
+        const box = line.boundingBox || block.boundingBox;
+        const x = box ? (box.x ?? box.left ?? 0) : 0;
+        const y = box ? (box.y ?? box.top ?? 0) : 0;
+        const width = box ? box.width ?? 0 : 0;
+        const height = box ? box.height ?? 0 : 0;
+
+        results.push({
+          text: redactSensitiveFields(line.text.trim()),
+          x: Math.round(Number(x) || 0),
+          y: Math.round(Number(y) || 0),
+          width: Math.round(Number(width) || 0),
+          height: Math.round(Number(height) || 0),
+        });
+      }
+    } else if (block.text && block.text.trim()) {
+      const box = block.boundingBox;
+      const x = box ? (box.x ?? box.left ?? 0) : 0;
+      const y = box ? (box.y ?? box.top ?? 0) : 0;
+      const width = box ? box.width ?? 0 : 0;
+      const height = box ? box.height ?? 0 : 0;
+
+      results.push({
+        text: redactSensitiveFields(block.text.trim()),
+        x: Math.round(Number(x) || 0),
+        y: Math.round(Number(y) || 0),
+        width: Math.round(Number(width) || 0),
+        height: Math.round(Number(height) || 0),
+      });
+    }
+  }
+
+  return results;
+}
+
+export interface SpatialEscalationOptions {
+  blocks?: any[];
+  rawText?: string;
+  availableCategories?: string[];
+  userAccounts?: { id: string; name: string; type: string }[];
+}
+
+export interface SpatialEscalationResult {
+  amount: number | null;
+  merchant_or_person: string;
+  direction: 'sent' | 'received';
+  transaction_datetime: string | null;
+  detected_bank_or_source: string | null;
+  suggested_category: string;
+}
+
+/**
+ * Tier 2: Structured Text + Bounding Box Geometry Escalation via Gemini.
+ * Sends ONLY a structured JSON array of text blocks with spatial coordinates (y-pos, width, height)
+ * without transmitting raw pixels or image bytes.
+ */
+export async function escalateWithSpatialHierarchyGemini(
+  input: SpatialEscalationOptions
+): Promise<GeminiResponse<SpatialEscalationResult>> {
+  try {
+    const apiKey = await resolveGeminiApiKey();
+    if (!apiKey) {
+      return {
+        success: false,
+        error: 'MISSING_KEY',
+        message: 'Set up your AI key in Settings to use this.',
+      };
+    }
+
+    let spatialBlocks = extractOcrSpatialBlocks(input.blocks);
+
+    // If blocks array was empty but rawText was provided, create line blocks
+    if (spatialBlocks.length === 0 && input.rawText && input.rawText.trim()) {
+      const lines = input.rawText.trim().split(/\r?\n/).filter(Boolean);
+      spatialBlocks = lines.map((line, idx) => ({
+        text: redactSensitiveFields(line.trim()),
+        x: 0,
+        y: idx * 25,
+        width: 100,
+        height: 20,
+      }));
+    }
+
+    if (spatialBlocks.length === 0) {
+      return {
+        success: false,
+        error: 'INSUFFICIENT_DATA',
+        message: 'No OCR text blocks available for spatial escalation.',
+      };
+    }
+
+    const cats =
+      input.availableCategories && input.availableCategories.length > 0
+        ? input.availableCategories
+        : [
+            'Food',
+            'Travel',
+            'Hostel/Rent',
+            'Recharge/Data',
+            'Subscriptions',
+            'Books/Stationery',
+            'Shopping',
+            'Entertainment',
+            'Uncategorized',
+          ];
+
+    const accountNames = (input.userAccounts || []).map((a) => a.name);
+
+    const prompt = `
+You are an expert financial assistant analyzing on-device OCR layout geometry from an Indian payment receipt or screenshot (Google Pay, PhonePe, Paytm, BHIM, CRED, or banking app).
+
+You are provided with a structured JSON array of OCR text blocks with spatial bounding box coordinates:
+- "text": The recognized text. Note: sensitive account numbers and balances have been pre-redacted.
+- "x": Horizontal coordinate from the left edge.
+- "y": Vertical coordinate from top of screen (lower y means higher on screen).
+- "width": Bounding box width.
+- "height": Bounding box height (directly proportional to font size/prominence!).
+
+SPATIAL & HIERARCHY RULES:
+1. "amount": Identify the primary HERO payment amount.
+   - The hero amount is rendered in the LARGEST font size (highest "height") and is usually positioned prominently near the upper-middle of the card ("y").
+   - Disqualify 12-digit UTR numbers, account digits, phone numbers, or dates as amounts.
+   - Return as a positive float/integer (e.g., 450.00 -> 450). Return null if no valid amount found.
+2. "merchant_or_person": The counterparty or payee/payer name or UPI handle.
+   - Typically located immediately above or below the hero amount or next to "Paid to", "To", "Received from". Return "Unknown" if not found.
+3. "direction": Determine transaction direction:
+   - "sent": If the user paid/debited/transferred/sent money (e.g., "You paid", "Paid to", "Payment to", "Debited from", "Money sent").
+   - "received": If the user received/credited money (e.g., "Received from", "Credited to", "Money received", "Refund").
+4. "transaction_datetime": The actual date and time stamped on the screen (e.g., "29 Sep 2026", "29-09-2026", "Sep 29, 2026, 14:32").
+   - Format as "YYYY-MM-DD" or "YYYY-MM-DDTHH:mm:ss".
+   - NEVER default to today or now — return null if no date is explicitly visible on the screen.
+5. "detected_bank_or_source": The bank or money source name displayed on screen (e.g., "State Bank of India", "SBI", "HDFC", "ICICI", "Axis", "Kotak", "Paytm Payments Bank").
+   ${accountNames.length > 0 ? `User's configured accounts: ${accountNames.join(', ')}` : ''}
+   - Return null if no bank or account is explicitly shown.
+6. "suggested_category": Choose the single most appropriate category from:
+   ${cats.join(', ')}
+   - If food, sweets, dining, or groceries (e.g., Gopal Sweet, Zomato, Swiggy, Blinkit), pick "Food".
+   - If unknown or ambiguous, pick "Uncategorized".
+
+STRUCTURED SPATIAL BLOCKS JSON:
+\`\`\`json
+${JSON.stringify(spatialBlocks, null, 2)}
+\`\`\`
+
+Return a STRICT JSON object only (no markdown formatting, no explanations):
+{
+  "amount": <number or null>,
+  "merchant_or_person": <string>,
+  "direction": "sent" | "received",
+  "transaction_datetime": <string or null>,
+  "detected_bank_or_source": <string or null>,
+  "suggested_category": <string>
+}
+`;
+
+    // Note: Tier 2 does NOT send inline image bytes! Only spatial text JSON!
+    const res = await callGeminiDirect(apiKey, prompt, undefined, true);
+
+    if (res.success && res.data) {
+      const d = res.data;
+      const normalizedCat = normalizeAndMatchCategory(d.suggested_category, cats).category;
+      return {
+        success: true,
+        data: {
+          amount: typeof d.amount === 'number' && !isNaN(d.amount) ? Math.abs(d.amount) : null,
+          merchant_or_person: (d.merchant_or_person || '').trim() || 'Unknown',
+          direction: d.direction === 'received' ? 'received' : 'sent',
+          transaction_datetime: typeof d.transaction_datetime === 'string' ? d.transaction_datetime.trim() : null,
+          detected_bank_or_source: typeof d.detected_bank_or_source === 'string' ? d.detected_bank_or_source.trim() : null,
+          suggested_category: normalizedCat || 'Uncategorized',
+        },
+      };
+    }
+
+    return {
+      success: false,
+      error: res.error || 'GENERIC_ERROR',
+      message: res.message || 'Spatial escalation with Gemini failed.',
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: 'GENERIC_ERROR',
+      message: err?.message || 'Error communicating with Gemini during spatial escalation.',
+    };
+  }
+}
 
 export const SPENDING_OVERVIEW_SYSTEM_PROMPT = `You are a spending-pattern observer for a personal finance app, not a financial advisor. You will be given aggregated JSON data (totals, category breakdowns, percentages — never raw transaction lists).
 

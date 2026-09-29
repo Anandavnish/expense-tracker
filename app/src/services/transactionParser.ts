@@ -40,6 +40,8 @@ export interface TransactionParserInput {
   learnedRules?: LearnedMerchantRule[];
 }
 
+export type ResolutionTier = 'tier1_local' | 'tier2_gemini_spatial' | 'tier3_vision_fallback';
+
 export interface ParsedTransactionResult {
   amount: number | null;
   amountConfidence: ConfidenceLevel;
@@ -55,9 +57,11 @@ export interface ParsedTransactionResult {
   classificationSource: 'user_rule' | 'gemini_rule' | 'seed_keyword' | 'unrecognized';
   accountHint?: string;
   matchedAccountId?: string;
+  detectedBankOrSource?: string | null;
   rawText: string;
   needsGeminiAmount: boolean;
   needsGeminiMerchant: boolean;
+  resolutionTier: ResolutionTier;
 }
 
 // ---------------------------------------------------------------------------
@@ -274,10 +278,10 @@ export function inferCategoryFromText(
     }
   }
 
-  if (availableCategories && availableCategories.includes('Food')) {
-    return 'Food';
+  if (availableCategories && availableCategories.some((c) => c.toLowerCase() === 'uncategorized')) {
+    return availableCategories.find((c) => c.toLowerCase() === 'uncategorized')!;
   }
-  return availableCategories?.[0] || 'Other';
+  return 'Uncategorized';
 }
 
 /**
@@ -288,8 +292,11 @@ export function normalizeAndMatchCategory(
   suggestedCategory?: string,
   existingCategories: string[] = []
 ): { category: string; isNew: boolean } {
+  const fallbackCat =
+    existingCategories.find((c) => c.toLowerCase() === 'uncategorized') || 'Uncategorized';
+
   if (!suggestedCategory || !suggestedCategory.trim()) {
-    return { category: existingCategories[0] || 'Food', isNew: false };
+    return { category: fallbackCat, isNew: false };
   }
   const clean = suggestedCategory.trim();
 
@@ -316,7 +323,7 @@ export function normalizeAndMatchCategory(
     return { category: clean, isNew: true };
   }
 
-  return { category: existingCategories[0] || 'Food', isNew: false };
+  return { category: fallbackCat, isNew: false };
 }
 
 // ---------------------------------------------------------------------------
@@ -571,6 +578,9 @@ export function extractAmountWithProminence(
   }
 
   const upiRef = extractUpiReference(text);
+  const vpaHandles = text.match(/\b[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\b/g) || [];
+  // Mask VPA handles so alphanumeric sequences with @ are not parsed as standalone amounts
+  const textWithoutVpas = text.replace(/\b[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\b/gi, ' ');
   const candidates: AmountCandidate[] = [];
 
   // Helper to validate whether a numeric float is a plausible payment amount
@@ -579,6 +589,13 @@ export function extractAmountWithProminence(
     // Exclude 12-digit UPI reference
     if (raw.replace(/\D/g, '').length === 12 || (upiRef && raw.includes(upiRef))) {
       return false;
+    }
+    // Exclude numbers contained in or adjacent to VPA / UPI ID handles (e.g. user9876543210@upi, merchant123@okhdfcbank)
+    const cleanRaw = raw.replace(/[,\s]/g, '');
+    for (const vpa of vpaHandles) {
+      if (vpa.includes(cleanRaw)) {
+        return false;
+      }
     }
     // Exclude 10-digit phone numbers
     if (raw.replace(/\D/g, '').length === 10 && /^[6-9]/.test(raw.trim())) {
@@ -603,7 +620,7 @@ export function extractAmountWithProminence(
 
   for (const regex of currencyPrefixRegexes) {
     let match: RegExpExecArray | null;
-    while ((match = regex.exec(text)) !== null) {
+    while ((match = regex.exec(textWithoutVpas)) !== null) {
       const rawNum = match[1];
       const parsed = parseFloat(rawNum.replace(/,/g, ''));
       if (isPlausibleAmount(parsed, rawNum)) {
@@ -624,7 +641,7 @@ export function extractAmountWithProminence(
     /(?:debited|credited|spent|paid|transferred|sent|received|withdrawn|deposit(?:ed)?|amount|amt|total)\s+(?:by|of|for|is)?\s*[:=]?\s*(?:₹|Rs\.?|INR)?\s*([0-9]{1,3}(?:,[0-9]{2,3})*(?:\.[0-9]{1,2})?|[0-9]+(?:\.[0-9]{1,2})?)/gi;
 
   let verbMatch: RegExpExecArray | null;
-  while ((verbMatch = verbRegex.exec(text)) !== null) {
+  while ((verbMatch = verbRegex.exec(textWithoutVpas)) !== null) {
     const rawNum = verbMatch[1];
     const parsed = parseFloat(rawNum.replace(/,/g, ''));
     if (isPlausibleAmount(parsed, rawNum)) {
@@ -767,7 +784,7 @@ export function extractAmountWithProminence(
   // Step 3: Text-Only Standalone Numeric Heuristic (if no OCR blocks provided)
   // -------------------------------------------------------------------------
   // 3A: Standalone decimal amounts (e.g. 420.00)
-  const standaloneDecimals = text.match(/\b([0-9]{1,3}(?:,[0-9]{2,3})*\.[0-9]{2})\b/g);
+  const standaloneDecimals = textWithoutVpas.match(/\b([0-9]{1,3}(?:,[0-9]{2,3})*\.[0-9]{2})\b/g);
   if (standaloneDecimals && standaloneDecimals.length > 0) {
     const validDecimals: number[] = [];
     for (const d of standaloneDecimals) {
@@ -795,7 +812,7 @@ export function extractAmountWithProminence(
   }
 
   // 3B: Standalone integers (e.g. 350, 1500)
-  const allNumbers = text.match(/\b([1-9][0-9]{1,6})\b/g);
+  const allNumbers = textWithoutVpas.match(/\b([1-9][0-9]{1,6})\b/g);
   if (allNumbers && allNumbers.length > 0) {
     const validIntegers: number[] = [];
     const txDate = extractTransactionDate(text);
@@ -868,9 +885,17 @@ export function parseTransaction(input: TransactionParserInput): ParsedTransacti
 
   // 1. Transaction Type (Income vs Expense vs Borrow)
   let suggestedType: TransactionType = 'expense';
-  if (/\b(?:credited|deposited|received|refund|cashback|added)\b/i.test(text)) {
+  if (
+    /(?:received\s+from|money\s+received|\breceived\b|\bcredited\b|\bdeposited\b|\brefund\b|\bcashback\b|\badded\b)/i.test(
+      text
+    )
+  ) {
     suggestedType = 'income';
-  } else if (/\b(?:debited|spent|paid|withdrawn|deducted|sent|purchase)\b/i.test(text)) {
+  } else if (
+    /(?:you\s+paid|paid\s+to|payment\s+to|money\s+sent\s+to|sent\s+to|\bdebited\b|\bspent\b|\bpaid\b|\bwithdrawn\b|\bdeducted\b|\bsent\b|\bpurchase\b)/i.test(
+      text
+    )
+  ) {
     suggestedType = 'expense';
   }
 
@@ -1030,6 +1055,7 @@ export function parseTransaction(input: TransactionParserInput): ParsedTransacti
     rawText: text,
     needsGeminiAmount,
     needsGeminiMerchant,
+    resolutionTier: 'tier1_local',
   };
 }
 
@@ -1044,85 +1070,23 @@ export interface PipelineOptions {
 /**
  * Full unified pipeline:
  * 1. Executes deterministic OCR / text extraction and rule classification locally (0ms, 0 AI calls).
- * 2. If amount has LOW confidence or is missing, escalates specifically that field to Gemini.
- * 3. If merchant is genuinely UNRECOGNIZED, escalates to Gemini for classification.
- * 4. Teaches the classified merchant back into user_merchant_rules (never overwriting user_manual rules).
- * 5. If OCR produced completely empty text, falls back to Gemini Multimodal Vision.
+ * 2. If OCR produced completely empty/corrupt text, falls back to Tier 3 (Multimodal Vision Fallback).
+ * 3. If Tier 1 confidence is high (amount known, recognized merchant, matched account), prefill directly (Tier 1).
+ * 4. If Tier 1 confidence is low (needsGeminiAmount, needsGeminiMerchant, or unmatched bank), escalates via
+ *    Tier 2: Structured Text + Bounding Box Coordinates (Gemini) — without transmitting raw pixels!
  */
 export async function parseTransactionWithPipeline(
   input: TransactionParserInput,
   options?: PipelineOptions
 ): Promise<ParsedTransactionResult> {
-  // Step 1: Run deterministic local extraction & rule lookup first
-  const result = parseTransaction(input);
+  const rawTextTrimmed = (input.rawText || '').trim();
+  const hasBlocks = Boolean(input.ocrBlocks && input.ocrBlocks.length > 0);
+  const isCorruptedOrBlank = rawTextTrimmed.length < 15 && !hasBlocks;
 
-  // If Gemini escalation is disabled or not requested, return immediately
-  if (!options?.enableGeminiEscalation) {
-    return result;
-  }
-
-  // If both amount and merchant are already resolved with confidence, return immediately (ZERO API CALLS!)
-  if (!result.needsGeminiAmount && !result.needsGeminiMerchant) {
-    return result;
-  }
-
-  // Lazy-load Gemini service to prevent circular dependencies
-  const {
-    classifyMerchantWithGemini,
-    extractAmountWithGemini,
-    parseReceiptWithGemini,
-  } = await import('./geminiService');
-
-  // Step 2: Escalate amount if LOW confidence or missing
-  if (result.needsGeminiAmount) {
+  // TIER 3: Multimodal Vision Fallback — Strictly invoked ONLY when Tier 1 returns empty or near-empty text
+  if (isCorruptedOrBlank && options?.imageUri && options?.enableGeminiEscalation) {
     try {
-      const amtRes = await extractAmountWithGemini({
-        text: input.rawText,
-        imageUri: options?.imageUri,
-        base64: options?.base64,
-        mimeType: options?.mimeType,
-      });
-
-      if (amtRes.success && typeof amtRes.data === 'number' && !isNaN(amtRes.data)) {
-        result.amount = amtRes.data;
-        result.amountConfidence = 'high';
-        result.needsGeminiAmount = false;
-        result.amountExtractionMethod = 'currency_regex';
-      }
-    } catch (e) {
-      console.warn('[transactionParser] Gemini amount escalation failed:', e);
-    }
-  }
-
-  // Step 3: Escalate merchant classification if genuinely unrecognized
-  if (result.needsGeminiMerchant) {
-    try {
-      const clsRes = await classifyMerchantWithGemini({
-        merchantName: result.merchant,
-        rawText: input.rawText,
-        availableCategories: input.availableCategories,
-      });
-
-      if (clsRes.success && clsRes.data) {
-        result.suggestedCategory = clsRes.data.category;
-        result.suggestedType = clsRes.data.type;
-        result.merchantConfidence = 'high';
-        result.classificationSource = 'gemini_rule';
-        result.needsGeminiMerchant = false;
-
-        // Teach back to user_merchant_rules
-        if (options?.onTeachRule) {
-          options.onTeachRule(result.merchant, clsRes.data.category, clsRes.data.type);
-        }
-      }
-    } catch (e) {
-      console.warn('[transactionParser] Gemini merchant classification failed:', e);
-    }
-  }
-
-  // Step 4: If OCR text was completely empty and amount is still null, invoke multimodal vision fallback
-  if (result.amount === null && options?.imageUri) {
-    try {
+      const { parseReceiptWithGemini } = await import('./geminiService');
       const fullVisionRes = await parseReceiptWithGemini({
         imageUri: options.imageUri,
         base64: options.base64,
@@ -1132,32 +1096,178 @@ export async function parseTransactionWithPipeline(
 
       if (fullVisionRes.success && fullVisionRes.data) {
         const vData = fullVisionRes.data;
-        if (vData.amount !== null) {
-          result.amount = vData.amount;
-          result.amountConfidence = 'high';
-          result.needsGeminiAmount = false;
-        }
-        if (vData.merchant_or_person && vData.merchant_or_person !== 'Unknown') {
-          result.merchant = vData.merchant_or_person;
-          result.normalizedMerchant = normalizeMerchantName(vData.merchant_or_person);
-          result.suggestedCategory = vData.suggested_category;
-          result.suggestedType = vData.suggested_type;
-          result.merchantConfidence = 'high';
-          result.classificationSource = 'gemini_rule';
-          result.needsGeminiMerchant = false;
+        const normMerchant =
+          vData.merchant_or_person && vData.merchant_or_person !== 'Unknown'
+            ? normalizeMerchantName(vData.merchant_or_person)
+            : '';
 
-          if (options?.onTeachRule) {
-            options.onTeachRule(vData.merchant_or_person, vData.suggested_category, vData.suggested_type);
-          }
+        let matchedAccountId: string | undefined;
+        if (input.userAccounts && input.userAccounts.length > 0 && normMerchant) {
+          const matchAcc = input.userAccounts.find((a) =>
+            a.name.toLowerCase().includes(normMerchant.toLowerCase())
+          );
+          if (matchAcc) matchedAccountId = matchAcc.id;
         }
-        if (vData.date_if_present) {
-          result.date = vData.date_if_present;
+
+        const tier3Result: ParsedTransactionResult = {
+          amount: vData.amount,
+          amountConfidence: vData.amount !== null ? 'high' : 'low',
+          amountExtractionMethod: vData.amount !== null ? 'currency_regex' : 'none',
+          upiRef: null,
+          date: vData.date_if_present,
+          merchant: vData.merchant_or_person || 'Unknown',
+          normalizedMerchant: normMerchant,
+          merchantConfidence: vData.merchant_or_person !== 'Unknown' ? 'high' : 'low',
+          suggestedCategory: vData.suggested_category || 'Uncategorized',
+          suggestedType: vData.suggested_type || 'expense',
+          isCategoryLearned: false,
+          classificationSource: 'gemini_rule',
+          matchedAccountId,
+          rawText: rawTextTrimmed,
+          needsGeminiAmount: vData.amount === null,
+          needsGeminiMerchant: vData.merchant_or_person === 'Unknown',
+          resolutionTier: 'tier3_vision_fallback',
+        };
+
+        if (options?.onTeachRule && vData.merchant_or_person && vData.merchant_or_person !== 'Unknown') {
+          options.onTeachRule(vData.merchant_or_person, vData.suggested_category, vData.suggested_type);
         }
+
+        console.log('[Boundary 2: transactionParser] Tier 3 Multimodal Vision completed:', {
+          resolutionTier: tier3Result.resolutionTier,
+          amount: tier3Result.amount,
+          merchant: tier3Result.merchant,
+          category: tier3Result.suggestedCategory,
+          type: tier3Result.suggestedType,
+          date: tier3Result.date,
+          matchedAccountId: tier3Result.matchedAccountId,
+        });
+
+        return tier3Result;
       }
     } catch (e) {
-      console.warn('[transactionParser] Full vision fallback failed:', e);
+      console.warn('[Boundary 2: transactionParser] Tier 3 full vision fallback failed:', e);
     }
   }
+
+  // TIER 1: Run deterministic on-device parser (0ms, 0 network, 0 API calls)
+  const result = parseTransaction(input);
+  result.resolutionTier = 'tier1_local';
+
+  // If Gemini escalation is disabled or not requested, return Tier 1 result
+  if (!options?.enableGeminiEscalation) {
+    console.log('[Boundary 2: transactionParser] Tier 1 deterministic completed (Escalation disabled):', {
+      resolutionTier: result.resolutionTier,
+      amount: result.amount,
+      merchant: result.merchant,
+      category: result.suggestedCategory,
+      type: result.suggestedType,
+      date: result.date,
+      matchedAccountId: result.matchedAccountId,
+    });
+    return result;
+  }
+
+  // Tier 1 High Confidence check:
+  // - Valid amount found
+  // - Known merchant / classification source is not unrecognized
+  // - Source account matched (or no user accounts configured)
+  const isTier1HighConfidence =
+    result.amount !== null &&
+    (result.amountConfidence === 'high' || result.amountConfidence === 'medium') &&
+    result.merchant !== 'Unknown' &&
+    !result.needsGeminiMerchant &&
+    (!input.userAccounts?.length || Boolean(result.matchedAccountId));
+
+  if (isTier1HighConfidence) {
+    console.log('[Boundary 2: transactionParser] Tier 1 High Confidence match resolved locally (0 API calls):', {
+      resolutionTier: result.resolutionTier,
+      amount: result.amount,
+      merchant: result.merchant,
+      category: result.suggestedCategory,
+      type: result.suggestedType,
+      date: result.date,
+      matchedAccountId: result.matchedAccountId,
+    });
+    return result;
+  }
+
+  // TIER 2: Structured Text + Coordinate Escalation via Gemini
+  // Triggered when local confidence is low (needsGeminiAmount, needsGeminiMerchant, or unmatched bank/source).
+  // Sends structured JSON array of text blocks with spatial coordinates (y-pos, width, height) — NEVER raw pixels!
+  try {
+    const { escalateWithSpatialHierarchyGemini } = await import('./geminiService');
+    const spatialRes = await escalateWithSpatialHierarchyGemini({
+      blocks: input.ocrBlocks,
+      rawText: input.rawText,
+      availableCategories: input.availableCategories,
+      userAccounts: input.userAccounts,
+    });
+
+    if (spatialRes.success && spatialRes.data) {
+      const sData = spatialRes.data;
+      result.resolutionTier = 'tier2_gemini_spatial';
+
+      if (sData.amount !== null) {
+        result.amount = sData.amount;
+        result.amountConfidence = 'high';
+        result.needsGeminiAmount = false;
+        result.amountExtractionMethod = 'prominence_heuristic';
+      }
+
+      if (sData.merchant_or_person && sData.merchant_or_person !== 'Unknown') {
+        result.merchant = sData.merchant_or_person;
+        result.normalizedMerchant = normalizeMerchantName(sData.merchant_or_person);
+        result.merchantConfidence = 'high';
+      }
+
+      if (sData.direction) {
+        result.suggestedType = sData.direction === 'received' ? 'income' : 'expense';
+      }
+
+      if (sData.transaction_datetime) {
+        result.date = sData.transaction_datetime;
+      }
+
+      if (sData.suggested_category) {
+        result.suggestedCategory = sData.suggested_category;
+        result.classificationSource = 'gemini_rule';
+        result.needsGeminiMerchant = false;
+
+        if (options?.onTeachRule && result.merchant !== 'Unknown') {
+          options.onTeachRule(result.merchant, sData.suggested_category, result.suggestedType);
+        }
+      }
+
+      if (sData.detected_bank_or_source) {
+        result.detectedBankOrSource = sData.detected_bank_or_source;
+        if (input.userAccounts && input.userAccounts.length > 0) {
+          const detectedLower = sData.detected_bank_or_source.toLowerCase();
+          const matchedAcc = input.userAccounts.find((acc) => {
+            const accNameLower = acc.name.toLowerCase();
+            return accNameLower.includes(detectedLower) || detectedLower.includes(accNameLower);
+          });
+          if (matchedAcc) {
+            result.matchedAccountId = matchedAcc.id;
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[Boundary 2: transactionParser] Tier 2 spatial escalation failed:', err);
+  }
+
+  console.log('[Boundary 2: transactionParser] parseTransactionWithPipeline completed:', {
+    resolutionTier: result.resolutionTier,
+    amount: result.amount,
+    amountConfidence: result.amountConfidence,
+    merchant: result.merchant,
+    category: result.suggestedCategory,
+    type: result.suggestedType,
+    date: result.date,
+    matchedAccountId: result.matchedAccountId,
+    detectedBankOrSource: result.detectedBankOrSource,
+  });
 
   return result;
 }
