@@ -16,6 +16,7 @@ All assets are local-first, transparent ~256x256 PNGs isolated to each brand's s
 | `Kotak` | `app/assets/logos/kotak.png` | Kotak Mahindra Bank | 256x256 Transparent PNG | [Wikipedia: Kotak Mahindra Bank logo.svg](https://en.wikipedia.org/wiki/File:Kotak_Mahindra_Bank_logo.svg) |
 | `India Post` / `IPPB` | `app/assets/logos/ippb.png` | India Post Payments Bank | 256x256 Transparent PNG | [Wikipedia: India Post Payments Bank logo.png](https://en.wikipedia.org/wiki/File:India_Post_Payments_Bank_logo.png) |
 | `Slice` | `app/assets/logos/slice.png` | Slice (GaragePreneurs / Slice SFB) | 256x256 Transparent PNG | [Slice Official Website](https://www.sliceit.com/) / [Wikimedia Commons: Slice SFB Logo.png](https://commons.wikimedia.org/wiki/File:Slice_SFB_Logo.png) |
+| `Fino` | `app/assets/logos/fino.png` | Fino Payments Bank | 256x256 Transparent PNG | [Fino Payments Bank Official](https://www.finobank.com/) |
 | `OneCard` | `app/assets/logos/onecard.png` | OneCard (FPL Technologies) | 256x256 Transparent PNG | [OneCard Official Website](https://www.getonecard.app/) |
 
 ## Note on Usage & Guidelines

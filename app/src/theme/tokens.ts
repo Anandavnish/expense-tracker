@@ -568,6 +568,8 @@ export const BANK_BRAND_COLORS = {
   canara: '#00838F',
   pnb: '#AD1457',
   bob: '#E65100',
+  fino: '#8E163B',
+  slice: '#7C3AED',
   custom: '#6366F1',
 } as const;
 

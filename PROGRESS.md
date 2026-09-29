@@ -4,9 +4,9 @@
 Foundational architecture build for a high-performance cross-platform personal finance mobile app built for Android using Expo Dev Client, React Native Reanimated, React Native Paper, Zustand, and Supabase.
 
 - **GitHub Repository**: [https://github.com/Anandavnish/expense-tracker](https://github.com/Anandavnish/expense-tracker)
-- **Latest Release**: [Expense Tracker v1.0.12 (Build 12)](https://github.com/Anandavnish/expense-tracker/releases/tag/v1.0.12)
-- **Direct APK Download**: [ExpenseTracker-v1.0.12.apk](https://github.com/Anandavnish/expense-tracker/releases/download/v1.0.12/ExpenseTracker-v1.0.12.apk)
-- **Previous Release**: [Expense Tracker v1.0.11 (Build 11)](https://github.com/Anandavnish/expense-tracker/releases/tag/v1.0.11)
+- **Latest Release**: [Expense Tracker v1.0.13 (Build 13)](https://github.com/Anandavnish/expense-tracker/releases/tag/v1.0.13)
+- **Direct APK Download**: [ExpenseTracker-v1.0.13.apk](https://github.com/Anandavnish/expense-tracker/releases/download/v1.0.13/ExpenseTracker-v1.0.13.apk)
+- **Previous Release**: [Expense Tracker v1.0.12 (Build 12)](https://github.com/Anandavnish/expense-tracker/releases/tag/v1.0.12)
 
 ---
 
@@ -41,6 +41,20 @@ Foundational architecture build for a high-performance cross-platform personal f
 ---
 
 ## Architectural Confirmations & System Revisions (Sept 2026)
+
+### 0. Bank Presets Expansion (Slice & Fino) & Recalibratable Money Source Balances (v1.0.13)
+- **Status**: **Implemented & Fully Verified**.
+- **Slice & Fino Bank Presets**:
+  - Added official transparent 256x256 brand mark assets (`app/assets/logos/fino.png` and `app/assets/logos/slice.png`).
+  - Updated `logoRegistry.ts` to statically bundle and resolve both Fino and Slice logos at compile-time.
+  - Added brand colors to `BANK_BRAND_COLORS` (`fino: '#8E163B'`, `slice: '#7C3AED'`) in `tokens.ts`.
+  - Added `Fino` and `Slice` to `BankPresetCode` union type in `database.ts`.
+  - Integrated `Fino` and `Slice` into `BANK_PRESETS` in both `DashboardScreen.tsx` and `AccountDetailScreen.tsx`.
+  - Updated `BankLogo.tsx` to automatically infer Fino and Slice from account titles and resolve brand tint colors.
+- **Editable Money Source Balances (Recalibration)**:
+  - **DashboardScreen**: Removed the `{isAddingNewSource && (` restriction around the balance input. For existing accounts, dynamically labeled the field `CURRENT BALANCE (₹)` or `CURRENT OUTSTANDING DUE (₹)`. Passed the updated balance to `updateAccountOptimistic()`.
+  - **AccountDetailScreen**: Added `editBalance` state initialized with the account's current balance (or absolute outstanding due for credit cards). Rendered the balance input in the Edit Modal and passed the updated balance into `updateAccountOptimistic()`.
+  - Maintained negative sign convention for credit cards (`-Math.abs(due)`).
 
 ### 1. Guest-Mode Removal & Scope Verification
 - **Audit Result**: Guest mode was newly introduced in commit `ba910a4` and was **not** requested. Because the app has no guest-accessible screens and is strictly auth-gated at `RootNavigator`, guest mode has been **completely removed**.

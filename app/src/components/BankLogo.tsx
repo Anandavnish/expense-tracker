@@ -97,6 +97,7 @@ export function inferPresetFromText(text?: string | null): string | null {
   if (lower.includes('axis')) return 'Axis';
   if (lower.includes('kotak')) return 'Kotak';
   if (lower.includes('canara')) return 'Canara';
+  if (lower.includes('fino')) return 'Fino';
   if (lower.includes('slice')) return 'Slice';
 
   return null;
@@ -141,6 +142,7 @@ export function resolveAccountBrandColor(
     if (norm === 'canara') return BANK_BRAND_COLORS.canara;
     if (norm === 'pnb') return BANK_BRAND_COLORS.pnb;
     if (norm === 'bob') return BANK_BRAND_COLORS.bob;
+    if (norm === 'fino' || norm === 'finobank') return BANK_BRAND_COLORS.fino;
 
     if (norm === 'sbicard') return CARD_BRAND_COLORS.sbiCard;
     if (norm === 'icici') return CARD_BRAND_COLORS.icici;

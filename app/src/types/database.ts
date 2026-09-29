@@ -1,7 +1,7 @@
 // src/types/database.ts
 
 export type AccountType = 'cash' | 'bank' | 'credit_card';
-export type BankPresetCode = 'SBI' | 'India Post' | 'HDFC' | 'Canara' | 'PNB' | 'BOB' | 'Custom';
+export type BankPresetCode = 'SBI' | 'India Post' | 'HDFC' | 'Canara' | 'PNB' | 'BOB' | 'Fino' | 'Slice' | 'Custom';
 export type BankPreset = BankPresetCode;
 export type CreditCardIssuerCode = 'HDFC' | 'SBI Card' | 'ICICI' | 'Axis' | 'Kotak' | 'Slice' | 'OneCard' | 'Custom';
 

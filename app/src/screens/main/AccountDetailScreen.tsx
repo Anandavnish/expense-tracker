@@ -40,6 +40,8 @@ const BANK_PRESETS: { name: BankPreset; code: string }[] = [
   { name: 'Canara', code: 'Canara' },
   { name: 'PNB', code: 'PNB' },
   { name: 'BOB', code: 'BOB' },
+  { name: 'Fino', code: 'Fino' },
+  { name: 'Slice', code: 'Slice' },
   { name: 'Custom', code: 'Custom' },
 ];
 
@@ -100,11 +102,12 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
       .reduce((sum, t) => sum + Number(t.amount || 0), 0);
   }, [accountTransactions]);
 
-  // Comprehensive Edit Modal state (Metadata only)
+  // Comprehensive Edit Modal state
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editName, setEditName] = useState('');
   const [editType, setEditType] = useState<AccountType>('bank');
   const [editBankPreset, setEditBankPreset] = useState<BankPreset>('HDFC');
+  const [editBalance, setEditBalance] = useState('');
   const [editCreditLimit, setEditCreditLimit] = useState('');
   const [isSavingEdit, setIsSavingEdit] = useState(false);
 
@@ -149,6 +152,12 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
     setEditType(account.type);
     setEditBankPreset((account.bank_preset as BankPreset) || 'HDFC');
     setEditCreditLimit(account.credit_limit ? String(account.credit_limit) : '');
+    if (account.type === 'credit_card') {
+      const outstanding = Math.abs(Math.min(0, Number(account.current_balance || 0)));
+      setEditBalance(String(outstanding));
+    } else {
+      setEditBalance(String(account.current_balance || 0));
+    }
     setEditModalVisible(true);
   };
 
@@ -164,12 +173,15 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
         : 'Cash';
 
     const finalName = editName.trim() || fallbackName;
+    const rawVal = parseFloat(editBalance) || 0;
+    const parsedBalance = editType === 'credit_card' ? -Math.abs(rawVal) : rawVal;
     const parsedLimit = editCreditLimit ? parseFloat(editCreditLimit) || null : null;
 
-    // Update metadata only - no balance tampering
+    // Update metadata and recalibrated balance
     await updateAccountOptimistic(account.id, {
       name: finalName,
       type: editType,
+      current_balance: parsedBalance,
       credit_limit: parsedLimit,
       bank_preset: editType === 'bank' ? editBankPreset : null,
     });
@@ -647,6 +659,23 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
                   />
                 </>
               )}
+
+              <Text style={styles.inputLabel}>
+                {editType === 'credit_card' ? 'CURRENT OUTSTANDING DUE (₹)' : 'CURRENT BALANCE (₹)'}
+              </Text>
+              <TextInput
+                value={editBalance}
+                onChangeText={setEditBalance}
+                placeholder="0.00"
+                placeholderTextColor={colors.textMuted}
+                keyboardType="decimal-pad"
+                mode="outlined"
+                textColor={colors.textPrimary}
+                outlineColor={colors.border}
+                activeOutlineColor={accent.hex}
+                theme={{ colors: { background: colors.surfaceLight } }}
+                style={styles.modalInput}
+              />
 
               <View style={styles.modalActionsCol}>
                 <TactileButton

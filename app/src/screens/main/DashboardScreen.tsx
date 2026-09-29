@@ -69,6 +69,8 @@ const BANK_PRESETS: BankPresetItem[] = [
   { code: 'Canara', label: 'Canara', short: 'Canara Bank', icon: 'triangle', color: BANK_BRAND_COLORS.canara },
   { code: 'PNB', label: 'PNB', short: 'Punjab National', icon: 'ribbon', color: BANK_BRAND_COLORS.pnb },
   { code: 'BOB', label: 'BOB', short: 'Bank of Baroda', icon: 'sunny', color: BANK_BRAND_COLORS.bob },
+  { code: 'Fino', label: 'Fino', short: 'Fino Bank', icon: 'star', color: BANK_BRAND_COLORS.fino },
+  { code: 'Slice', label: 'Slice', short: 'Slice Bank', icon: 'card', color: BANK_BRAND_COLORS.slice },
   { code: 'Custom', label: '+ Custom', short: 'Other Bank', icon: 'add-circle-outline', color: BANK_BRAND_COLORS.custom },
 ];
 
@@ -877,10 +879,11 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
       setEditingAccount(null);
       setIsAddingNewSource(false);
     } else if (editingAccount) {
-      // Update metadata only - no balance tampering
+      // Update metadata and recalibrated balance
       await updateAccountOptimistic(editingAccount.id, {
         name: finalName,
         type: editType,
+        current_balance: parsedBalance,
         credit_limit: parsedLimit,
         bank_preset: editType === 'bank' ? editBankPreset : null,
         card_issuer: editType === 'credit_card' ? editCardIssuer : null,
@@ -2271,59 +2274,61 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                   </>
                 )}
 
-                {isAddingNewSource && (
-                  editType === 'credit_card' ? (
-                    <>
-                      <Text style={styles.inputSectionLabel}>STARTING OUTSTANDING DUE (₹)</Text>
-                      <TextInput
-                        value={editBalance}
-                        onChangeText={setEditBalance}
-                        onFocus={() => {
-                          setTimeout(() => {
-                            sourceModalScrollRef.current?.scrollToEnd({ animated: true });
-                          }, 100);
-                        }}
-                        placeholder="0.00"
-                        keyboardType="decimal-pad"
-                        mode="outlined"
-                        outlineColor={colors.border}
-                        activeOutlineColor={accent.hex}
-                        textColor={colors.textPrimary}
-                        theme={{ colors: { background: colors.surfaceLight } }}
-                        style={styles.modalInput}
-                      />
+                {editType === 'credit_card' ? (
+                  <>
+                    <Text style={styles.inputSectionLabel}>
+                      {isAddingNewSource ? 'STARTING OUTSTANDING DUE (₹)' : 'CURRENT OUTSTANDING DUE (₹)'}
+                    </Text>
+                    <TextInput
+                      value={editBalance}
+                      onChangeText={setEditBalance}
+                      onFocus={() => {
+                        setTimeout(() => {
+                          sourceModalScrollRef.current?.scrollToEnd({ animated: true });
+                        }, 100);
+                      }}
+                      placeholder="0.00"
+                      keyboardType="decimal-pad"
+                      mode="outlined"
+                      outlineColor={colors.border}
+                      activeOutlineColor={accent.hex}
+                      textColor={colors.textPrimary}
+                      theme={{ colors: { background: colors.surfaceLight } }}
+                      style={styles.modalInput}
+                    />
 
-                      <View style={styles.creditCalcBox}>
-                        <Text style={styles.creditCalcSub}>
-                          Limit: ₹{(parseFloat(editCreditLimit) || 0).toLocaleString('en-IN')}  •  Due: ₹{(parseFloat(editBalance) || 0).toLocaleString('en-IN')}
-                        </Text>
-                        <Text style={[styles.creditCalcMain, { color: accent.hex }]}>
-                          Available Credit: ₹{Math.max(0, (parseFloat(editCreditLimit) || 0) - (parseFloat(editBalance) || 0)).toLocaleString('en-IN')}
-                        </Text>
-                      </View>
-                    </>
-                  ) : (
-                    <>
-                      <Text style={styles.inputSectionLabel}>STARTING BALANCE (₹)</Text>
-                      <TextInput
-                        value={editBalance}
-                        onChangeText={setEditBalance}
-                        onFocus={() => {
-                          setTimeout(() => {
-                            sourceModalScrollRef.current?.scrollToEnd({ animated: true });
-                          }, 100);
-                        }}
-                        placeholder="0.00"
-                        keyboardType="decimal-pad"
-                        mode="outlined"
-                        outlineColor={colors.border}
-                        activeOutlineColor={accent.hex}
-                        textColor={colors.textPrimary}
-                        theme={{ colors: { background: colors.surfaceLight } }}
-                        style={styles.modalInput}
-                      />
-                    </>
-                  )
+                    <View style={styles.creditCalcBox}>
+                      <Text style={styles.creditCalcSub}>
+                        Limit: ₹{(parseFloat(editCreditLimit) || 0).toLocaleString('en-IN')}  •  Due: ₹{(parseFloat(editBalance) || 0).toLocaleString('en-IN')}
+                      </Text>
+                      <Text style={[styles.creditCalcMain, { color: accent.hex }]}>
+                        Available Credit: ₹{Math.max(0, (parseFloat(editCreditLimit) || 0) - (parseFloat(editBalance) || 0)).toLocaleString('en-IN')}
+                      </Text>
+                    </View>
+                  </>
+                ) : (
+                  <>
+                    <Text style={styles.inputSectionLabel}>
+                      {isAddingNewSource ? 'STARTING BALANCE (₹)' : 'CURRENT BALANCE (₹)'}
+                    </Text>
+                    <TextInput
+                      value={editBalance}
+                      onChangeText={setEditBalance}
+                      onFocus={() => {
+                        setTimeout(() => {
+                          sourceModalScrollRef.current?.scrollToEnd({ animated: true });
+                        }, 100);
+                      }}
+                      placeholder="0.00"
+                      keyboardType="decimal-pad"
+                      mode="outlined"
+                      outlineColor={colors.border}
+                      activeOutlineColor={accent.hex}
+                      textColor={colors.textPrimary}
+                      theme={{ colors: { background: colors.surfaceLight } }}
+                      style={styles.modalInput}
+                    />
+                  </>
                 )}
               </KeyboardAwareScrollView>
 

@@ -22,6 +22,12 @@ export const BANK_LOGOS: Record<string, ImageSourcePropType> = {
   pnb: require('../../assets/logos/pnb.png'),
   BOB: require('../../assets/logos/bob.png'),
   bob: require('../../assets/logos/bob.png'),
+  Fino: require('../../assets/logos/fino.png'),
+  fino: require('../../assets/logos/fino.png'),
+  'Fino Bank': require('../../assets/logos/fino.png'),
+  'fino bank': require('../../assets/logos/fino.png'),
+  'Fino Payments Bank': require('../../assets/logos/fino.png'),
+  'fino payments bank': require('../../assets/logos/fino.png'),
 
   // Credit Card Issuer Presets
   'SBI Card': require('../../assets/logos/sbi_card.png'),
