@@ -163,32 +163,35 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
   };
 
   const handleSaveAccountEdit = async () => {
-    if (!user || !account) return;
+    if (!user || !account || isSavingEdit) return;
     setIsSavingEdit(true);
 
-    const fallbackName =
-      editType === 'bank'
-        ? editBankPreset ? `Bank (${editBankPreset})` : 'Bank'
-        : editType === 'credit_card'
-        ? 'Credit Card'
-        : 'Cash';
+    try {
+      const fallbackName =
+        editType === 'bank'
+          ? editBankPreset ? `Bank (${editBankPreset})` : 'Bank'
+          : editType === 'credit_card'
+          ? 'Credit Card'
+          : 'Cash';
 
-    const finalName = editName.trim() || fallbackName;
-    const rawVal = parseFloat(editBalance) || 0;
-    const parsedBalance = editType === 'credit_card' ? -Math.abs(rawVal) : rawVal;
-    const parsedLimit = editCreditLimit ? parseFloat(editCreditLimit) || null : null;
+      const finalName = editName.trim() || fallbackName;
+      const rawVal = parseFloat(editBalance) || 0;
+      const parsedBalance = editType === 'credit_card' ? -Math.abs(rawVal) : rawVal;
+      const parsedLimit = editCreditLimit ? parseFloat(editCreditLimit) || null : null;
 
-    // Update metadata and recalibrated balance
-    await updateAccountOptimistic(account.id, {
-      name: finalName,
-      type: editType,
-      current_balance: parsedBalance,
-      credit_limit: parsedLimit,
-      bank_preset: editType === 'bank' ? editBankPreset : null,
-    });
+      // Update metadata and recalibrated balance
+      await updateAccountOptimistic(account.id, {
+        name: finalName,
+        type: editType,
+        current_balance: parsedBalance,
+        credit_limit: parsedLimit,
+        bank_preset: editType === 'bank' ? editBankPreset : null,
+      });
 
-    setIsSavingEdit(false);
-    setEditModalVisible(false);
+      setEditModalVisible(false);
+    } finally {
+      setIsSavingEdit(false);
+    }
   };
 
   const handleOpenDeleteConfirm = () => {

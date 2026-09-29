@@ -4,9 +4,9 @@
 Foundational architecture build for a high-performance cross-platform personal finance mobile app built for Android using Expo Dev Client, React Native Reanimated, React Native Paper, Zustand, and Supabase.
 
 - **GitHub Repository**: [https://github.com/Anandavnish/expense-tracker](https://github.com/Anandavnish/expense-tracker)
-- **Latest Release**: [Expense Tracker v1.0.14 (Build 14)](https://github.com/Anandavnish/expense-tracker/releases/tag/v1.0.14)
-- **Direct APK Download**: [ExpenseTracker-v1.0.14.apk](https://github.com/Anandavnish/expense-tracker/releases/download/v1.0.14/ExpenseTracker-v1.0.14.apk)
-- **Previous Release**: [Expense Tracker v1.0.13 (Build 13)](https://github.com/Anandavnish/expense-tracker/releases/tag/v1.0.13)
+- **Latest Release**: [Expense Tracker v1.0.15 (Build 15)](https://github.com/Anandavnish/expense-tracker/releases/tag/v1.0.15)
+- **Direct APK Download**: [ExpenseTracker-v1.0.15.apk](https://github.com/Anandavnish/expense-tracker/releases/download/v1.0.15/ExpenseTracker-v1.0.15.apk)
+- **Previous Release**: [Expense Tracker v1.0.14 (Build 14)](https://github.com/Anandavnish/expense-tracker/releases/tag/v1.0.14)
 
 ---
 
@@ -41,6 +41,25 @@ Foundational architecture build for a high-performance cross-platform personal f
 ---
 
 ## Architectural Confirmations & System Revisions (Sept 2026)
+
+### 000. Interactive Donut Chart, Refined Net Worth Details, Fluid Scrolling, & Double-Submit Protection (v1.0.15)
+- **Status**: **Implemented & Fully Verified**.
+- **Interactive Donut Chart with Elbow Bent Pointer**:
+  - Tapping any slice on the SVG Donut Chart triggers light haptics (`Haptics.impactAsync`), dynamically expands the active arc (+4px stroke width), dims inactive slices, and renders an SVG bent elbow leader line (`Path`) with anchor and terminal dots extending from the slice inner edge into the center hub.
+  - The center hub dynamically updates to display the active category name badge, formatted expense amount, and exact percentage of total expenses.
+  - Auto-resets smoothly to the global summary after 3 seconds or when tapped again.
+  - Slices can also be highlighted by tapping the interactive category chips in the legend.
+- **Refined Net Worth Card & Micro-Callout**:
+  - Replaced the bulky pill container below Net Worth with a sleek inline colored trend arrow (`arrow-up-sharp` / `arrow-down-sharp`) and subtle `(i)` details button right next to the hero amount.
+  - Tapping the `(i)` button toggles an elegant floating micro-callout card directly underneath, showing the previous month's closing net worth, exact difference in ₹, and percentage change.
+- **Prevent Duplicate Money Source Entries on Poor Network**:
+  - Added an `isSavingSource` submission lock and loading spinner (`ActivityIndicator`) to the "Save Money Source" button in `DashboardScreen.tsx`.
+  - Added duplicate pending account protection in `financeStore.ts` (`createAccountOptimistic`), preventing twin `temp_acc_` instances from being created when network lag occurs.
+  - Guarded `handleSaveAccountEdit` in `AccountDetailScreen.tsx` against repeated taps.
+- **Global Scroll Fluidity & Momentum**:
+  - Configured `decelerationRate="normal"`, `scrollEventThrottle={16}`, `overScrollMode="never"`, and `showsVerticalScrollIndicator={false}` across `KeyboardAwareScrollView.tsx`, `DashboardScreen.tsx`, and `TransactionsScreen.tsx` for buttery smooth 60fps/120fps scrolling on Android and iOS.
+- **Google OAuth Multi-Client Guidance**:
+  - Clarified that Google Cloud Console supports multiple OAuth 2.0 Client IDs under the same project. Creating a separate Client ID for Expense Tracker leaves "progreshelf" completely untouched and resolves the 2-secret limit.
 
 ### 00. UI/UX Polishing, Category Donut Chart, Net Worth Delta, & Detail Lag Fix (v1.0.14)
 - **Status**: **Implemented & Fully Verified**.

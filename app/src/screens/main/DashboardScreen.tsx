@@ -243,9 +243,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
   const [editBalance, setEditBalance] = useState('');
   const [editCreditLimit, setEditCreditLimit] = useState('');
   const [isAddingNewSource, setIsAddingNewSource] = useState(false);
-
-
-  // Delete Account Confirmation State
+  const [isSavingSource, setIsSavingSource] = useState(false);
+  const [showNetWorthDeltaCallout, setShowNetWorthDeltaCallout] = useState(false);
   const [deleteTargetAccount, setDeleteTargetAccount] = useState<Account | null>(null);
   const [isDeletingSource, setIsDeletingSource] = useState(false);
 
@@ -441,6 +440,14 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
     }
     return `${prevY}-${String(prevM).padStart(2, '0')}`;
   }, [selectedMonth]);
+
+  const previousMonthLabel = useMemo(() => {
+    if (!previousMonthStr) return '';
+    const [yStr, mStr] = previousMonthStr.split('-');
+    const m = parseInt(mStr, 10);
+    const date = new Date(parseInt(yStr, 10), m - 1, 1);
+    return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+  }, [previousMonthStr]);
 
   // Net Worth delta comparing current/selected month closing against previous month's closing net worth
   const netWorthDelta = useMemo(() => {
@@ -884,7 +891,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
   };
 
   const handleSaveSource = async () => {
-    if (!user) return;
+    if (!user || isSavingSource) return;
 
     let finalName = editName.trim();
     if (editType === 'bank') {
@@ -911,51 +918,65 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
     const parsedBalance = editType === 'credit_card' ? -Math.abs(rawVal) : rawVal;
     const parsedLimit = editCreditLimit ? parseFloat(editCreditLimit) || null : null;
 
-    if (isAddingNewSource) {
-      await createAccountOptimistic({
-        user_id: user.id,
-        name: finalName,
-        type: editType,
-        current_balance: parsedBalance,
-        credit_limit: parsedLimit,
-        bank_preset: editType === 'bank' ? editBankPreset : null,
-        card_issuer: editType === 'credit_card' ? editCardIssuer : null,
-        custom_color:
-          (editType === 'bank' && editBankPreset === 'Custom') ||
-          (editType === 'credit_card' && editCardIssuer === 'Custom')
-            ? editCustomColor
-            : null,
-        custom_icon:
-          (editType === 'bank' && editBankPreset === 'Custom') ||
-          (editType === 'credit_card' && editCardIssuer === 'Custom')
-            ? editCustomIcon
-            : null,
-      });
-      setEditingAccount(null);
-      setIsAddingNewSource(false);
-    } else if (editingAccount) {
-      // Update metadata and recalibrated balance
-      await updateAccountOptimistic(editingAccount.id, {
-        name: finalName,
-        type: editType,
-        current_balance: parsedBalance,
-        credit_limit: parsedLimit,
-        bank_preset: editType === 'bank' ? editBankPreset : null,
-        card_issuer: editType === 'credit_card' ? editCardIssuer : null,
-        custom_color:
-          (editType === 'bank' && editBankPreset === 'Custom') ||
-          (editType === 'credit_card' && editCardIssuer === 'Custom')
-            ? editCustomColor
-            : null,
-        custom_icon:
-          (editType === 'bank' && editBankPreset === 'Custom') ||
-          (editType === 'credit_card' && editCardIssuer === 'Custom')
-            ? editCustomIcon
-            : null,
-      });
+    setIsSavingSource(true);
+    try {
+      if (isAddingNewSource) {
+        const res = await createAccountOptimistic({
+          user_id: user.id,
+          name: finalName,
+          type: editType,
+          current_balance: parsedBalance,
+          credit_limit: parsedLimit,
+          bank_preset: editType === 'bank' ? editBankPreset : null,
+          card_issuer: editType === 'credit_card' ? editCardIssuer : null,
+          custom_color:
+            (editType === 'bank' && editBankPreset === 'Custom') ||
+            (editType === 'credit_card' && editCardIssuer === 'Custom')
+              ? editCustomColor
+              : null,
+          custom_icon:
+            (editType === 'bank' && editBankPreset === 'Custom') ||
+            (editType === 'credit_card' && editCardIssuer === 'Custom')
+              ? editCustomIcon
+              : null,
+        });
 
-      setEditingAccount(null);
-      setIsAddingNewSource(false);
+        if (!res.success && res.error) {
+          Alert.alert('Save Failed', res.error);
+        } else {
+          setEditingAccount(null);
+          setIsAddingNewSource(false);
+        }
+      } else if (editingAccount) {
+        // Update metadata and recalibrated balance
+        const res = await updateAccountOptimistic(editingAccount.id, {
+          name: finalName,
+          type: editType,
+          current_balance: parsedBalance,
+          credit_limit: parsedLimit,
+          bank_preset: editType === 'bank' ? editBankPreset : null,
+          card_issuer: editType === 'credit_card' ? editCardIssuer : null,
+          custom_color:
+            (editType === 'bank' && editBankPreset === 'Custom') ||
+            (editType === 'credit_card' && editCardIssuer === 'Custom')
+              ? editCustomColor
+              : null,
+          custom_icon:
+            (editType === 'bank' && editBankPreset === 'Custom') ||
+            (editType === 'credit_card' && editCardIssuer === 'Custom')
+              ? editCustomIcon
+              : null,
+        });
+
+        if (!res.success && res.error) {
+          Alert.alert('Update Failed', res.error);
+        } else {
+          setEditingAccount(null);
+          setIsAddingNewSource(false);
+        }
+      }
+    } finally {
+      setIsSavingSource(false);
     }
   };
 
@@ -1071,20 +1092,24 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
           pointerEvents="none"
         />
         <ScrollView
-        contentContainerStyle={[styles.scrollContent, { paddingBottom: 110 }]}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor={accent.hex}
-            colors={[accent.hex]}
-          />
-        }
-      >
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: 110 }]}
+          showsVerticalScrollIndicator={false}
+          scrollEventThrottle={16}
+          decelerationRate="normal"
+          overScrollMode="never"
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={accent.hex}
+              colors={[accent.hex]}
+            />
+          }
+        >
         {/* 3. TOTAL NET WORTH Card */}
         <View style={styles.netWorthCard}>
           <View style={styles.netWorthHeader}>
-            <View>
+            <View style={{ flex: 1 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                 <Text style={styles.netWorthEyebrow}>Total Net Worth</Text>
                 {isPastMonth && (
@@ -1098,45 +1123,29 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                   </View>
                 )}
               </View>
-              <Text
-                style={[
-                  styles.netWorthHeroNumber,
-                  TYPOGRAPHY.heroNumber,
-                  { color: colors.textPrimary },
-                ]}
-              >
-                {formattedNetWorth}
-              </Text>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginTop: 6 }}>
+
+              {/* Hero Amount with colored arrow and (i) details button */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 2 }}>
+                <Text
+                  style={[
+                    styles.netWorthHeroNumber,
+                    TYPOGRAPHY.heroNumber,
+                    { color: colors.textPrimary },
+                  ]}
+                >
+                  {formattedNetWorth}
+                </Text>
                 {netWorthDelta && !isFutureMonth && (
-                  <View
-                    style={[
-                      styles.netWorthDeltaBadge,
-                      {
-                        backgroundColor:
-                          netWorthDelta.diff > 0
-                            ? colors.success + '15'
-                            : netWorthDelta.diff < 0
-                            ? colors.alert + '15'
-                            : colors.surfaceLight,
-                        borderColor:
-                          netWorthDelta.diff > 0
-                            ? colors.success + '30'
-                            : netWorthDelta.diff < 0
-                            ? colors.alert + '30'
-                            : colors.border,
-                      },
-                    ]}
-                  >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                     <Ionicons
                       name={
                         netWorthDelta.diff > 0
-                          ? 'trending-up'
+                          ? 'arrow-up-sharp'
                           : netWorthDelta.diff < 0
-                          ? 'trending-down'
-                          : 'remove'
+                          ? 'arrow-down-sharp'
+                          : 'remove-sharp'
                       }
-                      size={12}
+                      size={20}
                       color={
                         netWorthDelta.diff > 0
                           ? colors.success
@@ -1145,38 +1154,94 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                           : colors.textMuted
                       }
                     />
-                    <Text
-                      style={[
-                        styles.netWorthDeltaText,
-                        TYPOGRAPHY.tabularText,
-                        {
-                          color:
-                            netWorthDelta.diff > 0
-                              ? colors.success
-                              : netWorthDelta.diff < 0
-                              ? colors.alert
-                              : colors.textMuted,
-                        },
-                      ]}
+                    <TouchableOpacity
+                      onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                        setShowNetWorthDeltaCallout((prev) => !prev);
+                      }}
+                      hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
+                      style={styles.netWorthInfoBtn}
+                      activeOpacity={0.7}
                     >
-                      {netWorthDelta.diff > 0 ? '▲ +' : netWorthDelta.diff < 0 ? '▼ −' : '— '}₹
-                      {Math.abs(netWorthDelta.diff).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-                      {netWorthDelta.pct !== null
-                        ? ` (${netWorthDelta.diff > 0 ? '+' : ''}${netWorthDelta.pct}%)`
-                        : ''}{' '}
-                      vs last month
-                    </Text>
-                  </View>
-                )}
-                {totalCreditLimit > 0 && !isFutureMonth && (
-                  <View style={[styles.availCreditPill, { borderColor: colors.border, marginTop: 0 }]}>
-                    <Ionicons name="card-outline" size={12} color={accent.hex} />
-                    <Text style={styles.availCreditText}>
-                      Avail. Credit: ₹{totalAvailCredit.toLocaleString('en-IN', { maximumFractionDigits: 0 })} of ₹{totalCreditLimit.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-                    </Text>
+                      <Ionicons
+                        name={showNetWorthDeltaCallout ? 'close-circle' : 'information-circle-outline'}
+                        size={17}
+                        color={showNetWorthDeltaCallout ? colors.textPrimary : colors.textMuted}
+                      />
+                    </TouchableOpacity>
                   </View>
                 )}
               </View>
+
+              {/* Refined floating micro-callout card revealing previous month closing and delta */}
+              {showNetWorthDeltaCallout && netWorthDelta && !isFutureMonth && (
+                <TouchableOpacity
+                  activeOpacity={0.9}
+                  onPress={() => setShowNetWorthDeltaCallout(false)}
+                  style={[
+                    styles.netWorthCalloutCard,
+                    {
+                      backgroundColor: colors.surfaceLight,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
+                  <View style={styles.netWorthCalloutHeader}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <View
+                        style={[
+                          styles.netWorthCalloutDot,
+                          {
+                            backgroundColor:
+                              netWorthDelta.diff > 0
+                                ? colors.success
+                                : netWorthDelta.diff < 0
+                                ? colors.alert
+                                : colors.textMuted,
+                          },
+                        ]}
+                      />
+                      <Text
+                        style={[
+                          styles.netWorthCalloutTitle,
+                          TYPOGRAPHY.tabularText,
+                          {
+                            color:
+                              netWorthDelta.diff > 0
+                                ? colors.success
+                                : netWorthDelta.diff < 0
+                                ? colors.alert
+                                : colors.textPrimary,
+                          },
+                        ]}
+                      >
+                        {netWorthDelta.diff > 0 ? '+' : netWorthDelta.diff < 0 ? '−' : ''}₹
+                        {Math.abs(netWorthDelta.diff).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                        {netWorthDelta.pct !== null
+                          ? ` (${netWorthDelta.diff > 0 ? '+' : ''}${netWorthDelta.pct}%)`
+                          : ''}
+                      </Text>
+                    </View>
+                    <Ionicons name="close" size={13} color={colors.textMuted} />
+                  </View>
+                  <Text style={[styles.netWorthCalloutBody, { color: colors.textSecondary }]}>
+                    Closing net worth was{' '}
+                    <Text style={{ fontWeight: '700', color: colors.textPrimary }}>
+                      ₹{netWorthDelta.prevNetWorth.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                    </Text>{' '}
+                    at end of {previousMonthLabel || 'last month'}. Tap to dismiss.
+                  </Text>
+                </TouchableOpacity>
+              )}
+
+              {totalCreditLimit > 0 && !isFutureMonth && (
+                <View style={[styles.availCreditPill, { borderColor: colors.border, marginTop: 8 }]}>
+                  <Ionicons name="card-outline" size={12} color={accent.hex} />
+                  <Text style={styles.availCreditText}>
+                    Avail. Credit: ₹{totalAvailCredit.toLocaleString('en-IN', { maximumFractionDigits: 0 })} of ₹{totalCreditLimit.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                  </Text>
+                </View>
+              )}
             </View>
           </View>
 
@@ -2441,16 +2506,25 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                     setEditingAccount(null);
                     setIsAddingNewSource(false);
                   }}
-                  style={styles.modalCancelPillBtn}
+                  disabled={isSavingSource}
+                  style={[styles.modalCancelPillBtn, isSavingSource && { opacity: 0.5 }]}
                 >
                   <Text style={styles.modalCancelPillBtnText}>Back</Text>
                 </TouchableOpacity>
 
                 <TactileButton
                   onPress={handleSaveSource}
-                  style={[styles.modalSavePillBtn, { backgroundColor: accent.hex }]}
+                  disabled={isSavingSource}
+                  style={[
+                    styles.modalSavePillBtn,
+                    { backgroundColor: accent.hex, opacity: isSavingSource ? 0.7 : 1 },
+                  ]}
                 >
-                  <Text style={styles.modalSavePillBtnText}>Save Money Source</Text>
+                  {isSavingSource ? (
+                    <ActivityIndicator size="small" color={colors.textInverse} />
+                  ) : (
+                    <Text style={styles.modalSavePillBtnText}>Save Money Source</Text>
+                  )}
                 </TactileButton>
               </View>
             </KeyboardAvoidingView>
@@ -3093,6 +3167,39 @@ function getStyles(colors: ThemeColors) {
     fontSize: 32,
     fontWeight: '800',
     color: colors.textPrimary,
+  },
+  netWorthInfoBtn: {
+    padding: 3,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 12,
+  },
+  netWorthCalloutCard: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  netWorthCalloutHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  netWorthCalloutDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  netWorthCalloutTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  netWorthCalloutBody: {
+    fontSize: 11,
+    lineHeight: 16,
   },
   netWorthDeltaBadge: {
     flexDirection: 'row',

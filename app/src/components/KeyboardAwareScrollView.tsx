@@ -44,6 +44,10 @@ export const KeyboardAwareScrollView = forwardRef<ScrollView, KeyboardAwareScrol
         ref={internalScrollRef}
         keyboardShouldPersistTaps={keyboardShouldPersistTaps}
         automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+        decelerationRate="normal"
+        scrollEventThrottle={16}
+        overScrollMode="never"
+        showsVerticalScrollIndicator={false}
         contentContainerStyle={[
           contentContainerStyle,
           { paddingBottom: dynamicPaddingBottom },

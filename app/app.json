@@ -2,7 +2,7 @@
   "expo": {
     "name": "Expense Tracker",
     "slug": "expense-tracker",
-    "version": "1.0.14",
+    "version": "1.0.15",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "expensetracker",
@@ -10,7 +10,7 @@
     "backgroundColor": "#0C0D11",
     "android": {
       "package": "com.expensetracker.app",
-      "versionCode": 14,
+      "versionCode": 15,
       "backgroundColor": "#0C0D11",
       "adaptiveIcon": {
         "backgroundColor": "#0C0D11"

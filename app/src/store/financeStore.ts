@@ -1863,6 +1863,17 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
   },
 
   createAccountOptimistic: async (accData) => {
+    // Prevent adding duplicate pending accounts if one with identical temp name & type is already in progress
+    const alreadyPending = get().accounts.some(
+      (a) =>
+        a.id.startsWith('temp_acc_') &&
+        a.name.trim().toLowerCase() === accData.name.trim().toLowerCase() &&
+        a.type === accData.type
+    );
+    if (alreadyPending) {
+      return { success: false, error: 'Account creation already in progress' };
+    }
+
     const tempId = `temp_acc_${Date.now()}`;
     const optimisticAcc: Account = {
       ...accData,
