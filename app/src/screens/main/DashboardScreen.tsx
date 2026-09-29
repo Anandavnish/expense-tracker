@@ -11,6 +11,7 @@ import {
   Platform,
   ActivityIndicator,
   Alert,
+  Image,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -247,6 +248,30 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
   const [showNetWorthDeltaCallout, setShowNetWorthDeltaCallout] = useState(false);
   const [deleteTargetAccount, setDeleteTargetAccount] = useState<Account | null>(null);
   const [isDeletingSource, setIsDeletingSource] = useState(false);
+
+  // Derived user details for clean dashboard header
+  const userFirstName = useMemo(() => {
+    if (isGuest) return 'Guest';
+    const metadata = user?.user_metadata;
+    if (metadata?.given_name && typeof metadata.given_name === 'string') {
+      return metadata.given_name.trim();
+    }
+    const fullName = metadata?.full_name || metadata?.name;
+    if (fullName && typeof fullName === 'string') {
+      return fullName.trim().split(' ')[0];
+    }
+    if (user?.email) {
+      const emailName = user.email.split('@')[0];
+      return emailName.charAt(0).toUpperCase() + emailName.slice(1);
+    }
+    return 'User';
+  }, [user, isGuest]);
+
+  const userAvatarUrl = useMemo(() => {
+    if (isGuest) return null;
+    const metadata = user?.user_metadata;
+    return (metadata?.avatar_url || metadata?.picture || null) as string | null;
+  }, [user, isGuest]);
 
   // Pay Credit Card Bill State
   const [payBillModalVisible, setPayBillModalVisible] = useState(false);
@@ -985,27 +1010,33 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
       {/* 1. Top Bar */}
       <View style={styles.topBar}>
         <View>
-          <Text style={styles.appGreeting}>Welcome back,</Text>
-          <Text style={styles.appName}>
-            {isGuest ? 'Guest Explorer' : user?.email ? user.email.split('@')[0] : 'Expense Tracker'}
+          <Text style={styles.appGreeting}>Welcome back</Text>
+        </View>
+
+        <TouchableOpacity
+          onPress={() => navigation.navigate('Profile')}
+          style={[
+            styles.profileHeaderPill,
+            {
+              backgroundColor: colors.surfaceLight,
+              borderColor: colors.border,
+            },
+          ]}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          activeOpacity={0.7}
+        >
+          {userAvatarUrl ? (
+            <Image source={{ uri: userAvatarUrl }} style={styles.profileHeaderAvatar} />
+          ) : (
+            <View style={[styles.profileHeaderFallbackAvatar, { backgroundColor: accent.hex + '22' }]}>
+              <Ionicons name="person" size={13} color={accent.hex} />
+            </View>
+          )}
+          <Text style={[styles.profileHeaderName, { color: colors.textPrimary }]} numberOfLines={1}>
+            {userFirstName}
           </Text>
-        </View>
-        <View style={styles.topRightActions}>
-          <TouchableOpacity
-            onPress={() => navigation.navigate('Profile')}
-            style={[styles.avatarPill, { borderColor: accent.hex }]}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            activeOpacity={0.8}
-          >
-            {isGuest ? (
-              <Ionicons name="person-outline" size={16} color={accent.hex} />
-            ) : (
-              <Text style={[styles.avatarText, { color: accent.hex }]}>
-                {user?.email?.charAt(0).toUpperCase() || 'U'}
-              </Text>
-            )}
-          </TouchableOpacity>
-        </View>
+          <Ionicons name="chevron-forward" size={12} color={colors.textMuted} />
+        </TouchableOpacity>
       </View>
 
       {/* 2. Fixed Month Selector (Capsule with transparent area around it) */}
@@ -1140,12 +1171,12 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                     <Ionicons
                       name={
                         netWorthDelta.diff > 0
-                          ? 'arrow-up-sharp'
+                          ? 'arrow-up-circle'
                           : netWorthDelta.diff < 0
-                          ? 'arrow-down-sharp'
-                          : 'remove-sharp'
+                          ? 'arrow-down-circle'
+                          : 'remove-circle'
                       }
-                      size={20}
+                      size={16}
                       color={
                         netWorthDelta.diff > 0
                           ? colors.success
@@ -2992,6 +3023,33 @@ function getStyles(colors: ThemeColors) {
     flexDirection: 'row',
     alignItems: 'center',
     gap: SPACING.sm,
+  },
+  profileHeaderPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingLeft: 4,
+    paddingRight: 8,
+    paddingVertical: 4,
+    borderRadius: 20,
+    borderWidth: 1,
+  },
+  profileHeaderAvatar: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+  },
+  profileHeaderFallbackAvatar: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  profileHeaderName: {
+    fontSize: 13,
+    fontWeight: '700',
+    maxWidth: 110,
   },
   avatarPill: {
     width: 32,

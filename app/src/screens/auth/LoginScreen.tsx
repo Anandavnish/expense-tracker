@@ -4,6 +4,7 @@ import {
   Text,
   StyleSheet,
   ScrollView,
+  TouchableOpacity,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TextInput, ActivityIndicator } from 'react-native-paper';
@@ -17,11 +18,12 @@ interface LoginScreenProps {
   navigation: any;
 }
 
-export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
+export const LoginScreen: React.FC<LoginScreenProps> = () => {
   const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showEmailLogin, setShowEmailLogin] = useState(false);
   const { signIn, signInWithGoogle, isLoading, error, clearError } = useAuthStore();
 
   const handleSignIn = async () => {
@@ -37,103 +39,117 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
       >
-          <View style={styles.header}>
-            <View style={styles.tag}>
-              <Text style={styles.tagText}>FINANCE ARCHITECTURE</Text>
-            </View>
-            <Text style={styles.title}>Sign In</Text>
-            <Text style={styles.subtitle}>Enter your credentials to access your financial tracker</Text>
+        <View style={styles.header}>
+          <View style={styles.tag}>
+            <Text style={styles.tagText}>FINANCE ARCHITECTURE</Text>
           </View>
+          <Text style={styles.title}>Welcome</Text>
+          <Text style={styles.subtitle}>
+            Sign in with your Google account to access your financial tracker
+          </Text>
+        </View>
 
-          {error ? (
-            <View style={styles.errorBox}>
-              <Text style={styles.errorText}>{error}</Text>
-            </View>
-          ) : null}
+        {error ? (
+          <View style={styles.errorBox}>
+            <Ionicons name="alert-circle-outline" size={16} color={COLORS.alert} style={{ marginRight: 6 }} />
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
+        ) : null}
 
-          <View style={styles.form}>
-            <TextInput
-              label="Email"
-              value={email}
-              onChangeText={(text) => {
-                clearError();
-                setEmail(text);
-              }}
-              autoCapitalize="none"
-              keyboardType="email-address"
-              mode="outlined"
-              outlineColor={COLORS.border}
-              activeOutlineColor={COLORS.accent}
-              textColor={COLORS.textPrimary}
-              style={styles.input}
-            />
-
-            <TextInput
-              label="Password"
-              value={password}
-              onChangeText={(text) => {
-                clearError();
-                setPassword(text);
-              }}
-              onFocus={() => {
-                setTimeout(() => {
-                  scrollRef.current?.scrollToEnd({ animated: true });
-                }, 150);
-              }}
-              secureTextEntry
-              mode="outlined"
-              outlineColor={COLORS.border}
-              activeOutlineColor={COLORS.accent}
-              textColor={COLORS.textPrimary}
-              style={styles.input}
-            />
-
-            <TactileButton
-              onPress={handleSignIn}
-              disabled={isLoading || !email || !password}
-              style={styles.submitBtn}
-            >
-              {isLoading ? (
-                <ActivityIndicator color={COLORS.textInverse} size="small" />
-              ) : (
-                <Text style={styles.submitBtnText}>Sign In</Text>
-              )}
-            </TactileButton>
-
-            <TactileButton
-              onPress={() => {
-                clearError();
-                navigation.navigate('SignUp');
-              }}
-              style={styles.secondaryBtn}
-            >
-              <Text style={styles.secondaryBtnText}>
-                Don't have an account? <Text style={styles.linkText}>Sign Up</Text>
-              </Text>
-            </TactileButton>
-
-            {/* Divider */}
-            <View style={styles.dividerRow}>
-              <View style={styles.dividerLine} />
-              <Text style={styles.dividerText}>OR CONTINUE WITH</Text>
-              <View style={styles.dividerLine} />
-            </View>
-
-            {/* Google Sign In Button */}
-            <TactileButton
-              onPress={() => {
-                clearError();
-                signInWithGoogle();
-              }}
-              disabled={isLoading}
-              style={styles.oauthBtn}
-            >
+        <View style={styles.form}>
+          {/* Primary Action: Google Sign In Hero Button */}
+          <TactileButton
+            onPress={() => {
+              clearError();
+              signInWithGoogle();
+            }}
+            disabled={isLoading}
+            style={styles.googleHeroBtn}
+          >
+            {isLoading && !showEmailLogin ? (
+              <ActivityIndicator color={COLORS.textInverse} size="small" />
+            ) : (
               <View style={styles.btnRow}>
-                <Ionicons name="logo-google" size={17} color={COLORS.textPrimary} />
-                <Text style={styles.oauthBtnText}>Continue with Google</Text>
+                <Ionicons name="logo-google" size={18} color={COLORS.textInverse} />
+                <Text style={styles.googleHeroBtnText}>Continue with Google</Text>
               </View>
-            </TactileButton>
+            )}
+          </TactileButton>
+
+          {/* Secondary Email Login Toggle */}
+          <View style={styles.toggleRowContainer}>
+            <TouchableOpacity
+              onPress={() => {
+                clearError();
+                setShowEmailLogin((prev) => !prev);
+              }}
+              style={styles.toggleEmailBtn}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.toggleEmailBtnText}>
+                {showEmailLogin ? 'Hide Email Sign In' : 'Already set a password? Sign in with Email'}
+              </Text>
+              <Ionicons
+                name={showEmailLogin ? 'chevron-up' : 'chevron-down'}
+                size={14}
+                color={COLORS.textMuted}
+              />
+            </TouchableOpacity>
           </View>
+
+          {/* Collapsible Email & Password Section */}
+          {showEmailLogin && (
+            <View style={styles.emailLoginForm}>
+              <TextInput
+                label="Email"
+                value={email}
+                onChangeText={(text) => {
+                  clearError();
+                  setEmail(text);
+                }}
+                autoCapitalize="none"
+                keyboardType="email-address"
+                mode="outlined"
+                outlineColor={COLORS.border}
+                activeOutlineColor={COLORS.accent}
+                textColor={COLORS.textPrimary}
+                style={styles.input}
+              />
+
+              <TextInput
+                label="Password"
+                value={password}
+                onChangeText={(text) => {
+                  clearError();
+                  setPassword(text);
+                }}
+                onFocus={() => {
+                  setTimeout(() => {
+                    scrollRef.current?.scrollToEnd({ animated: true });
+                  }, 150);
+                }}
+                secureTextEntry
+                mode="outlined"
+                outlineColor={COLORS.border}
+                activeOutlineColor={COLORS.accent}
+                textColor={COLORS.textPrimary}
+                style={styles.input}
+              />
+
+              <TactileButton
+                onPress={handleSignIn}
+                disabled={isLoading || !email || !password}
+                style={styles.submitBtn}
+              >
+                {isLoading ? (
+                  <ActivityIndicator color={COLORS.textInverse} size="small" />
+                ) : (
+                  <Text style={styles.submitBtnText}>Sign In with Email</Text>
+                )}
+              </TactileButton>
+            </View>
+          )}
+        </View>
       </KeyboardAwareScrollView>
     </View>
   );
@@ -143,9 +159,6 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: COLORS.background,
-  },
-  keyboardContainer: {
-    flex: 1,
   },
   scrollContent: {
     flexGrow: 1,
@@ -184,6 +197,8 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   errorBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: COLORS.alertMuted,
     borderColor: COLORS.alert,
     borderWidth: 1,
@@ -194,54 +209,22 @@ const styles = StyleSheet.create({
   errorText: {
     color: COLORS.alert,
     fontSize: 13,
+    flex: 1,
   },
   form: {
     gap: SPACING.md,
   },
-  input: {
-    backgroundColor: COLORS.surface,
-  },
-  submitBtn: {
+  googleHeroBtn: {
     backgroundColor: COLORS.accent,
-    borderRadius: 8,
-    paddingVertical: SPACING.md,
+    borderRadius: 10,
+    paddingVertical: SPACING.md + 2,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: SPACING.sm,
   },
-  submitBtnText: {
+  googleHeroBtnText: {
     color: COLORS.textInverse,
     fontSize: 15,
     fontWeight: '700',
-  },
-  secondaryBtn: {
-    paddingVertical: SPACING.xs,
-    alignItems: 'center',
-  },
-  secondaryBtnText: {
-    color: COLORS.textSecondary,
-    fontSize: 14,
-  },
-  linkText: {
-    color: COLORS.accent,
-    fontWeight: '600',
-  },
-  dividerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginVertical: SPACING.xs,
-    gap: SPACING.sm,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: COLORS.border,
-  },
-  dividerText: {
-    fontSize: 11,
-    color: COLORS.textMuted,
-    fontWeight: '700',
-    letterSpacing: 0.8,
   },
   btnRow: {
     flexDirection: 'row',
@@ -249,16 +232,39 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
   },
-  oauthBtn: {
+  toggleRowContainer: {
+    alignItems: 'center',
+    marginVertical: SPACING.sm,
+  },
+  toggleEmailBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: SPACING.xs,
+  },
+  toggleEmailBtnText: {
+    color: COLORS.textMuted,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  emailLoginForm: {
+    gap: SPACING.md,
+    paddingTop: SPACING.xs,
+  },
+  input: {
     backgroundColor: COLORS.surface,
+  },
+  submitBtn: {
+    backgroundColor: COLORS.surfaceLight,
     borderColor: COLORS.border,
     borderWidth: 1,
     borderRadius: 8,
     paddingVertical: SPACING.md,
     alignItems: 'center',
     justifyContent: 'center',
+    marginTop: SPACING.xs,
   },
-  oauthBtnText: {
+  submitBtnText: {
     color: COLORS.textPrimary,
     fontSize: 14,
     fontWeight: '600',

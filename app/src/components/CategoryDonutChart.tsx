@@ -1,6 +1,12 @@
 // app/src/components/CategoryDonutChart.tsx
 import React, { useMemo, useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  GestureResponderEvent,
+} from 'react-native';
 import Svg, { G, Circle, Path } from 'react-native-svg';
 import * as Haptics from 'expo-haptics';
 import { useSettingsStore } from '../store/settingsStore';
@@ -22,7 +28,7 @@ interface CategoryDonutChartProps {
 export const CategoryDonutChart: React.FC<CategoryDonutChartProps> = ({
   data,
   totalAmount,
-  size = 180,
+  size = 170,
   strokeWidth = 22,
 }) => {
   const { colors } = useSettingsStore();
@@ -46,7 +52,7 @@ export const CategoryDonutChart: React.FC<CategoryDonutChartProps> = ({
       .sort((a, b) => b.amount - a.amount);
   }, [data]);
 
-  // Compute strokeDasharray, strokeDashoffset, and angular geometry for each slice
+  // Compute strokeDasharray, strokeDashoffset, and angular coverage for each slice
   const sliceAngles = useMemo(() => {
     if (totalAmount <= 0 || activeSlices.length === 0) return [];
 
@@ -56,25 +62,19 @@ export const CategoryDonutChart: React.FC<CategoryDonutChartProps> = ({
       const strokeDasharray = `${circumference * fraction} ${circumference * (1 - fraction)}`;
       const strokeDashoffset = -circumference * accumulatedFraction;
 
-      // Calculate midpoint angle in degrees (rotated -90deg so 12 o'clock is 0)
-      const startDeg = accumulatedFraction * 360 - 90;
-      const midDeg = startDeg + (fraction * 360) / 2;
-      const midRad = (midDeg * Math.PI) / 180;
+      // Angular coverage normalized to 0 - 360deg starting from 12 o'clock (top) clockwise
+      const startDegNorm = accumulatedFraction * 360;
+      const endDegNorm = (accumulatedFraction + fraction) * 360;
+      const midDegNorm = startDegNorm + (fraction * 360) / 2;
 
-      // Coordinate on inner edge of the donut stroke
-      const rInner = radius - strokeWidth / 2;
-      const x1 = center + rInner * Math.cos(midRad);
-      const y1 = center + rInner * Math.sin(midRad);
+      // Convert to standard cartesian coordinates (0 at 3 o'clock, 90 at 6 o'clock, etc.)
+      const cartesianDeg = midDegNorm - 90;
+      const cartesianRad = (cartesianDeg * Math.PI) / 180;
 
-      // Elbow bend point towards the center hub
-      const rBend = radius - strokeWidth - 5;
-      const x2 = center + rBend * Math.cos(midRad);
-      const y2 = center + rBend * Math.sin(midRad);
-
-      // Horizontal leader leg extending towards center
-      const dx = Math.cos(midRad);
-      const x3 = x2 - (dx >= 0 ? 10 : -10);
-      const y3 = y2;
+      // Point on the outer rim of the slice
+      const rOuter = radius + strokeWidth / 2 + 1;
+      const sliceArcX = center + rOuter * Math.cos(cartesianRad);
+      const sliceArcY = center + rOuter * Math.sin(cartesianRad);
 
       accumulatedFraction += fraction;
       return {
@@ -82,14 +82,11 @@ export const CategoryDonutChart: React.FC<CategoryDonutChartProps> = ({
         percentage: fraction * 100,
         strokeDasharray,
         strokeDashoffset,
-        midDeg,
-        midRad,
-        x1,
-        y1,
-        x2,
-        y2,
-        x3,
-        y3,
+        startDegNorm,
+        endDegNorm,
+        midDegNorm,
+        sliceArcX,
+        sliceArcY,
       };
     });
   }, [activeSlices, totalAmount, circumference, radius, strokeWidth, center]);
@@ -111,7 +108,49 @@ export const CategoryDonutChart: React.FC<CategoryDonutChartProps> = ({
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => {
       setSelectedCategory(null);
-    }, 3000);
+    }, 3500);
+  };
+
+  /**
+   * Angle-based touch handler on the entire donut area.
+   * Completely circumvents Android SVG stroke touch-target bugs!
+   */
+  const handleDonutTouch = (evt: GestureResponderEvent) => {
+    const { locationX, locationY } = evt.nativeEvent;
+    const dx = locationX - center;
+    const dy = locationY - center;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    // Inner and outer boundaries of the touchable donut ring
+    const minR = Math.max(10, radius - strokeWidth - 10);
+    const maxR = radius + strokeWidth + 15;
+
+    if (dist < minR) {
+      // Tap in center hub clears selection
+      if (selectedCategory) {
+        setSelectedCategory(null);
+        if (timerRef.current) clearTimeout(timerRef.current);
+      }
+      return;
+    }
+
+    if (dist > maxR) {
+      return;
+    }
+
+    // Calculate angle in degrees from -180 to 180
+    const rawDeg = (Math.atan2(dy, dx) * 180) / Math.PI;
+    // Normalize so that 12 o'clock (-90deg) is 0deg clockwise:
+    const touchAngleNorm = (rawDeg + 90 + 360) % 360;
+
+    // Find which slice contains this angle
+    const matched = sliceAngles.find(
+      (s) => touchAngleNorm >= s.startDegNorm && touchAngleNorm <= s.endDegNorm
+    );
+
+    if (matched) {
+      handleSelectSlice(matched.category);
+    }
   };
 
   if (totalAmount <= 0 || activeSlices.length === 0) {
@@ -144,7 +183,59 @@ export const CategoryDonutChart: React.FC<CategoryDonutChartProps> = ({
 
   return (
     <View style={styles.container}>
-      <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+      {/* 1. Outside Floating Callout Card (Visible above the chart so fingers never block the values) */}
+      <View style={styles.topCalloutSlot}>
+        {selectedSlice ? (
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={() => setSelectedCategory(null)}
+            style={[
+              styles.floatingCalloutCard,
+              {
+                backgroundColor: colors.surfaceLight,
+                borderColor: selectedSlice.color,
+              },
+            ]}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <View style={[styles.activeCategoryDot, { backgroundColor: selectedSlice.color }]} />
+              <Text
+                style={[styles.activeCategoryText, { color: selectedSlice.color }]}
+                numberOfLines={1}
+              >
+                {selectedSlice.category}
+              </Text>
+            </View>
+            <View style={styles.calloutValuesRow}>
+              <Text
+                style={[
+                  styles.calloutHeroAmount,
+                  TYPOGRAPHY.tabularText,
+                  { color: colors.textPrimary },
+                ]}
+              >
+                ₹{selectedSlice.amount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+              </Text>
+              <View style={[styles.percentBadge, { backgroundColor: selectedSlice.color + '1A' }]}>
+                <Text style={[styles.calloutPercent, { color: selectedSlice.color }]}>
+                  {selectedSlice.percentage.toFixed(1)}%
+                </Text>
+              </View>
+            </View>
+          </TouchableOpacity>
+        ) : (
+          <Text style={[styles.tapHintText, { color: colors.textMuted }]}>
+            Tap any ring slice or category below
+          </Text>
+        )}
+      </View>
+
+      {/* 2. Donut Ring Canvas with Geometry-Based Touch Responder */}
+      <View
+        style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}
+        onStartShouldSetResponder={() => true}
+        onResponderRelease={handleDonutTouch}
+      >
         <Svg width={size} height={size}>
           <G rotation="-90" origin={`${center}, ${center}`}>
             {/* Background Track */}
@@ -172,84 +263,50 @@ export const CategoryDonutChart: React.FC<CategoryDonutChartProps> = ({
                   strokeLinecap="round"
                   fill="transparent"
                   opacity={selectedCategory && !isSelected ? 0.35 : 1}
-                  onPress={() => handleSelectSlice(slice.category)}
                 />
               );
             })}
           </G>
 
-          {/* Bent Elbow Leader Line (Arrow) for Selected Slice */}
+          {/* Bent Elbow Leader Line (Arrow) pointing from top edge to the tapped slice outer edge */}
           {selectedSlice && (
             <G>
-              {/* Leader path from slice inner rim, through bend, to horizontal leg */}
+              {/* Elbow path: from top center down to bend, then to slice outer edge */}
               <Path
-                d={`M ${selectedSlice.x1.toFixed(1)} ${selectedSlice.y1.toFixed(1)} L ${selectedSlice.x2.toFixed(1)} ${selectedSlice.y2.toFixed(1)} L ${selectedSlice.x3.toFixed(1)} ${selectedSlice.y3.toFixed(1)}`}
+                d={`M ${center} 4 L ${center} ${Math.min(selectedSlice.sliceArcY, 40)} L ${selectedSlice.sliceArcX.toFixed(1)} ${selectedSlice.sliceArcY.toFixed(1)}`}
                 stroke={selectedSlice.color}
                 strokeWidth={2}
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 fill="none"
               />
-              {/* Anchor dot on slice */}
+              {/* Glowing anchor dot on the selected slice arc */}
               <Circle
-                cx={selectedSlice.x1}
-                cy={selectedSlice.y1}
-                r={3}
-                fill={selectedSlice.color}
-              />
-              {/* Terminal indicator dot */}
-              <Circle
-                cx={selectedSlice.x3}
-                cy={selectedSlice.y3}
-                r={2}
+                cx={selectedSlice.sliceArcX}
+                cy={selectedSlice.sliceArcY}
+                r={4}
                 fill={selectedSlice.color}
               />
             </G>
           )}
         </Svg>
 
-        {/* Center Total Summary / Interactive Hub */}
-        <TouchableOpacity
-          activeOpacity={0.8}
-          onPress={() => setSelectedCategory(null)}
+        {/* Center Total Summary Hub */}
+        <View
           style={[StyleSheet.absoluteFill, styles.centerLabelContainer]}
+          pointerEvents="none"
         >
-          {selectedSlice ? (
-            <View style={{ alignItems: 'center', paddingHorizontal: 12 }}>
-              <View style={[styles.activeCategoryBadge, { backgroundColor: selectedSlice.color + '22' }]}>
-                <Text style={[styles.activeCategoryText, { color: selectedSlice.color }]} numberOfLines={1}>
-                  {selectedSlice.category}
-                </Text>
-              </View>
-              <Text
-                style={[
-                  styles.centerHeroAmount,
-                  TYPOGRAPHY.tabularText,
-                  { color: colors.textPrimary, fontSize: 16, marginVertical: 1 },
-                ]}
-                numberOfLines={1}
-              >
-                ₹{selectedSlice.amount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-              </Text>
-              <Text style={[styles.centerCategoryPercent, { color: selectedSlice.color }]}>
-                {selectedSlice.percentage.toFixed(1)}% of total
-              </Text>
-            </View>
-          ) : (
-            <View style={{ alignItems: 'center' }}>
-              <Text style={[styles.centerSubLabel, { color: colors.textMuted }]}>TOTAL EXPENSES</Text>
-              <Text style={[styles.centerHeroAmount, TYPOGRAPHY.tabularText, { color: colors.textPrimary }]}>
-                ₹{totalAmount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-              </Text>
-              <Text style={[styles.centerCategoriesCount, { color: colors.textSecondary }]}>
-                {activeSlices.length} {activeSlices.length === 1 ? 'category' : 'categories'}
-              </Text>
-            </View>
-          )}
-        </TouchableOpacity>
+          <Text style={[styles.centerSubLabel, { color: colors.textMuted }]}>TOTAL EXPENSES</Text>
+          <Text style={[styles.centerHeroAmount, TYPOGRAPHY.tabularText, { color: colors.textPrimary }]}>
+            ₹{totalAmount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+          </Text>
+          <Text style={[styles.centerCategoriesCount, { color: colors.textSecondary }]}>
+            {activeSlices.length} {activeSlices.length === 1 ? 'category' : 'categories'}
+          </Text>
+        </View>
       </View>
 
-      {/* Interactive Legend Row below the Donut */}
+      {/* 3. Interactive Legend Chips below the Donut */}
       <View style={styles.legendContainer}>
         {sliceAngles.slice(0, 5).map((slice) => {
           const isSelected = selectedCategory === slice.category;
@@ -261,7 +318,7 @@ export const CategoryDonutChart: React.FC<CategoryDonutChartProps> = ({
               style={[
                 styles.legendItem,
                 isSelected && {
-                  backgroundColor: slice.color + '18',
+                  backgroundColor: slice.color + '1A',
                   borderColor: slice.color,
                   borderWidth: 1,
                 },
@@ -305,6 +362,60 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: SPACING.md,
   },
+  topCalloutSlot: {
+    minHeight: 38,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: SPACING.xs,
+  },
+  tapHintText: {
+    fontSize: 11,
+    fontWeight: '500',
+    letterSpacing: 0.2,
+  },
+  floatingCalloutCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    gap: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  activeCategoryDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  activeCategoryText: {
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+  },
+  calloutValuesRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  calloutHeroAmount: {
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  percentBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  calloutPercent: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
   centerLabelContainer: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -317,29 +428,13 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   centerHeroAmount: {
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: '800',
   },
   centerCategoriesCount: {
     fontSize: 10,
     fontWeight: '600',
     marginTop: 2,
-  },
-  activeCategoryBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 8,
-    marginBottom: 2,
-  },
-  activeCategoryText: {
-    fontSize: 10,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
-  },
-  centerCategoryPercent: {
-    fontSize: 10,
-    fontWeight: '700',
   },
   emptyHintText: {
     fontSize: 12,

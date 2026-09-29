@@ -4,9 +4,9 @@
 Foundational architecture build for a high-performance cross-platform personal finance mobile app built for Android using Expo Dev Client, React Native Reanimated, React Native Paper, Zustand, and Supabase.
 
 - **GitHub Repository**: [https://github.com/Anandavnish/expense-tracker](https://github.com/Anandavnish/expense-tracker)
-- **Latest Release**: [Expense Tracker v1.0.15 (Build 15)](https://github.com/Anandavnish/expense-tracker/releases/tag/v1.0.15)
-- **Direct APK Download**: [ExpenseTracker-v1.0.15.apk](https://github.com/Anandavnish/expense-tracker/releases/download/v1.0.15/ExpenseTracker-v1.0.15.apk)
-- **Previous Release**: [Expense Tracker v1.0.14 (Build 14)](https://github.com/Anandavnish/expense-tracker/releases/tag/v1.0.14)
+- **Latest Release**: [Expense Tracker v1.0.16 (Build 16)](https://github.com/Anandavnish/expense-tracker/releases/tag/v1.0.16)
+- **Direct APK Download**: [ExpenseTracker-v1.0.16.apk](https://github.com/Anandavnish/expense-tracker/releases/download/v1.0.16/ExpenseTracker-v1.0.16.apk)
+- **Previous Release**: [Expense Tracker v1.0.15 (Build 15)](https://github.com/Anandavnish/expense-tracker/releases/tag/v1.0.15)
 
 ---
 
@@ -41,6 +41,22 @@ Foundational architecture build for a high-performance cross-platform personal f
 ---
 
 ## Architectural Confirmations & System Revisions (Sept 2026)
+
+### 0000. Tightened Google-First Auth, Outside Donut Callout, Circular Net Worth Trend, & User Pill Header (v1.0.16)
+- **Status**: **Implemented & Fully Verified**.
+- **Tightened Google-First Login & Removed Public Sign Up**:
+  - Re-architected `LoginScreen.tsx` to position Google Sign-In as the hero action at the center of the screen.
+  - Eliminated the public "Don't have an account? Sign Up" button, ensuring all initial onboarding is gated through Google OAuth.
+  - Added a subtle secondary collapsible toggle for users who previously established password credentials within the app.
+- **Angle-Based Donut Chart & Above-the-Ring Floating Callout**:
+  - Replaced native SVG touch targets with a mathematical `Math.atan2` touch responder on the chart canvas, guaranteeing 100% accurate slice detection on all Android/iOS runtimes without SVG hit-test bugs.
+  - Relocated the floating breakdown card directly **above** the donut ring so the user's fingers never obstruct the category name, amount, or percentage.
+  - Added an SVG bent pointer line with glowing anchor dot extending down to the active slice arc.
+- **Circular Trend Arrow beside Net Worth**:
+  - Replaced the harsh directional arrows with `arrow-up-circle` / `arrow-down-circle` (size 16), creating visual consistency with the borrow/lent overview badges.
+- **Top Dashboard User Profile Pill**:
+  - Displayed clean "Welcome back" on the left of the dashboard top bar.
+  - Rendered a theme-supported profile pill on the right containing the user's Google avatar image (with fallback icon), first name (e.g. "Anand"), and chevron, opening the Profile / Settings page on tap.
 
 ### 000. Interactive Donut Chart, Refined Net Worth Details, Fluid Scrolling, & Double-Submit Protection (v1.0.15)
 - **Status**: **Implemented & Fully Verified**.
