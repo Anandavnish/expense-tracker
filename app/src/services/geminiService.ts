@@ -7,7 +7,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from './supabase';
 import { TransactionType } from '../types/database';
-import { useSettingsStore } from '../store/settingsStore';
+import { useSettingsStore, getGeminiStorageKey, LEGACY_GEMINI_API_KEY_STORAGE_KEY } from '../store/settingsStore';
 import { redactSensitiveFields } from './dataSanitizer';
 
 import { normalizeAndMatchCategory } from './smsParser';
@@ -55,7 +55,7 @@ export function normalizeSuggestedType(type?: string): TransactionType {
 }
 
 /**
- * Retrieves the Gemini API key from settingsStore, AsyncStorage, or database profile
+ * Retrieves the Gemini API key from settingsStore, user-scoped AsyncStorage, or database profile
  */
 async function resolveGeminiApiKey(): Promise<string | null> {
   // 1. Check in-memory store
@@ -64,22 +64,24 @@ async function resolveGeminiApiKey(): Promise<string | null> {
     return storeKey.trim().replace(/^["']|["']$/g, '');
   }
 
-  // 2. Check local persistent storage (offline / guest mode / cold start)
+  // 2. Remove legacy shared key if present to prevent leakage
+  AsyncStorage.removeItem(LEGACY_GEMINI_API_KEY_STORAGE_KEY).catch(() => {});
+
+  // 3. Resolve active user session
   try {
-    const localKey = await AsyncStorage.getItem('@gemini_byok_api_key');
+    const { data: sessionData } = await supabase.auth.getSession();
+    const userId = sessionData.session?.user?.id;
+    const storageKey = getGeminiStorageKey(userId);
+
+    // 4. Check user-scoped local storage
+    const localKey = await AsyncStorage.getItem(storageKey);
     if (localKey && localKey.trim()) {
       const cleaned = localKey.trim().replace(/^["']|["']$/g, '');
       useSettingsStore.setState({ geminiApiKey: cleaned, hasGeminiApiKey: true });
       return cleaned;
     }
-  } catch (err) {
-    console.warn('[geminiService] Could not resolve key from AsyncStorage:', err);
-  }
 
-  // 3. Fallback to Supabase profiles table
-  try {
-    const { data: sessionData } = await supabase.auth.getSession();
-    const userId = sessionData.session?.user?.id;
+    // 5. Fallback to Supabase profiles table for this specific user
     if (userId) {
       const { data: profile } = await supabase
         .from('profiles')
@@ -89,12 +91,12 @@ async function resolveGeminiApiKey(): Promise<string | null> {
       if (profile?.gemini_api_key && profile.gemini_api_key.trim()) {
         const key = profile.gemini_api_key.trim().replace(/^["']|["']$/g, '');
         useSettingsStore.setState({ geminiApiKey: key, hasGeminiApiKey: true });
-        await AsyncStorage.setItem('@gemini_byok_api_key', key).catch(() => {});
+        await AsyncStorage.setItem(storageKey, key).catch(() => {});
         return key;
       }
     }
   } catch (err) {
-    console.warn('[geminiService] Could not resolve key from profile:', err);
+    console.warn('[geminiService] Could not resolve key:', err);
   }
 
   return null;

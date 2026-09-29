@@ -199,6 +199,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         if (session?.user) {
           useSettingsStore.getState().fetchGeminiApiKey(session.user.id).catch(() => {});
           useMerchantRulesStore.getState().loadRules(session.user.id).catch(() => {});
+        } else {
+          useSettingsStore.getState().resetForSignOut();
+          useMerchantRulesStore.getState().resetForSignOut();
         }
       });
     } catch (err: any) {
@@ -366,6 +369,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         await useFinanceStore.getState().clearAllLocalData();
         useMerchantRulesStore.getState().resetForSignOut();
         await useSettingsStore.getState().removeGeminiApiKey(user.id);
+        useSettingsStore.getState().resetForSignOut();
         await supabase.auth.signOut();
         set({ session: null, user: null, isGuest: false });
         return { success: true };
@@ -388,6 +392,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       }
       useFinanceStore.getState().resetForSignOut();
       useMerchantRulesStore.getState().resetForSignOut();
+      useSettingsStore.getState().resetForSignOut();
     } finally {
       set({ session: null, user: null, isGuest: false, isLoading: false, error: null });
     }

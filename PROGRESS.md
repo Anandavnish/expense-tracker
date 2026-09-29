@@ -4,9 +4,9 @@
 Foundational architecture build for a high-performance cross-platform personal finance mobile app built for Android using Expo Dev Client, React Native Reanimated, React Native Paper, Zustand, and Supabase.
 
 - **GitHub Repository**: [https://github.com/Anandavnish/expense-tracker](https://github.com/Anandavnish/expense-tracker)
-- **Latest Release**: [Expense Tracker v1.0.16 (Build 16)](https://github.com/Anandavnish/expense-tracker/releases/tag/v1.0.16)
-- **Direct APK Download**: [ExpenseTracker-v1.0.16.apk](https://github.com/Anandavnish/expense-tracker/releases/download/v1.0.16/ExpenseTracker-v1.0.16.apk)
-- **Previous Release**: [Expense Tracker v1.0.15 (Build 15)](https://github.com/Anandavnish/expense-tracker/releases/tag/v1.0.15)
+- **Latest Release**: [Expense Tracker v1.0.17 (Build 17)](https://github.com/Anandavnish/expense-tracker/releases/tag/v1.0.17)
+- **Direct APK Download**: [ExpenseTracker-v1.0.17.apk](https://github.com/Anandavnish/expense-tracker/releases/download/v1.0.17/ExpenseTracker-v1.0.17.apk)
+- **Previous Release**: [Expense Tracker v1.0.16 (Build 16)](https://github.com/Anandavnish/expense-tracker/releases/tag/v1.0.16)
 
 ---
 
@@ -41,6 +41,24 @@ Foundational architecture build for a high-performance cross-platform personal f
 ---
 
 ## Architectural Confirmations & System Revisions (Sept 2026)
+
+### 00000. Multi-Account Gemini API Key Isolation & Cross-Account Leak Fix (v1.0.17)
+- **Status**: **Implemented & Fully Verified**.
+- **Leak Root Cause Identification**:
+  - *Legacy Global Key*: `settingsStore.ts` and `geminiService.ts` used a shared global key `@gemini_byok_api_key`.
+  - *Startup Preload*: `loadSettings()` read this global key unconditionally before any user was authenticated.
+  - *False Sync*: In `fetchGeminiApiKey()`, if a newly logged-in user (User B) had no API key in their Supabase profile, the store detected the device's cached key (belonging to User A) and uploaded it into User B's Supabase profile (`supabase.from('profiles').update({ gemini_api_key: localKey }).eq('id', uid)`), permanently linking User A's API key to User B's account in the cloud!
+  - *Sign-Out Retention*: `authStore.ts` `signOut()` never cleared `geminiApiKey` from `settingsStore`.
+- **Comprehensive Security & Privacy Fixes**:
+  - **User-Scoped Device Storage**: Implemented `getGeminiStorageKey(userId)` in `settingsStore.ts` (`@gemini_byok_api_key_${userId}`), ensuring local keys are strictly partitioned per authenticated user account.
+  - **Legacy Key Purge**: `loadSettings()` and `resolveGeminiApiKey()` automatically delete the legacy unpartitioned `@gemini_byok_api_key` from device storage on launch.
+  - **Sign-Out Memory Reset**: Added `resetForSignOut()` in `settingsStore.ts` and wired it into `authStore.ts` `signOut()`, `deleteAccount()`, and `onAuthStateChange(session === null)`.
+  - **Safe Profile Sync**: `fetchGeminiApiKey()` now strictly queries the active user's profile and user-scoped storage key. If a user has no key, the store state is set to `null` and never back-fills from another user's storage.
+  - **RootNavigator Scoped Fallback**: Updated background share intent handlers (`processSharedImage` and `processSharedText`) in `RootNavigator.tsx` to read solely from `getGeminiStorageKey(user.id)`.
+- **Verification & Testing**:
+  - Unified pipeline test suite (`node test_unified_pipeline.mjs`): All 10 test suites passed cleanly.
+  - TypeScript typecheck (`npx tsc --noEmit`): 0 errors.
+  - ESLint (`npm run lint`): 0 errors, 0 warnings.
 
 ### 0000. Tightened Google-First Auth, Outside Donut Callout, Circular Net Worth Trend, & User Pill Header (v1.0.16)
 - **Status**: **Implemented & Fully Verified**.

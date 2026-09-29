@@ -14,7 +14,7 @@ import { isRunningInExpoGo } from 'expo';
 import { useShareIntent } from 'expo-share-intent';
 import { useAuthStore } from '../store/authStore';
 import { useFinanceStore } from '../store/financeStore';
-import { useSettingsStore } from '../store/settingsStore';
+import { useSettingsStore, getGeminiStorageKey } from '../store/settingsStore';
 import { useMerchantRulesStore } from '../store/merchantRulesStore';
 import { AuthStack } from './AuthStack';
 import { MainTabs } from './MainTabs';
@@ -184,9 +184,9 @@ export const RootNavigator = () => {
   const processSharedImage = useCallback(
     async (uri: string) => {
       let keyAvailable = hasGeminiApiKey;
-      if (!keyAvailable) {
+      if (!keyAvailable && user?.id) {
         try {
-          const localKey = await AsyncStorage.getItem('@gemini_byok_api_key');
+          const localKey = await AsyncStorage.getItem(getGeminiStorageKey(user.id));
           if (localKey && localKey.trim()) {
             keyAvailable = true;
           }
@@ -284,7 +284,7 @@ export const RootNavigator = () => {
         }
       }
     },
-    [hasGeminiApiKey, navigateOrQueue, surfaceSharedTransaction]
+    [hasGeminiApiKey, user, navigateOrQueue, surfaceSharedTransaction]
   );
 
   const processSharedText = useCallback(
@@ -293,9 +293,9 @@ export const RootNavigator = () => {
       const { rules, recordGeminiRule } = useMerchantRulesStore.getState();
 
       let keyAvailable = hasGeminiApiKey;
-      if (!keyAvailable) {
+      if (!keyAvailable && user?.id) {
         try {
-          const localKey = await AsyncStorage.getItem('@gemini_byok_api_key');
+          const localKey = await AsyncStorage.getItem(getGeminiStorageKey(user.id));
           if (localKey && localKey.trim()) {
             keyAvailable = true;
           }
@@ -400,7 +400,7 @@ export const RootNavigator = () => {
           .catch(() => {});
       }
     },
-    [hasGeminiApiKey, surfaceSharedTransaction]
+    [hasGeminiApiKey, user, surfaceSharedTransaction]
   );
 
   // Handle incoming shared screenshot / receipt or SMS text from external apps

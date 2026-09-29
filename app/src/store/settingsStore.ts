@@ -35,7 +35,19 @@ export const ACCENT_PALETTE: AccentColor[] = [
 const THEME_MODE_STORAGE_KEY = '@finance_tracker_theme_mode';
 const THEME_STYLE_STORAGE_KEY = '@finance_tracker_theme_style';
 const SHOW_AI_OVERVIEW_STORAGE_KEY = '@finance_tracker_show_ai_overview';
+
+// Legacy global key — cleaned on startup to prevent cross-account key leaks
+export const LEGACY_GEMINI_API_KEY_STORAGE_KEY = '@gemini_byok_api_key';
 export const GEMINI_API_KEY_STORAGE_KEY = '@gemini_byok_api_key';
+
+/**
+ * Returns a user-scoped AsyncStorage key for Gemini BYOK API key.
+ * This guarantees keys are isolated strictly per authenticated user account,
+ * preventing cross-account leakage on shared or re-logged devices.
+ */
+export const getGeminiStorageKey = (userId?: string | null): string => {
+  return userId ? `@gemini_byok_api_key_${userId}` : '@gemini_byok_api_key_anon';
+};
 
 const getSystemScheme = (): 'dark' | 'light' => {
   const scheme = Appearance.getColorScheme();
@@ -122,6 +134,7 @@ interface SettingsState {
   fetchGeminiApiKey: (userId?: string) => Promise<string | null>;
   saveGeminiApiKey: (key: string, userId?: string) => Promise<{ success: boolean; error?: string }>;
   removeGeminiApiKey: (userId?: string) => Promise<{ success: boolean; error?: string }>;
+  resetForSignOut: () => void;
 }
 
 export const useSettingsStore = create<SettingsState>((set, get) => {
@@ -169,11 +182,13 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
 
     loadSettings: async () => {
       try {
-        const [savedMode, savedStyle, savedShowAi, savedGeminiKey] = await Promise.all([
+        // Clean up any legacy shared global key from older versions
+        await AsyncStorage.removeItem(LEGACY_GEMINI_API_KEY_STORAGE_KEY).catch(() => {});
+
+        const [savedMode, savedStyle, savedShowAi] = await Promise.all([
           AsyncStorage.getItem(THEME_MODE_STORAGE_KEY),
           AsyncStorage.getItem(THEME_STYLE_STORAGE_KEY),
           AsyncStorage.getItem(SHOW_AI_OVERVIEW_STORAGE_KEY),
-          AsyncStorage.getItem(GEMINI_API_KEY_STORAGE_KEY),
         ]);
 
         let mode: ThemeMode = 'dark';
@@ -202,7 +217,6 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
         );
 
         const showAi = savedShowAi !== null ? savedShowAi === 'true' : true;
-        const cleanedLocalKey = savedGeminiKey && savedGeminiKey.trim() ? savedGeminiKey.trim() : null;
 
         set({
           themeMode: mode,
@@ -211,17 +225,15 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
           isDark: effective === 'dark',
           colors: resolvedColors,
           showAiOverviewOnDashboard: showAi,
-          geminiApiKey: cleanedLocalKey,
-          hasGeminiApiKey: !!cleanedLocalKey,
+          // Gemini API key is user-scoped and loaded upon user session initialization
+          geminiApiKey: null,
+          hasGeminiApiKey: false,
           accent: {
             name: THEME_STYLES[style]?.name || 'Theme',
             hex: resolvedColors.primary,
             muted: resolvedColors.primaryContainer,
           },
         });
-
-        // Sync with Supabase profile in background
-        get().fetchGeminiApiKey().catch(() => {});
       } catch {
         // Fallback to defaults
       }
@@ -304,8 +316,17 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
       try {
         set({ isLoadingGeminiKey: true });
 
-        // 1. Check local storage first (instant access)
-        const localKey = await AsyncStorage.getItem(GEMINI_API_KEY_STORAGE_KEY);
+        // Resolve active user id
+        let uid = userId;
+        if (!uid) {
+          const { data } = await supabase.auth.getUser();
+          uid = data.user?.id;
+        }
+
+        const storageKey = getGeminiStorageKey(uid);
+
+        // 1. Check user-scoped local storage
+        const localKey = await AsyncStorage.getItem(storageKey);
         if (localKey && localKey.trim()) {
           const cleanedLocal = localKey.trim();
           set({
@@ -315,12 +336,6 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
         }
 
         // 2. Sync with Supabase profile if user is logged in
-        let uid = userId;
-        if (!uid) {
-          const { data } = await supabase.auth.getUser();
-          uid = data.user?.id;
-        }
-
         if (uid) {
           const { data, error } = await supabase
             .from('profiles')
@@ -334,7 +349,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
 
           const remoteKey = data?.gemini_api_key ? data.gemini_api_key.trim() : null;
           if (remoteKey) {
-            await AsyncStorage.setItem(GEMINI_API_KEY_STORAGE_KEY, remoteKey).catch(() => {});
+            await AsyncStorage.setItem(storageKey, remoteKey).catch(() => {});
             set({
               geminiApiKey: remoteKey,
               hasGeminiApiKey: true,
@@ -342,7 +357,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
             });
             return remoteKey;
           } else if (localKey && localKey.trim()) {
-            // Profile has no key, but device has one: sync local key to profile!
+            // Only sync local key to profile if this specific user already saved one locally
             await supabase
               .from('profiles')
               .update({
@@ -350,10 +365,17 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
                 updated_at: new Date().toISOString(),
               })
               .eq('id', uid);
+          } else {
+            // User has no key on remote and no key in their scoped storage
+            set({
+              geminiApiKey: null,
+              hasGeminiApiKey: false,
+              isLoadingGeminiKey: false,
+            });
+            return null;
           }
         }
 
-        // If local key exists, keep it
         const currentKey = get().geminiApiKey;
         set({
           isLoadingGeminiKey: false,
@@ -371,11 +393,19 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
         set({ isLoadingGeminiKey: true });
         const trimmed = key.trim();
 
-        // 1. Always save to local device storage first (instant & supports guest/offline mode)
+        let uid = userId;
+        if (!uid) {
+          const { data } = await supabase.auth.getUser();
+          uid = data.user?.id;
+        }
+
+        const storageKey = getGeminiStorageKey(uid);
+
+        // 1. Always save to user-scoped local device storage
         if (trimmed) {
-          await AsyncStorage.setItem(GEMINI_API_KEY_STORAGE_KEY, trimmed);
+          await AsyncStorage.setItem(storageKey, trimmed);
         } else {
-          await AsyncStorage.removeItem(GEMINI_API_KEY_STORAGE_KEY);
+          await AsyncStorage.removeItem(storageKey);
         }
 
         set({
@@ -383,13 +413,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
           hasGeminiApiKey: !!trimmed,
         });
 
-        // 2. If user is authenticated, sync to Supabase profile
-        let uid = userId;
-        if (!uid) {
-          const { data } = await supabase.auth.getUser();
-          uid = data.user?.id;
-        }
-
+        // 2. If user is authenticated, sync to their Supabase profile
         if (uid) {
           const { data, error } = await supabase
             .from('profiles')
@@ -428,13 +452,15 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
     removeGeminiApiKey: async (userId?: string) => {
       try {
         set({ isLoadingGeminiKey: true });
-        await AsyncStorage.removeItem(GEMINI_API_KEY_STORAGE_KEY).catch(() => {});
 
         let uid = userId;
         if (!uid) {
           const { data } = await supabase.auth.getUser();
           uid = data.user?.id;
         }
+
+        const storageKey = getGeminiStorageKey(uid);
+        await AsyncStorage.removeItem(storageKey).catch(() => {});
 
         if (uid) {
           try {
@@ -460,6 +486,14 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
         set({ isLoadingGeminiKey: false });
         return { success: false, error: err?.message || 'Failed to remove Gemini key' };
       }
+    },
+
+    resetForSignOut: () => {
+      set({
+        geminiApiKey: null,
+        hasGeminiApiKey: false,
+        isLoadingGeminiKey: false,
+      });
     },
   };
 });
