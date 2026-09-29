@@ -2,6 +2,7 @@
 // On-device OCR text recognition using expo-mlkit-ocr in the Expo managed workflow
 // Extracts text and visual bounding boxes feeding into the unified transactionParser pipeline
 
+import { isRunningInExpoGo } from 'expo';
 import { OcrBlockInput } from './transactionParser';
 
 export interface OcrResult {
@@ -14,11 +15,22 @@ export interface OcrResult {
 /**
  * Performs on-device text recognition on an image URI using expo-mlkit-ocr.
  * Returns extracted text and structured OCR blocks with bounding boxes.
- * Safely handles environments where the native module is absent.
+ * Safely handles environments where the native module is absent (e.g. Expo Go, web).
  */
 export async function extractTextFromImage(imageUri: string): Promise<OcrResult> {
+  // If running in Expo Go sandbox, native MLKit OCR is absent by design:
+  // Skip requiring to avoid yellow LogBox warnings and cleanly delegate to Tier 3 Vision
+  if (isRunningInExpoGo()) {
+    console.log('[Boundary 1: ocrService] Expo Go sandbox detected: bypassing MLKit, delegating to Tier 3 Vision');
+    return {
+      success: false,
+      text: '',
+      error: 'expo-mlkit-ocr not available in Expo Go (using Tier 3 Vision fallback)',
+    };
+  }
+
   try {
-    // Dynamically require to safely handle environments (Expo Go, test runners)
+    // Dynamically require for standalone builds / development builds
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const mlkitOcr = require('expo-mlkit-ocr');
     if (mlkitOcr && typeof mlkitOcr.recognizeText === 'function') {

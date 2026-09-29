@@ -1279,11 +1279,14 @@ export async function parseTransactionWithPipeline(
             : '';
 
         let matchedAccountId: string | undefined;
+        let accountHint: string | undefined;
         if (input.userAccounts && input.userAccounts.length > 0) {
-          matchedAccountId = matchAccountToSource(
-            `${vData.merchant_or_person || ''} ${rawTextTrimmed}`,
-            input.userAccounts
-          );
+          const bankQuery = `${vData.detected_bank_or_source || ''} ${rawTextTrimmed}`.trim();
+          matchedAccountId = matchAccountToSource(bankQuery, input.userAccounts);
+          if (matchedAccountId) {
+            const foundAcc = input.userAccounts.find((a) => a.id === matchedAccountId);
+            if (foundAcc) accountHint = foundAcc.name;
+          }
         }
 
         const tier3Result: ParsedTransactionResult = {
@@ -1299,7 +1302,9 @@ export async function parseTransactionWithPipeline(
           suggestedType: vData.suggested_type || 'expense',
           isCategoryLearned: false,
           classificationSource: 'gemini_rule',
+          accountHint,
           matchedAccountId,
+          detectedBankOrSource: vData.detected_bank_or_source || undefined,
           rawText: rawTextTrimmed,
           needsGeminiAmount: vData.amount === null,
           needsGeminiMerchant: vData.merchant_or_person === 'Unknown',

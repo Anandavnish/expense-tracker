@@ -4,9 +4,9 @@
 Foundational architecture build for a high-performance cross-platform personal finance mobile app built for Android using Expo Dev Client, React Native Reanimated, React Native Paper, Zustand, and Supabase.
 
 - **GitHub Repository**: [https://github.com/Anandavnish/expense-tracker](https://github.com/Anandavnish/expense-tracker)
-- **Latest Release**: [Expense Tracker v1.0.11 (Build 11)](https://github.com/Anandavnish/expense-tracker/releases/tag/v1.0.11)
-- **Direct APK Download**: [ExpenseTracker-v1.0.11.apk](https://github.com/Anandavnish/expense-tracker/releases/download/v1.0.11/ExpenseTracker-v1.0.11.apk)
-- **Previous Release**: [Expense Tracker v1.0.10 (Build 10)](https://github.com/Anandavnish/expense-tracker/releases/tag/v1.0.10)
+- **Latest Release**: [Expense Tracker v1.0.12 (Build 12)](https://github.com/Anandavnish/expense-tracker/releases/tag/v1.0.12)
+- **Direct APK Download**: [ExpenseTracker-v1.0.12.apk](https://github.com/Anandavnish/expense-tracker/releases/download/v1.0.12/ExpenseTracker-v1.0.12.apk)
+- **Previous Release**: [Expense Tracker v1.0.11 (Build 11)](https://github.com/Anandavnish/expense-tracker/releases/tag/v1.0.11)
 
 ---
 
@@ -972,6 +972,21 @@ Foundational architecture build for a high-performance cross-platform personal f
     - TypeScript typecheck (`npx tsc --noEmit`): 0 errors.
     - ESLint (`npm run lint`): 0 errors, 0 warnings.
     - Full unified pipeline test suite (`node test_unified_pipeline.mjs`): 10/10 test suites passed.
+
+- [x] **v1.0.12 (Build 12): Tier 3 Gemini Vision Bank Auto-Selection & Expo Go LogBox Warning Silence**:
+  - **Tier 3 Gemini Vision Bank Auto-Selection**:
+    - *Issue*: In Expo Go, where on-device MLKit OCR is unavailable, receipts seamlessly fall back to Tier 3 (Multimodal Vision). However, Tier 3 was only prompting for amount, merchant, and category, and was omitting `detected_bank_or_source`. This prevented the multi-tier bank matching engine from auto-selecting the user's money source (e.g. matching "State Bank of India" to "SBI" or "Fino Payments Bank" to "Fino").
+    - *Resolution*:
+      - Updated `ParsedReceiptData` interface in `geminiService.ts` to include `detected_bank_or_source?: string | null`.
+      - Augmented `parseReceiptWithGemini` system prompt to explicitly extract the payer's source bank, card, or account (`detected_bank_or_source`), while explicitly instructing the model to disregard the payee's recipient VPA handle (e.g., in `Paid to Gopal Sweet gopalsweet@okhdfcbank`, the payer bank is not HDFC).
+      - Updated Tier 3 resolution in `transactionParser.ts` to pass `vData.detected_bank_or_source` into `matchAccountToSource`.
+      - Preserved strict matching & zero-defaulting: when no bank is visible, `matchedAccountId` remains `undefined` (`• Select source`), ensuring no erroneous charges occur.
+  - **Expo Go LogBox Warning Suppression**:
+    - In `ocrService.ts`, added `isRunningInExpoGo()` detection. In Expo Go, native MLKit is bypassed with an informative `console.log` instead of `console.warn`, completely eliminating disruptive yellow LogBox warning popups on the device screen.
+  - **Verification & Testing**:
+    - TypeScript typecheck (`npx tsc --noEmit`): 0 errors.
+    - ESLint (`npm run lint`): 0 errors, 0 warnings.
+    - Full unified pipeline test suite (`node test_unified_pipeline.mjs`): 10/10 test suites passed, including Tier 3 Vision bank matching assertion.
 
 ---
 

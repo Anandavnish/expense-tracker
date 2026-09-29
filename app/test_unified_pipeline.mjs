@@ -879,10 +879,8 @@ async function parseTransactionWithPipeline(input, options = {}) {
 
         let matchedAccountId;
         if (input.userAccounts && input.userAccounts.length > 0) {
-          matchedAccountId = matchAccountToSource(
-            `${vData.merchant_or_person || ''} ${rawTextTrimmed}`,
-            input.userAccounts
-          );
+          const bankQuery = `${vData.detected_bank_or_source || ''} ${rawTextTrimmed}`.trim();
+          matchedAccountId = matchAccountToSource(bankQuery, input.userAccounts);
         }
 
         return {
@@ -899,6 +897,7 @@ async function parseTransactionWithPipeline(input, options = {}) {
           isCategoryLearned: false,
           classificationSource: 'gemini_rule',
           matchedAccountId,
+          detectedBankOrSource: vData.detected_bank_or_source || undefined,
           rawText: rawTextTrimmed,
           needsGeminiAmount: vData.amount === null,
           needsGeminiMerchant: vData.merchant_or_person === 'Unknown',
@@ -1553,6 +1552,7 @@ const resCascadeTier3 = await parseTransactionWithPipeline(
     rawText: '   ',
     ocrBlocks: [],
     availableCategories: mockCategories,
+    userAccounts: mockAccounts,
   },
   {
     imageUri: 'file:///mock/receipt_scenery.jpg',
@@ -1572,6 +1572,7 @@ const resCascadeTier3 = await parseTransactionWithPipeline(
           suggested_type: 'expense',
           suggested_category: 'Food',
           date_if_present: '2026-09-29',
+          detected_bank_or_source: 'State Bank of India',
         },
       };
     },
@@ -1581,11 +1582,13 @@ const resCascadeTier3 = await parseTransactionWithPipeline(
 console.log('  8C. Tier 3 Multimodal Vision Fallback:');
 console.log(`      Resolution Tier: ${resCascadeTier3.resolutionTier}`);
 console.log(`      Amount: ₹${resCascadeTier3.amount}, Merchant: "${resCascadeTier3.merchant}"`);
+console.log(`      Matched Account: ${resCascadeTier3.matchedAccountId} (via detected source bank)`);
 assert.strictEqual(resCascadeTier3.resolutionTier, 'tier3_vision_fallback');
 assert.strictEqual(tier3Invoked, true, 'Tier 3 MUST be invoked when OCR text is empty/corrupt');
 assert.strictEqual(tier2Invoked, false, 'Tier 2 should NOT be called when text is corrupt/empty');
 assert.strictEqual(resCascadeTier3.amount, 250);
 assert.strictEqual(resCascadeTier3.merchant, 'Cafe Coffee Day');
+assert.strictEqual(resCascadeTier3.matchedAccountId, 'acc-sbi-1', 'Tier 3 Vision must auto-select matched account');
 
 console.log('✔ [TEST SUITE 8 PASSED]: Tier 1, Tier 2, and Tier 3 resolution cascade verified.\n');
 

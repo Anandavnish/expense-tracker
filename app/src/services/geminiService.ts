@@ -18,6 +18,7 @@ export interface ParsedReceiptData {
   suggested_category: string;
   suggested_type: TransactionType;
   date_if_present: string | null;
+  detected_bank_or_source?: string | null;
 }
 
 export interface ParseReceiptOptions {
@@ -558,6 +559,7 @@ export async function parseReceiptWithGemini(
         suggested_category: normalizedCat,
         suggested_type: normalizeSuggestedType(edgeData.suggested_type),
         date_if_present: typeof edgeData.date_if_present === 'string' ? edgeData.date_if_present.trim() : null,
+        detected_bank_or_source: typeof edgeData.detected_bank_or_source === 'string' ? edgeData.detected_bank_or_source.trim() : null,
       };
       return { success: true, data: parsed };
     }
@@ -582,14 +584,16 @@ Return a STRICT JSON object with these EXACT keys:
   "merchant_or_person": <string, name of payee/merchant/person or "Unknown">,
   "suggested_category": <string, choose or match the best category from: ${userCats.join(', ')}. If it is a food/sweet/restaurant/grocery merchant like Gopal Sweet, Zomato, Swiggy, Blinkit, choose "Food">,
   "suggested_type": <string, one of: "expense", "income", "lent", "borrowed">,
-  "date_if_present": <string in "YYYY-MM-DD" format, or null if no valid date found in the receipt>
+  "date_if_present": <string in "YYYY-MM-DD" format, or null if no valid date found in the receipt>,
+  "detected_bank_or_source": <string, name of the payer's source bank, card, or account (e.g. "State Bank of India", "SBI", "HDFC Bank", "Fino Payments Bank", "Slice", "Paytm Bank", or account digits like "0186"), or null if not mentioned. NOTE: Extract ONLY the payer's source of funds, NOT the payee's recipient bank or VPA handle>
 }
 
 Rules:
 1. "amount": Extract the primary transaction amount (e.g. ₹450 -> 450). Never include currency symbols.
 2. "merchant_or_person": The party paid to or received from (e.g., "Gopal Sweet", "Swiggy", "Rahul Sharma", "Uber", "Amazon").
 3. "suggested_type": If paid/debited -> "expense". If received/credited -> "income". If lent to someone -> "lent". If borrowed -> "borrowed". Default to "expense" for typical UPI/card payments.
-4. Output STRICT JSON only. Do NOT include markdown code blocks or extra prose.
+4. "detected_bank_or_source": The payer's source bank or card from "From:", "Paid using", "Debited from", or bank logos. Do NOT use the recipient's bank handle (e.g. in "Paid to Gopal Sweet gopalsweet@okhdfcbank", the payer bank is NOT HDFC).
+5. Output STRICT JSON only. Do NOT include markdown code blocks or extra prose.
 `;
     if (rawText) {
       prompt += `\n\nRaw Text:\n"""\n${rawText}\n"""`;
@@ -620,6 +624,7 @@ Rules:
       suggested_category: normalizedDirectCat,
       suggested_type: normalizeSuggestedType(raw.suggested_type),
       date_if_present: typeof raw.date_if_present === 'string' ? raw.date_if_present.trim() : null,
+      detected_bank_or_source: typeof raw.detected_bank_or_source === 'string' ? raw.detected_bank_or_source.trim() : null,
     };
 
     if (parsed.amount === null && (parsed.merchant_or_person === 'Unknown' || !parsed.merchant_or_person)) {
