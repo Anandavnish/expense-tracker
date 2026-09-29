@@ -23,8 +23,11 @@ import { AccountDetailScreen } from '../screens/main/AccountDetailScreen';
 import { TransactionDetailScreen } from '../screens/main/TransactionDetailScreen';
 import { ProfileScreen } from '../screens/main/ProfileScreen';
 import { SettingsScreen } from '../screens/main/SettingsScreen';
-import { parseReceiptWithGemini } from '../services/geminiService';
-import { parseBankingSms } from '../services/smsParser';
+import { extractTextFromImage } from '../services/ocrService';
+import {
+  parseTransaction,
+  parseTransactionWithPipeline,
+} from '../services/transactionParser';
 import {
   checkForAppUpdate,
   AppReleaseInfo,
@@ -125,59 +128,62 @@ export const RootNavigator = () => {
         }
       }
 
-      if (!keyAvailable) {
-        // Immediately navigate to AddTransaction on the go, with informative note
-        navigateOrQueue('AddTransaction', {
-          imageUri: uri,
-          prefillSource: 'screenshot',
-          scanError: 'Set up Gemini key in Settings for AI screenshot reading, or enter details manually.',
-        });
-        return;
-      }
-
       // Immediately navigate with active analyzing state so user sees screen open on the go!
       navigateOrQueue('AddTransaction', {
         imageUri: uri,
         prefillSource: 'screenshot',
         isAnalyzing: true,
-        scanMessage: 'Analyzing screenshot with Gemini AI...',
+        scanMessage: 'Reading receipt with on-device OCR...',
       });
 
       try {
-        const { categories } = useFinanceStore.getState();
-        const geminiRes = await parseReceiptWithGemini({ imageUri: uri, availableCategories: categories });
-        if (geminiRes.success && geminiRes.data) {
-          const parsed = geminiRes.data;
-          if (parsed.merchant_or_person && parsed.merchant_or_person !== 'Unknown') {
-            useMerchantRulesStore.getState().recordGeminiRule(
-              parsed.merchant_or_person,
-              parsed.suggested_category,
-              parsed.suggested_type
-            );
+        const { accounts, categories } = useFinanceStore.getState();
+        const { rules, recordGeminiRule } = useMerchantRulesStore.getState();
+
+        // 1. Run on-device OCR via expo-mlkit-ocr
+        const ocrRes = await extractTextFromImage(uri);
+
+        // 2. Run shared extraction & rule classification pipeline
+        const parsed = await parseTransactionWithPipeline(
+          {
+            rawText: ocrRes.text,
+            ocrBlocks: ocrRes.blocks,
+            userAccounts: accounts,
+            availableCategories: categories,
+            learnedRules: rules,
+          },
+          {
+            imageUri: uri,
+            enableGeminiEscalation: keyAvailable,
+            onTeachRule: (m, c, t) => recordGeminiRule(m, c, t),
           }
-          navigateOrQueue('AddTransaction', {
-            imageUri: uri,
-            prefillAmount: parsed.amount,
-            prefillNote: parsed.merchant_or_person,
-            parsedMerchant: parsed.merchant_or_person !== 'Unknown' ? parsed.merchant_or_person : undefined,
-            prefillPersonName:
-              parsed.suggested_type === 'borrow_given' || parsed.suggested_type === 'borrow_taken'
-                ? parsed.merchant_or_person
-                : undefined,
-            prefillType: parsed.suggested_type,
-            prefillCategory: parsed.suggested_category,
-            prefillDate: parsed.date_if_present || undefined,
-            prefillSource: 'screenshot',
-            isAnalyzing: false,
-            scanMessage: 'Screenshot parsed from share! Review details and save.',
-          });
-        } else {
-          navigateOrQueue('AddTransaction', {
-            imageUri: uri,
-            isAnalyzing: false,
-            scanError: geminiRes.message || "Couldn't read that screenshot — enter it manually",
-          });
-        }
+        );
+
+        const parsedMerchant = parsed.merchant !== 'Unknown' ? parsed.merchant : undefined;
+
+        navigateOrQueue('AddTransaction', {
+          imageUri: uri,
+          prefillAmount: parsed.amount !== null ? parsed.amount : undefined,
+          prefillNote: parsedMerchant || undefined,
+          parsedMerchant,
+          prefillPersonName:
+            parsed.suggestedType === 'borrow_given' || parsed.suggestedType === 'borrow_taken'
+              ? parsed.merchant !== 'Unknown'
+                ? parsed.merchant
+                : undefined
+              : undefined,
+          prefillType: parsed.suggestedType,
+          prefillCategory: parsed.suggestedCategory,
+          prefillDate: parsed.date || undefined,
+          accountId: parsed.matchedAccountId,
+          prefillSource: 'screenshot',
+          isAnalyzing: false,
+          scanMessage: parsed.isCategoryLearned
+            ? `Matched learned rule: ${parsed.merchant} ➔ ${parsed.suggestedCategory}`
+            : parsed.amount !== null
+            ? `Extracted ₹${parsed.amount} for ${parsed.merchant} (${parsed.suggestedCategory})`
+            : 'Screenshot parsed! Review details and save.',
+        });
       } catch {
         navigateOrQueue('AddTransaction', {
           imageUri: uri,
@@ -192,38 +198,8 @@ export const RootNavigator = () => {
   const processSharedText = useCallback(
     async (rawText: string) => {
       const { accounts, categories } = useFinanceStore.getState();
-      const { rules } = useMerchantRulesStore.getState();
+      const { rules, recordGeminiRule } = useMerchantRulesStore.getState();
 
-      // 1. Instant offline banking & UPI parsing (0ms, exact learned rule matching first)
-      const parsedSms = parseBankingSms(rawText, accounts, categories, rules);
-      const parsedMerchant = parsedSms.merchant_or_person !== 'Unknown' ? parsedSms.merchant_or_person : undefined;
-
-      const navParams: any = {
-        prefillAmount: parsedSms.amount !== null ? parsedSms.amount : undefined,
-        prefillNote:
-          parsedSms.merchant_or_person !== 'Unknown'
-            ? parsedSms.merchant_or_person
-            : rawText.length > 80
-            ? rawText.substring(0, 77) + '...'
-            : rawText,
-        parsedMerchant,
-        prefillType: parsedSms.suggested_type,
-        prefillCategory: parsedSms.suggested_category,
-        prefillDate: parsedSms.date_if_present || undefined,
-        accountId: parsedSms.matched_account_id,
-        prefillSource: 'sms',
-        scanMessage: parsedSms.is_learned
-          ? `Matched learned rule: ${parsedSms.merchant_or_person} ➔ ${parsedSms.suggested_category}`
-          : parsedSms.amount
-          ? `Extracted ₹${parsedSms.amount} for ${parsedSms.merchant_or_person} (${parsedSms.suggested_category})`
-          : 'Message received! Review details and save.',
-      };
-
-      // Immediately open AddTransaction screen on the go!
-      navigateOrQueue('AddTransaction', navParams);
-
-      // 2. If confidence is NOT high (unfamiliar merchant or ambiguous format) and Gemini key is configured,
-      // refine in background without blocking the user
       let keyAvailable = hasGeminiApiKey;
       if (!keyAvailable) {
         try {
@@ -236,33 +212,68 @@ export const RootNavigator = () => {
         }
       }
 
-      if (keyAvailable && parsedSms.confidence !== 'high') {
-        parseReceiptWithGemini({ text: rawText, availableCategories: categories })
-          .then((geminiRes) => {
-            if (geminiRes.success && geminiRes.data && navigationRef.isReady()) {
-              const geminiData = geminiRes.data;
+      // 1. Instant deterministic parsing & exact learned rule matching first (0ms, offline)
+      const parsed = parseTransaction({
+        rawText,
+        userAccounts: accounts,
+        availableCategories: categories,
+        learnedRules: rules,
+      });
 
-              // Save learned rule from Gemini (precedence rule in store prevents overwriting user_manual)
-              if (geminiData.merchant_or_person && geminiData.merchant_or_person !== 'Unknown') {
-                useMerchantRulesStore.getState().recordGeminiRule(
-                  geminiData.merchant_or_person,
-                  geminiData.suggested_category,
-                  geminiData.suggested_type
-                );
-              }
+      const parsedMerchant = parsed.merchant !== 'Unknown' ? parsed.merchant : undefined;
 
+      const navParams: any = {
+        prefillAmount: parsed.amount !== null ? parsed.amount : undefined,
+        prefillNote:
+          parsedMerchant || (rawText.length > 80 ? rawText.substring(0, 77) + '...' : rawText),
+        parsedMerchant,
+        prefillType: parsed.suggestedType,
+        prefillCategory: parsed.suggestedCategory,
+        prefillDate: parsed.date || undefined,
+        accountId: parsed.matchedAccountId,
+        prefillSource: 'sms',
+        scanMessage: parsed.isCategoryLearned
+          ? `Matched learned rule: ${parsed.merchant} ➔ ${parsed.suggestedCategory}`
+          : parsed.amount !== null
+          ? `Extracted ₹${parsed.amount} for ${parsed.merchant} (${parsed.suggestedCategory})`
+          : 'Message received! Review details and save.',
+      };
+
+      // Immediately open AddTransaction screen on the go!
+      navigateOrQueue('AddTransaction', navParams);
+
+      // 2. If Gemini escalation is needed (unrecognized merchant or low confidence amount),
+      // refine in background without blocking the user
+      if (keyAvailable && (parsed.needsGeminiAmount || parsed.needsGeminiMerchant)) {
+        parseTransactionWithPipeline(
+          {
+            rawText,
+            userAccounts: accounts,
+            availableCategories: categories,
+            learnedRules: rules,
+          },
+          {
+            enableGeminiEscalation: true,
+            onTeachRule: (m, c, t) => recordGeminiRule(m, c, t),
+          }
+        )
+          .then((refined) => {
+            if (navigationRef.isReady()) {
+              const refinedMerchant = refined.merchant !== 'Unknown' ? refined.merchant : undefined;
               navigationRef.dispatch(
                 CommonActions.navigate({
                   name: 'AddTransaction',
                   params: {
-                    prefillAmount: geminiData.amount !== null ? geminiData.amount : undefined,
-                    prefillNote: geminiData.merchant_or_person,
-                    parsedMerchant: geminiData.merchant_or_person,
-                    prefillType: geminiData.suggested_type,
-                    prefillCategory: geminiData.suggested_category,
-                    prefillDate: geminiData.date_if_present || undefined,
+                    prefillAmount: refined.amount !== null ? refined.amount : undefined,
+                    prefillNote: refinedMerchant,
+                    parsedMerchant: refinedMerchant,
+                    prefillType: refined.suggestedType,
+                    prefillCategory: refined.suggestedCategory,
+                    prefillDate: refined.date || undefined,
                     prefillSource: 'sms',
-                    scanMessage: `Gemini AI identified: ${geminiData.merchant_or_person} (${geminiData.suggested_category})`,
+                    scanMessage: refined.isCategoryLearned
+                      ? `Matched learned rule: ${refined.merchant} ➔ ${refined.suggestedCategory}`
+                      : `Gemini AI identified: ${refined.merchant} (${refined.suggestedCategory})`,
                   },
                 })
               );

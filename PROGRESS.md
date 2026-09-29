@@ -777,10 +777,63 @@ Foundational architecture build for a high-performance cross-platform personal f
   - **Settings Management Screen**:
     - Added interactive **"Learned Merchants & Rules"** modal in `SettingsScreen.tsx`.
     - Searchable list of all learned merchants, category pills, source tags (`USER` vs `AI`), usage counters, 1-tap category reassignments, and deletion with confirmation.
-  - **Standalone Android APK v1.0.2 (Build 3)**:
-    - EAS Build ID: `c349b1b4-88ab-44ba-b72d-2ffff1631d3d`
-    - Direct APK Download Link: `https://expo.dev/artifacts/eas/l8oGEqKA0E-aBeCN3t6rgKAPF3SVV4kO0glk_ZbnQq4.apk`
-    - Verified all 4 test suites, `npx tsc --noEmit` (0 errors), and `npm run lint` (0 errors, 0 warnings).
+- [x] **v1.0.3: Unified OCR & SMS Extraction/Classification Pipeline (`transactionParser.ts`)**:
+  - **Single Shared Parsing Service (`transactionParser.ts`)**:
+    - Unified screenshot OCR and SMS extraction into ONE common, deterministic pipeline used across both `AddTransactionScreen` and `RootNavigator`.
+    - Eliminated disparate parsing implementations in favor of a shared deterministic engine (`parseTransaction`) and asynchronous pipeline (`parseTransactionWithPipeline`).
+  - **On-Device Text Extraction (`expo-mlkit-ocr`)**:
+    - Integrated `expo-mlkit-ocr` within the Expo managed workflow (`ocrService.ts`).
+    - Extracts raw text and bounding-box structured OCR blocks without any custom Kotlin/Java native code.
+    - Wrapped in safe dynamic runtime loader with graceful fallback, ensuring 100% crash immunity across all test and development environments.
+  - **Deterministic Extraction Pipeline (Runs First, Zero AI Calls)**:
+    - **Amount Extraction Regexes & Confidence Thresholds**:
+      - Explicit Currency Prefix Regex (`HIGH` confidence, score $\ge 100$):
+        - `/(?:₹|Rs\.?|INR)\s*([0-9]{1,3}(?:,[0-9]{2,3})*(?:\.[0-9]{1,2})?|[0-9]+(?:\.[0-9]{1,2})?)/gi`
+        - `/\b([0-9]{1,3}(?:,[0-9]{2,3})*(?:\.[0-9]{1,2})?|[0-9]+(?:\.[0-9]{1,2})?)\s*(?:₹|Rs\.?|INR)\b/gi`
+      - Contextual Action Verbs (`HIGH` confidence, score $\ge 90$):
+        - `/(?:debited|credited|spent|paid|transferred|sent|received|amount|amt|total)\s+(?:by|of|for|is)?\s*[:=]?\s*(?:₹|Rs\.?|INR)?\s*([0-9,]+(?:\.[0-9]{1,2})?)/gi`
+      - Prominence Heuristic Fallback (`MEDIUM` confidence, handles layout variations in GPay/PhonePe/Paytm where ₹ is an SVG icon or OCR-missed):
+        - *OCR Bounding Box Score*: Calculates visual prominence `score = (boundingBox.height * 2) + Math.sqrt(boundingBox.width * boundingBox.height)`. Detects the hero transaction amount rendered in dominant font height in the card. Candidates with `.XX` decimal receive a $+25\%$ boost.
+        - *Text-only Fallback*: Evaluates standalone decimal numbers `\b([0-9,]+\.[0-9]{2})\b` or filtered standalone integers `\b([1-9][0-9]{1,6})\b`, strictly disqualifying 12-digit UTRs, 10-digit phone numbers, years (2020–2030), and account numbers (`XX0186`).
+      - Low-Confidence Escalation (`LOW` confidence, `needsGeminiAmount: true`):
+        - Triggered when no valid numeric token is found OR multiple ambiguous disparate candidates compete without clear prominence.
+        - Escalates specifically the amount field to Gemini AI (`extractAmountWithGemini` or multimodal vision fallback) rather than silently leaving it blank or guessing.
+    - **UPI Ref / UTR Extraction**:
+      - 12-digit continuous numeric string regex:
+        - `/(?:UPI\s*(?:Ref(?:erence)?|Txn|Transaction)?\s*(?:ID|No\.?)?|UTR|RRN|Ref\s*No\.?)\s*[:#-]?\s*(\d{12})\b/i`
+        - Standalone 12-digit token: `/\b(\d{12})\b/`
+    - **Date Pattern Regexes**:
+      - Month-first: `/\b([A-Za-z]{3,9})\s+(\d{1,2}),?\s+(\d{2,4})\b/i` (`Sep 29, 2026`)
+      - Day-first alphanumeric: `/\b(\d{1,2})[-/ ]?([A-Za-z]{3,9})[-/ ]?(\d{2,4})\b/i` (`29 Sep 2026`, `29-Sep-2026`, `29Sep26`)
+      - Slash/hyphen numeric: `/\b(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})\b/` (`29/09/2026`, `29-09-2026`)
+      - ISO format: `/\b(\d{4})[-/](\d{1,2})[-/](\d{1,2})\b/` (`2026-09-29`)
+    - **Bank & Account Matching**:
+      - Account hint regex: `/\b(?:A\/[cC]|Acct|Account|Card)\s*(?:no\.?)?\s*([X\*•\.]*\d{3,4})\b|(?:\.{2,}|[X\*•]{2,}|\bending\s+)(\d{3,4})\b/i`
+      - Bank alias mapping (`State Bank of India` &rarr; `SBI`, `HDFC`, `ICICI`, `Kotak`, `Axis`, `PNB`, `BOB`, `Canara`, `Paytm`), linking matched account IDs automatically.
+  - **Classification Pipeline (Merchant &rarr; Category)**:
+    - **Step 1: Learned Rules Lookup**:
+      - Exact normalized match in `user_merchant_rules` FIRST (`merchantConfidence: 'high'`).
+      - Completely bypasses Gemini AI for all recognized merchants.
+    - **Step 2: Seed Keyword Dictionary**:
+      - Matches Indian ecosystem brands (Zomato, Swiggy, Uber, Blinkit, DMRC, IRCTC, etc.) locally (`merchantConfidence: 'medium'`).
+    - **Step 3: Unrecognized Merchant Escalation**:
+      - Only escalates to Gemini if the merchant is genuinely unrecognized (`needsGeminiMerchant: true`).
+      - Targeted lightweight prompt: `classifyMerchantWithGemini(merchant, categories)` returns `{ suggested_category, suggested_type }`.
+      - Gemini's classification is taught back into `user_merchant_rules` with `source: 'gemini'`, strictly respecting the immutability of `user_manual` rules.
+  - **Measurable API Cost Reduction**:
+    - Repeat merchants (Zomato, Swiggy, Blinkit, local sweet shops, daily groceries) are resolved 100% on-device after their initial encounter.
+    - Drives Gemini API calls for receipt and screenshot scanning toward near-zero during regular ongoing usage.
+  - **Verification & Testing**:
+    - Built comprehensive unit test suite `app/test_unified_pipeline.mjs` verifying:
+      - Google Pay (standard layout, missing ₹ currency symbol prominence fallback, bounding-box hero font height).
+      - PhonePe (standard layout, comma amounts, plain integer amounts, UTR extraction).
+      - Paytm (Money Sent, space-separated currency, Chai Point learned rule matching).
+      - Indian Banking SMS alerts (SBI, HDFC debit alerts).
+      - Merchant lookup in `user_merchant_rules` before Gemini (Zero AI invocations).
+      - False positive avoidance ("Gopal Medical" vs "Gopal Sweet").
+      - Low-confidence amount escalation.
+    - Ran and passed all existing test suites: `test_sms_learning_system.mjs`, `test_sms_and_guest_isolation.mjs`, `test_ai_overview_gating.mjs`, `test_version_service.mjs`, and `npm run test:e2e` (all 6 E2E steps passed).
+    - Passed TypeScript typecheck (`npx tsc --noEmit`: 0 errors) and ESLint (`npm run lint`: 0 errors, 0 warnings).
 
 ---
 

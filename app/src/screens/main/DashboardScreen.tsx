@@ -564,6 +564,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
       // Construct compact summary with strict omission of budget variance if no budget exists
       const compactSummary: Record<string, any> = {
         month: formattedMonthLabel,
+        currency: 'INR (₹)',
+        currencySymbol: '₹',
         isHistorical,
         periodStatus: isHistorical
           ? `Historical closed and finalized period for ${formattedMonthLabel}`

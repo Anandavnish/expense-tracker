@@ -642,9 +642,162 @@ Rules:
   }
 }
 
+/**
+ * Classifies an unrecognized merchant or payee into an existing category using Gemini AI.
+ * Results from this function are taught back into user_merchant_rules.
+ */
+export async function classifyMerchantWithGemini(
+  merchantName: string,
+  availableCategories: string[] = []
+): Promise<GeminiResponse<{ category: string; type: TransactionType }>> {
+  try {
+    const apiKey = await resolveGeminiApiKey();
+    if (!apiKey) {
+      return {
+        success: false,
+        error: 'MISSING_KEY',
+        message: 'Set up your AI key in Settings to use this.',
+      };
+    }
+
+    const cats =
+      availableCategories.length > 0
+        ? availableCategories
+        : [
+            'Food',
+            'Travel',
+            'Hostel/Rent',
+            'Recharge/Data',
+            'Subscriptions',
+            'Books/Stationery',
+            'Shopping',
+            'Entertainment',
+            'Other',
+          ];
+
+    const prompt = `
+You are an expert financial classification assistant.
+Given this Indian merchant or person name: "${merchantName}"
+Classify them into EXACTLY ONE category from this allowed list:
+${cats.join(', ')}
+
+Also determine if this is typically an expense, income, lent money (borrow_given), or borrowed money (borrow_taken).
+
+Return a STRICT JSON object:
+{
+  "suggested_category": <one of: ${cats.map((c) => `"${c}"`).join(', ')}>,
+  "suggested_type": "expense" | "income" | "borrow_given" | "borrow_taken"
+}
+`;
+
+    const res = await callGeminiDirect(apiKey, prompt, undefined, true);
+    if (res.success && res.data) {
+      const normalizedCat = normalizeAndMatchCategory(res.data.suggested_category, cats).category;
+      const normalizedType = normalizeSuggestedType(res.data.suggested_type);
+      return {
+        success: true,
+        data: {
+          category: normalizedCat,
+          type: normalizedType,
+        },
+      };
+    }
+
+    return {
+      success: false,
+      error: res.error || 'GENERIC_ERROR',
+      message: res.message || 'Could not classify merchant.',
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: 'GENERIC_ERROR',
+      message: err?.message || 'Error communicating with Gemini.',
+    };
+  }
+}
+
+/**
+ * Targeted amount extraction fallback using Gemini AI when deterministic OCR extraction has low confidence
+ */
+export async function extractAmountWithGemini(input: {
+  text?: string;
+  base64?: string;
+  mimeType?: string;
+  imageUri?: string;
+}): Promise<GeminiResponse<number>> {
+  try {
+    const apiKey = await resolveGeminiApiKey();
+    if (!apiKey) {
+      return {
+        success: false,
+        error: 'MISSING_KEY',
+        message: 'Set up your AI key in Settings to use this.',
+      };
+    }
+
+    let base64Data = input.base64;
+    const mimeType = input.mimeType || 'image/jpeg';
+    if (!base64Data && input.imageUri) {
+      try {
+        base64Data = await FileSystem.readAsStringAsync(input.imageUri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+      } catch (e) {
+        console.warn('[geminiService] Failed reading image for amount extraction:', e);
+      }
+    }
+
+    const prompt = `
+You are an expert financial assistant.
+Extract ONLY the primary transaction amount (in Indian Rupees / INR) from this payment screenshot, receipt, or text.
+Ignore reference numbers (like 12-digit UTR), account numbers (like last 4 digits), dates, phone numbers, or balances.
+${input.text ? `\nText:\n"""\n${input.text}\n"""` : ''}
+
+Return a STRICT JSON object:
+{
+  "amount": <number float/int or null if not found>
+}
+`;
+
+    const inlineData = base64Data
+      ? {
+          mimeType,
+          data: base64Data.replace(/^data:image\/[a-zA-Z]+;base64,/, ''),
+        }
+      : undefined;
+
+    const res = await callGeminiDirect(apiKey, prompt, inlineData, true);
+    if (res.success && res.data && typeof res.data.amount === 'number' && !isNaN(res.data.amount)) {
+      return {
+        success: true,
+        data: Math.abs(res.data.amount),
+      };
+    }
+
+    return {
+      success: false,
+      error: res.error || 'GENERIC_ERROR',
+      message: res.message || 'Could not determine amount with Gemini.',
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: 'GENERIC_ERROR',
+      message: err?.message || 'Error communicating with Gemini.',
+    };
+  }
+}
+
+
 export const SPENDING_OVERVIEW_SYSTEM_PROMPT = `You are a spending-pattern observer for a personal finance app, not a financial advisor. You will be given aggregated JSON data (totals, category breakdowns, percentages — never raw transaction lists).
 
 STRICT RULES:
+- CURRENCY: All transactions and amounts are in Indian Rupees (INR). ALWAYS format currency with the Indian Rupee symbol "₹" (e.g. ₹22,211, ₹2,929). NEVER use the dollar sign "$" or "USD".
+- FINANCIAL LOGIC & ACCURACY:
+  * When totalIncome > totalExpense: Income exceeded expenses, resulting in positive net savings (e.g. "With total income of ₹25,140 surpassing expenses of ₹22,211, you achieved net savings of ₹2,929"). NEVER claim that expenses "outpaced" income when savings are positive!
+  * When totalExpense > totalIncome: Expenses exceeded income, resulting in a deficit (e.g. "Total expenses of ₹25,000 outpaced income of ₹20,000, creating a deficit of ₹5,000").
+  * Ensure mathematical consistency and never generate self-contradictory claims.
 - Every claim must be directly derivable from the JSON provided. Never invent a number, merchant, date, or month-over-month comparison that isn't explicitly present in the input.
 - Never recommend specific financial products, investments, loans, insurance, or debt actions. You observe spending behavior only — never prescribe financial decisions.
 - If this period is marked as a historical/closed period, use past tense and frame as a finalized retrospective summary, not in-progress pace advice.
@@ -656,10 +809,11 @@ STRICT RULES:
   3. (Optional) Provide one concrete behavioral observation or relevant takeaway based strictly on these numbers.`;
 
 /**
- * Enforces the ~120-word cap on AI overview output
+ * Enforces the ~120-word cap on AI overview output and sanitizes currency symbols
  */
 export function cleanAndCapOverviewText(rawText: string, maxWords: number = 120): string {
-  const trimmed = rawText.trim();
+  // Defensive guardrail: sanitize any rogue dollar signs or USD labels to Indian Rupees (₹)
+  let trimmed = rawText.trim().replace(/\$/g, '₹').replace(/\bUSD\b/g, 'INR');
   const words = trimmed.split(/\s+/).filter(Boolean);
   if (words.length <= maxWords) {
     return trimmed;

@@ -8,7 +8,6 @@ import {
   Platform,
   Modal,
   ActivityIndicator,
-  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -23,8 +22,8 @@ import { TactileButton } from '../../components/TactileButton';
 import { KeyboardAwareScrollView } from '../../components/KeyboardAwareScrollView';
 import { BankLogo } from '../../components/BankLogo';
 import { TransactionType, TransactionSource } from '../../types/database';
-import { parseReceiptWithGemini } from '../../services/geminiService';
-import { normalizeAndMatchCategory } from '../../services/smsParser';
+import { extractTextFromImage } from '../../services/ocrService';
+import { parseTransactionWithPipeline, normalizeAndMatchCategory } from '../../services/transactionParser';
 import { useMerchantRulesStore } from '../../store/merchantRulesStore';
 
 interface AddTransactionScreenProps {
@@ -223,24 +222,8 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
   }
 
   const handlePickAndScanImage = async () => {
-    // 1. Check if Gemini API key is configured
-    if (!hasGeminiApiKey) {
-      Alert.alert(
-        'Gemini Key Required',
-        'Set up your free AI key in Settings to unlock screenshot scanning and automatic receipt parsing.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Go to Settings',
-            onPress: () => navigation.navigate('MainTabs', { screen: 'Settings' }),
-          },
-        ]
-      );
-      return;
-    }
-
     try {
-      // 2. Open image picker from device gallery
+      // 1. Open image picker from device gallery
       const pickRes = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
         allowsEditing: false,
@@ -256,87 +239,104 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
       const imageUri = asset.uri;
       const base64 = asset.base64;
       setIsScanning(true);
-      setScanToast({ type: 'info', message: 'Analyzing receipt with Gemini AI...' });
+      setScanToast({ type: 'info', message: 'Reading receipt with on-device OCR...' });
 
-      // Parse receipt using Gemini Vision
-      const geminiRes = await parseReceiptWithGemini({
-        imageUri,
-        base64: base64 || undefined,
-        mimeType: asset.mimeType || undefined,
-      });
+      // 2. Perform on-device text & bounding box extraction via expo-mlkit-ocr
+      const ocrRes = await extractTextFromImage(imageUri);
+
+      // 3. Run shared transactionParser pipeline (deterministic extraction first, rules lookup, selective Gemini escalation)
+      const { rules, recordGeminiRule } = useMerchantRulesStore.getState();
+      const parsed = await parseTransactionWithPipeline(
+        {
+          rawText: ocrRes.text,
+          ocrBlocks: ocrRes.blocks,
+          userAccounts: accounts,
+          availableCategories: categories,
+          learnedRules: rules,
+        },
+        {
+          imageUri,
+          base64: base64 || undefined,
+          mimeType: asset.mimeType || undefined,
+          enableGeminiEscalation: hasGeminiApiKey,
+          onTeachRule: (m, c, t) => recordGeminiRule(m, c, t),
+        }
+      );
 
       setIsScanning(false);
 
-      if (!geminiRes.success || !geminiRes.data) {
-        if (geminiRes.error === 'MISSING_KEY') {
-          Alert.alert(
-            'Gemini Key Required',
-            'Set up your AI key in Settings to use this feature.',
-            [
-              { text: 'Cancel', style: 'cancel' },
-              { text: 'Go to Settings', onPress: () => navigation.navigate('MainTabs', { screen: 'Settings' }) },
-            ]
-          );
-        } else if (geminiRes.error === 'INVALID_KEY') {
-          Alert.alert(
-            'Invalid API Key',
-            geminiRes.message || 'Please check your Gemini key in Settings.',
-            [
-              { text: 'Cancel', style: 'cancel' },
-              { text: 'Settings', onPress: () => navigation.navigate('MainTabs', { screen: 'Settings' }) },
-            ]
-          );
-        } else if (geminiRes.error === 'RATE_LIMIT') {
-          setScanToast({
-            type: 'error',
-            message: 'Gemini rate limit exceeded. Please wait a minute and try again.',
-          });
-        } else {
-          setScanToast({
-            type: 'error',
-            message: geminiRes.message || "Couldn't read that screenshot — enter it manually",
-          });
-        }
+      if (parsed.amount === null && (parsed.merchant === 'Unknown' || !parsed.merchant)) {
+        setScanToast({
+          type: 'error',
+          message: "Couldn't read financial details from that screenshot — enter it manually",
+        });
         return;
       }
 
-      // 5. Pre-fill form values for user review
-      const parsed = geminiRes.data;
-      if (parsed.amount) {
+      // 4. Pre-fill form values for user review
+      if (parsed.amount !== null && !amountTouched) {
         setAmount(String(parsed.amount));
       }
-      if (parsed.suggested_type) {
-        setType(parsed.suggested_type);
-        if (parsed.suggested_type === 'borrow_given' || parsed.suggested_type === 'borrow_taken') {
-          setPersonName(parsed.merchant_or_person || '');
+      if (parsed.suggestedType && !typeTouched) {
+        setType(parsed.suggestedType);
+        if (parsed.suggestedType === 'borrow_given' || parsed.suggestedType === 'borrow_taken') {
+          setPersonName(parsed.merchant !== 'Unknown' ? parsed.merchant : '');
         }
       }
-      if (parsed.merchant_or_person && parsed.merchant_or_person !== 'Unknown') {
-        setNote(parsed.merchant_or_person);
+      if (parsed.merchant && parsed.merchant !== 'Unknown') {
+        if (!noteTouched) {
+          setNote(parsed.merchant);
+        }
+        setParsedMerchant(parsed.merchant);
       }
-      if (parsed.suggested_category) {
-        // Check if category exists or set directly
-        setCategory(parsed.suggested_category);
+      if (parsed.suggestedCategory && !categoryTouched) {
+        const match = normalizeAndMatchCategory(parsed.suggestedCategory, categories);
+        if (match.isNew) {
+          useFinanceStore.getState().addCategory(match.category);
+        }
+        setCategory(match.category);
       }
-      if (parsed.date_if_present) {
-        const [yStr, mStr] = parsed.date_if_present.split('-');
+      if (parsed.date) {
+        const [yStr, mStr] = parsed.date.split('-');
         if (
           parseInt(yStr, 10) === today.getFullYear() &&
           parseInt(mStr, 10) === today.getMonth() + 1
         ) {
-          setDate(parsed.date_if_present);
+          setDate(parsed.date);
         }
       }
+      if (parsed.matchedAccountId) {
+        setSelectedAccountId(parsed.matchedAccountId);
+      }
       setSource('screenshot');
-      setScanToast({
-        type: 'success',
-        message: 'Screenshot parsed! Review details and tap Save.',
-      });
-    } catch {
+
+      // 5. User-facing feedback toast
+      if (parsed.isCategoryLearned) {
+        setScanToast({
+          type: 'success',
+          message: `Matched learned rule: ${parsed.merchant} ➔ ${parsed.suggestedCategory}`,
+        });
+      } else if (parsed.amount !== null && parsed.merchant !== 'Unknown') {
+        setScanToast({
+          type: 'success',
+          message: `Extracted ₹${parsed.amount} for ${parsed.merchant} (${parsed.suggestedCategory})`,
+        });
+      } else if (parsed.amount !== null) {
+        setScanToast({
+          type: 'success',
+          message: `Extracted ₹${parsed.amount}! Review category and save.`,
+        });
+      } else {
+        setScanToast({
+          type: 'info',
+          message: 'Screenshot parsed! Please verify amount and tap Save.',
+        });
+      }
+    } catch (err: any) {
       setIsScanning(false);
       setScanToast({
         type: 'error',
-        message: "Couldn't read that screenshot — enter it manually",
+        message: err?.message || "Couldn't read that screenshot — enter it manually",
       });
     }
   };

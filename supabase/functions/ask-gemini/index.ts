@@ -20,7 +20,7 @@ interface RequestPayload {
 }
 
 function cleanAndCapOverviewText(rawText: string, maxWords: number = 120): string {
-  const trimmed = rawText.trim();
+  const trimmed = rawText.trim().replace(/\$/g, '₹').replace(/\bUSD\b/g, 'INR');
   const words = trimmed.split(/\s+/).filter(Boolean);
   if (words.length <= maxWords) {
     return trimmed;
@@ -182,6 +182,11 @@ Rules:
       geminiPrompt = `You are a spending-pattern observer for a personal finance app, not a financial advisor. You will be given aggregated JSON data (totals, category breakdowns, percentages — never raw transaction lists).
 
 STRICT RULES:
+- CURRENCY: All transactions and amounts are in Indian Rupees (INR). ALWAYS format currency with the Indian Rupee symbol "₹" (e.g. ₹22,211, ₹2,929). NEVER use the dollar sign "$" or "USD".
+- FINANCIAL LOGIC & ACCURACY:
+  * When totalIncome > totalExpense: Income exceeded expenses, resulting in positive net savings (e.g. "With total income of ₹25,140 surpassing expenses of ₹22,211, you achieved net savings of ₹2,929"). NEVER claim that expenses "outpaced" income when savings are positive!
+  * When totalExpense > totalIncome: Expenses exceeded income, resulting in a deficit (e.g. "Total expenses of ₹25,000 outpaced income of ₹20,000, creating a deficit of ₹5,000").
+  * Ensure mathematical consistency and never generate self-contradictory claims.
 - Every claim must be directly derivable from the JSON provided. Never invent a number, merchant, date, or month-over-month comparison that isn't explicitly present in the input.
 - Never recommend specific financial products, investments, loans, insurance, or debt actions. You observe spending behavior only — never prescribe financial decisions.
 - If this period is marked as a historical/closed period, use past tense and frame as a finalized retrospective summary, not in-progress pace advice.
