@@ -7,6 +7,7 @@ import {
   DarkTheme,
   DefaultTheme,
   createNavigationContainerRef,
+  CommonActions,
 } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useShareIntent } from 'expo-share-intent';
@@ -59,7 +60,12 @@ export const RootNavigator = () => {
 
   const navigateOrQueue = useCallback((screen: string, params: any) => {
     if (navigationRef.isReady()) {
-      navigationRef.navigate(screen, params);
+      navigationRef.dispatch(CommonActions.navigate({ name: screen, params }));
+      setTimeout(() => {
+        if (navigationRef.isReady() && navigationRef.getCurrentRoute()?.name !== screen) {
+          navigationRef.dispatch(CommonActions.navigate({ name: screen, params }));
+        }
+      }, 120);
     } else {
       pendingNavRef.current = { screen, params };
     }
@@ -218,7 +224,19 @@ export const RootNavigator = () => {
 
       // 2. If confidence is NOT high (unfamiliar merchant or ambiguous format) and Gemini key is configured,
       // refine in background without blocking the user
-      if (hasGeminiApiKey && parsedSms.confidence !== 'high') {
+      let keyAvailable = hasGeminiApiKey;
+      if (!keyAvailable) {
+        try {
+          const localKey = await AsyncStorage.getItem('@gemini_byok_api_key');
+          if (localKey && localKey.trim()) {
+            keyAvailable = true;
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      if (keyAvailable && parsedSms.confidence !== 'high') {
         parseReceiptWithGemini({ text: rawText, availableCategories: categories })
           .then((geminiRes) => {
             if (geminiRes.success && geminiRes.data && navigationRef.isReady()) {
@@ -233,16 +251,21 @@ export const RootNavigator = () => {
                 );
               }
 
-              navigationRef.navigate('AddTransaction', {
-                prefillAmount: geminiData.amount !== null ? geminiData.amount : undefined,
-                prefillNote: geminiData.merchant_or_person,
-                parsedMerchant: geminiData.merchant_or_person,
-                prefillType: geminiData.suggested_type,
-                prefillCategory: geminiData.suggested_category,
-                prefillDate: geminiData.date_if_present || undefined,
-                prefillSource: 'sms',
-                scanMessage: `Gemini AI identified: ${geminiData.merchant_or_person} (${geminiData.suggested_category})`,
-              });
+              navigationRef.dispatch(
+                CommonActions.navigate({
+                  name: 'AddTransaction',
+                  params: {
+                    prefillAmount: geminiData.amount !== null ? geminiData.amount : undefined,
+                    prefillNote: geminiData.merchant_or_person,
+                    parsedMerchant: geminiData.merchant_or_person,
+                    prefillType: geminiData.suggested_type,
+                    prefillCategory: geminiData.suggested_category,
+                    prefillDate: geminiData.date_if_present || undefined,
+                    prefillSource: 'sms',
+                    scanMessage: `Gemini AI identified: ${geminiData.merchant_or_person} (${geminiData.suggested_category})`,
+                  },
+                })
+              );
             }
           })
           .catch(() => {});
@@ -301,11 +324,20 @@ export const RootNavigator = () => {
         if (pendingNavRef.current) {
           const { screen, params } = pendingNavRef.current;
           pendingNavRef.current = null;
-          setTimeout(() => {
-            if (navigationRef.isReady()) {
-              navigationRef.navigate(screen, params);
-            }
-          }, 60);
+          const attempt = (delay: number) => {
+            setTimeout(() => {
+              if (navigationRef.isReady()) {
+                navigationRef.dispatch(CommonActions.navigate({ name: screen, params }));
+                setTimeout(() => {
+                  if (navigationRef.isReady() && navigationRef.getCurrentRoute()?.name !== screen) {
+                    navigationRef.dispatch(CommonActions.navigate({ name: screen, params }));
+                  }
+                }, 120);
+              }
+            }, delay);
+          };
+          attempt(60);
+          attempt(250);
         }
       }}
     >

@@ -38,14 +38,38 @@ const persistFinanceCache = (
     currentUserId?: string | null;
   }
 ) => {
+  // If there is no active user id (e.g. during sign out or transitional state),
+  // NEVER write to storage to prevent cross-account cache poisoning!
+  if (!state.currentUserId) return;
+
+  const isGuest = isGuestUser(state.currentUserId) || state.currentUserId === 'guest';
   const key = getStorageKey(state.currentUserId);
+
+  // Strictly sanitize data: if saving guest cache, only save guest items.
+  // If saving authenticated user cache, only save that user's items.
+  const filteredAccounts = isGuest
+    ? state.accounts.filter((a) => a.user_id === 'guest_local_user')
+    : state.accounts.filter((a) => a.user_id === state.currentUserId);
+
+  const filteredTransactions = isGuest
+    ? state.transactions.filter((t) => t.user_id === 'guest_local_user')
+    : state.transactions.filter((t) => t.user_id === state.currentUserId);
+
+  const filteredBorrows = isGuest
+    ? state.borrows.filter((b) => b.user_id === 'guest_local_user')
+    : state.borrows.filter((b) => b.user_id === state.currentUserId);
+
+  const filteredBudgets = isGuest
+    ? state.budgets.filter((bg) => bg.user_id === 'guest_local_user')
+    : state.budgets.filter((bg) => bg.user_id === state.currentUserId);
+
   AsyncStorage.setItem(
     key,
     JSON.stringify({
-      accounts: state.accounts,
-      transactions: state.transactions,
-      borrows: state.borrows,
-      budgets: state.budgets,
+      accounts: filteredAccounts,
+      transactions: filteredTransactions,
+      borrows: filteredBorrows,
+      budgets: filteredBudgets,
       budgetSummaries: state.budgetSummaries,
     })
   ).catch(() => {});
@@ -569,14 +593,28 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
 
       if (cached) {
         const parsed = JSON.parse(cached);
-        const rawAccounts = (parsed.accounts || []) as Account[];
+        const isGuest = isGuestUser(effectiveUserId) || effectiveUserId === 'guest';
+
+        const rawAccounts = ((parsed.accounts || []) as Account[]).filter((a) =>
+          isGuest ? a.user_id === 'guest_local_user' : a.user_id === effectiveUserId
+        );
         const accounts = sortAccountsByOrder(deduplicateAccounts(rawAccounts), orderIds);
+
+        const transactions = ((parsed.transactions || []) as Transaction[]).filter((t) =>
+          isGuest ? t.user_id === 'guest_local_user' : t.user_id === effectiveUserId
+        );
+        const borrows = ((parsed.borrows || []) as Borrow[]).filter((b) =>
+          isGuest ? b.user_id === 'guest_local_user' : b.user_id === effectiveUserId
+        );
+        const budgets = ((parsed.budgets || []) as Budget[]).filter((bg) =>
+          isGuest ? bg.user_id === 'guest_local_user' : bg.user_id === effectiveUserId
+        );
 
         set({
           accounts,
-          transactions: parsed.transactions || [],
-          borrows: parsed.borrows || [],
-          budgets: parsed.budgets || [],
+          transactions,
+          borrows,
+          budgets,
           budgetSummaries: parsed.budgetSummaries || [],
           categories,
           isInitialLoading: false,
@@ -2174,6 +2212,12 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
 
       // Refresh full dataset from Supabase
       await get().fetchInitialData(userId);
+      // Clean up the guest local cache now that it has been migrated to cloud
+      await Promise.allSettled([
+        AsyncStorage.removeItem(getStorageKey('guest_local_user')),
+        AsyncStorage.removeItem(getCategoriesKey('guest_local_user')),
+        AsyncStorage.removeItem(getAccountOrderKey('guest_local_user')),
+      ]);
       set({ syncStatus: 'synced', lastSyncedAt: new Date().toISOString() });
       return { success: true };
     } catch (err: any) {
