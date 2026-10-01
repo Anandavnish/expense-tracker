@@ -90,6 +90,14 @@ const CATEGORY_KEYWORD_MAP = [
       'college', 'university', 'school', 'fee', 'fees',
     ],
   },
+  {
+    category: 'Credit Card Payment',
+    keywords: [
+      'credit card payment', 'cc payment', 'card bill', 'credit card bill',
+      'cred', 'card payment', 'autopay cc', 'cc bill', 'credit card outstanding',
+      'settlement', 'repayment', 'card settlement',
+    ],
+  },
 ];
 
 function normalizeMerchantName(raw) {
@@ -187,22 +195,24 @@ function extractTransactionDate(text) {
     nov: 11, november: 11, dec: 12, december: 12,
   };
 
-  const monthFirstMatch = text.match(/\b([A-Za-z]{3,9})\s+(\d{1,2}),?\s+(\d{2,4})\b/i);
+  // Pattern 1: "Sep 29, 2026", "Sep 29th, 2026", "September 29", "Sep 29"
+  const monthFirstMatch = text.match(/\b([A-Za-z]{3,9})\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{2,4}))?\b/i);
   if (monthFirstMatch) {
     const month = monthMap[monthFirstMatch[1].toLowerCase()];
     const day = parseInt(monthFirstMatch[2], 10);
-    let year = parseInt(monthFirstMatch[3], 10);
+    let year = monthFirstMatch[3] ? parseInt(monthFirstMatch[3], 10) : currentYear;
     if (year < 100) year += 2000;
     if (month && day >= 1 && day <= 31 && year >= 2020 && year <= currentYear + 1) {
       return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     }
   }
 
-  const alphaMatch = text.match(/\b(\d{1,2})[-/ ]?([A-Za-z]{3,9})[-/ ]?(\d{2,4})\b/i);
+  // Pattern 2: "29 Sep 2026", "29 Sep, 2026", "29-Sep-2026", "29Sep26", "29th Sep", "29 Sep"
+  const alphaMatch = text.match(/\b(\d{1,2})(?:st|nd|rd|th)?[-/ ,]*([A-Za-z]{3,9})(?:[-/ ,]*(\d{2,4}))?\b/i);
   if (alphaMatch) {
     const day = parseInt(alphaMatch[1], 10);
     const month = monthMap[alphaMatch[2].toLowerCase()];
-    let year = parseInt(alphaMatch[3], 10);
+    let year = alphaMatch[3] ? parseInt(alphaMatch[3], 10) : currentYear;
     if (year < 100) year += 2000;
     if (month && day >= 1 && day <= 31 && year >= 2020 && year <= currentYear + 1) {
       return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
@@ -1645,6 +1655,9 @@ const dateToday = normalizeDateToIso('Today');
 const dateTodayTime = normalizeDateToIso('Today, 8:46 PM');
 const dateYest = normalizeDateToIso('Yesterday');
 const dateAlphaWithTime = normalizeDateToIso('29 Sep 2026, 8:46 PM');
+const dateWithComma = normalizeDateToIso('29 Sep, 2026');
+const dateMissingYear = normalizeDateToIso('29 Sep');
+const dateOrdinal = normalizeDateToIso('Sep 29th, 2026');
 const dateIsoTimestamp = normalizeDateToIso('2026-09-29T14:30:00.000Z');
 const dateInvalid = normalizeDateToIso('non-date garbage text');
 
@@ -1653,14 +1666,24 @@ console.log(`      'Today' ➔ ${dateToday} (expected: ${expToday})`);
 console.log(`      'Today, 8:46 PM' ➔ ${dateTodayTime} (expected: ${expToday})`);
 console.log(`      'Yesterday' ➔ ${dateYest} (expected: ${expYest})`);
 console.log(`      '29 Sep 2026, 8:46 PM' ➔ ${dateAlphaWithTime} (expected: 2026-09-29)`);
+console.log(`      '29 Sep, 2026' ➔ ${dateWithComma} (expected: 2026-09-29)`);
+console.log(`      '29 Sep' (no year) ➔ ${dateMissingYear} (expected: 2026-09-29)`);
+console.log(`      'Sep 29th, 2026' ➔ ${dateOrdinal} (expected: 2026-09-29)`);
 console.log(`      '2026-09-29T14:30:00.000Z' ➔ ${dateIsoTimestamp} (expected: 2026-09-29)`);
 
 assert.strictEqual(dateToday, expToday, "normalizeDateToIso('Today') must equal today's ISO date");
 assert.strictEqual(dateTodayTime, expToday, "normalizeDateToIso('Today, 8:46 PM') must equal today's ISO date");
 assert.strictEqual(dateYest, expYest, "normalizeDateToIso('Yesterday') must equal yesterday's ISO date");
 assert.strictEqual(dateAlphaWithTime, '2026-09-29', "normalizeDateToIso('29 Sep 2026, 8:46 PM') must extract 2026-09-29");
+assert.strictEqual(dateWithComma, '2026-09-29', "normalizeDateToIso('29 Sep, 2026') must extract 2026-09-29");
+assert.strictEqual(dateMissingYear, '2026-09-29', "normalizeDateToIso('29 Sep') must extract current year date 2026-09-29");
+assert.strictEqual(dateOrdinal, '2026-09-29', "normalizeDateToIso('Sep 29th, 2026') must extract 2026-09-29");
 assert.strictEqual(dateIsoTimestamp, '2026-09-29', "normalizeDateToIso(ISO timestamp) must extract 2026-09-29");
 assert.strictEqual(dateInvalid, null, "Invalid date strings must return null and never produce 'Invalid Date'");
+
+// Case 10A-2: Credit Card Payment category inference
+const ccPaymentCategory = inferCategoryFromText('Cred credit card payment of 5000 successful', ['Food', 'Credit Card Payment', 'Other']);
+assert.strictEqual(ccPaymentCategory, 'Credit Card Payment', 'Cred credit card bill payment must infer Credit Card Payment category');
 
 // Case 10B: Multi-Tier Bank Matching Algorithm
 const accountsForBankMatching = [

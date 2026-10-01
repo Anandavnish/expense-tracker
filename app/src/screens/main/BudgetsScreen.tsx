@@ -18,7 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { ProgressBar, TextInput, ActivityIndicator } from 'react-native-paper';
 import * as Haptics from 'expo-haptics';
 import { useAuthStore } from '../../store/authStore';
-import { useFinanceStore, calculateNetWorth } from '../../store/financeStore';
+import { useFinanceStore } from '../../store/financeStore';
 import { useSettingsStore } from '../../store/settingsStore';
 import { COLORS, SPACING, TYPOGRAPHY } from '../../theme/tokens';
 import { InlineError } from '../../components/InlineError';
@@ -55,8 +55,6 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
   const { user } = useAuthStore();
   const { accent, colors } = useSettingsStore();
   const {
-    accounts,
-    borrows,
     budgets,
     budgetSummaries,
     categories,
@@ -110,14 +108,14 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
     [budgetSummaries]
   );
   const categorySummaries = useMemo(
-    () => budgetSummaries.filter((b) => b.category !== null),
+    () => budgetSummaries.filter((b) => b.category !== null && b.category !== 'Credit Card Payment'),
     [budgetSummaries]
   );
 
-  // Calculate live spending totals for this period
+  // Calculate live spending totals for this period (excluding credit card payment settlements)
   const totalExpensesThisMonth = useMemo(() => {
     return transactions
-      .filter((t) => t.type === 'expense' && t.date.startsWith(selectedMonth))
+      .filter((t) => t.type === 'expense' && t.category !== 'Credit Card Payment' && t.date.startsWith(selectedMonth))
       .reduce((sum, t) => sum + Number(t.amount || 0), 0);
   }, [transactions, selectedMonth]);
 
@@ -134,25 +132,13 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
   }, [overallSummary, categorySummaries]);
 
   const totalSpent = useMemo(() => {
-    if (overallSummary && Number(overallSummary.monthly_limit) > 0) {
-      return Number(overallSummary.spent);
-    }
     return totalExpensesThisMonth;
-  }, [overallSummary, totalExpensesThisMonth]);
+  }, [totalExpensesThisMonth]);
 
   const overallPct = useMemo(() => {
     if (totalBudgetLimit <= 0) return 0;
     return Math.round((totalSpent / totalBudgetLimit) * 100);
   }, [totalSpent, totalBudgetLimit]);
-
-  // Total Net Worth ceiling calculation
-  const totalNetWorth = useMemo(() => {
-    return calculateNetWorth(accounts, borrows, transactions);
-  }, [accounts, borrows, transactions]);
-
-  const parsedLimit = parseFloat(limitAmount);
-  const isExceedingNetWorth = !isNaN(parsedLimit) && parsedLimit > totalNetWorth;
-
 
   // Days remaining in the selected period
   const daysLeftInPeriod = useMemo(() => {
@@ -181,6 +167,7 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
     return transactions
       .filter((t) => {
         if (t.type !== 'expense') return false;
+        if (t.category === 'Credit Card Payment') return false;
         if (!t.date.startsWith(selectedMonth)) return false;
         if (target === null) return true;
         return t.category.toLowerCase() === target.toLowerCase();
@@ -389,17 +376,15 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
 
   const handlePresetSelect = (preset: number) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-    const val = totalNetWorth > 0 && preset > totalNetWorth ? totalNetWorth : preset;
-    setLimitAmount(String(val));
+    setLimitAmount(String(preset));
     setFetchedMeta(null);
   };
 
   const handleIncrementLimit = (increment: number) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     const current = parseFloat(limitAmount) || 0;
-    const nextVal = current + increment;
-    const val = totalNetWorth > 0 && nextVal > totalNetWorth ? totalNetWorth : Math.max(0, nextVal);
-    setLimitAmount(String(val));
+    const nextVal = Math.max(0, current + increment);
+    setLimitAmount(String(nextVal));
     setFetchedMeta(null);
   };
 
@@ -408,17 +393,6 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
     const numLimit = parseFloat(limitAmount);
     if (isNaN(numLimit) || numLimit <= 0) {
       setFormError('Please enter a valid monthly limit (e.g. 5000)');
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
-      return;
-    }
-
-    // Strict Rule: Budget limit cannot exceed total net worth (must be less than or equal) for all types of budget
-    if (numLimit > totalNetWorth) {
-      const errorMsg =
-        totalNetWorth <= 0
-          ? `Budget limit (₹${numLimit.toLocaleString('en-IN')}) cannot exceed your total net worth (₹${totalNetWorth.toLocaleString('en-IN')}). Please increase your net worth or clear debts before setting budgets.`
-          : `Budget limit (₹${numLimit.toLocaleString('en-IN')}) cannot exceed your total net worth (₹${totalNetWorth.toLocaleString('en-IN')}).`;
-      setFormError(errorMsg);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
       return;
     }
@@ -815,7 +789,7 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
 
             {/* Wrapping Grid of Categories */}
             <View style={styles.categoriesGrid}>
-              {categories.map((cat) => {
+              {categories.filter((c) => c !== 'Credit Card Payment').map((cat) => {
                 const active = selectedCategory === cat;
                 const iconName = getCategoryIcon(cat);
                 const colorToken = getCategoryColor(cat, undefined, accent.hex);
@@ -904,14 +878,6 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
                 <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
                   MONTHLY LIMIT (₹)
                 </Text>
-                <Text
-                  style={[
-                    styles.netWorthCapText,
-                    { color: totalNetWorth <= 0 ? colors.alert : colors.textMuted },
-                  ]}
-                >
-                  Net Worth Cap: ₹{totalNetWorth.toLocaleString('en-IN')}
-                </Text>
               </View>
 
               {/* Auto-Fetch Status Indicator */}
@@ -961,8 +927,8 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
               placeholderTextColor={colors.textMuted}
               keyboardType="decimal-pad"
               mode="outlined"
-              outlineColor={isExceedingNetWorth ? colors.alert : colors.border}
-              activeOutlineColor={isExceedingNetWorth ? colors.alert : accent.hex}
+              outlineColor={colors.border}
+              activeOutlineColor={accent.hex}
               textColor={colors.textPrimary}
               style={[
                 styles.limitInput,
@@ -971,7 +937,7 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
               left={
                 <TextInput.Affix
                   text="₹"
-                  textStyle={{ color: isExceedingNetWorth ? colors.alert : accent.hex, fontWeight: '700' }}
+                  textStyle={{ color: accent.hex, fontWeight: '700' }}
                 />
               }
               right={
@@ -988,24 +954,6 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
               }
             />
 
-            {/* Real-time Net Worth Rule Warning */}
-            {isExceedingNetWorth && (
-              <View
-                style={[
-                  styles.netWorthWarningBox,
-                  {
-                    backgroundColor: colors.alertMuted,
-                    borderColor: colors.alert,
-                  },
-                ]}
-              >
-                <Ionicons name="alert-circle" size={15} color={colors.alert} />
-                <Text style={[styles.netWorthWarningText, { color: colors.alert }]}>
-                  Limit cannot exceed your total net worth (₹{Math.max(0, totalNetWorth).toLocaleString('en-IN')})
-                </Text>
-              </View>
-            )}
-
             {/* Quick Amount Suggestion Chips */}
             <View style={styles.presetsWrapper}>
               <Text style={[styles.presetsLabel, { color: colors.textMuted }]}>
@@ -1016,40 +964,6 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.presetsScroll}
               >
-                {totalNetWorth > 0 && (
-                  <TouchableOpacity
-                    onPress={() => handlePresetSelect(totalNetWorth)}
-                    style={[
-                      styles.presetChip,
-                      {
-                        backgroundColor:
-                          limitAmount === String(totalNetWorth)
-                            ? accent.muted
-                            : colors.surfaceLight,
-                        borderColor:
-                          limitAmount === String(totalNetWorth)
-                            ? accent.hex
-                            : colors.border,
-                      },
-                    ]}
-                    activeOpacity={0.7}
-                  >
-                    <Text
-                      style={[
-                        styles.presetChipText,
-                        {
-                          color:
-                            limitAmount === String(totalNetWorth)
-                              ? accent.hex
-                              : colors.textPrimary,
-                          fontWeight: '700',
-                        },
-                      ]}
-                    >
-                      Max Net Worth (₹{totalNetWorth.toLocaleString('en-IN')})
-                    </Text>
-                  </TouchableOpacity>
-                )}
                 {(selectedCategory === 'Overall Budget'
                   ? [10000, 20000, 30000, 50000]
                   : [1000, 2500, 5000, 10000]
@@ -1876,26 +1790,6 @@ const styles = StyleSheet.create({
   },
   limitLabelWithCap: {
     flexDirection: 'column',
-  },
-  netWorthCapText: {
-    fontSize: 10,
-    fontWeight: '700',
-    marginTop: 1,
-  },
-  netWorthWarningBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: 7,
-    marginBottom: SPACING.sm,
-  },
-  netWorthWarningText: {
-    fontSize: 11,
-    fontWeight: '600',
-    flex: 1,
   },
   fetchStatusRow: {
     flexDirection: 'row',

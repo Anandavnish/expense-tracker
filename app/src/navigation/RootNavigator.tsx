@@ -250,6 +250,7 @@ export const RootNavigator = () => {
 
         const navParams = {
           imageUri: uri,
+          prefillRawText: ocrRes.text,
           prefillAmount: parsed.amount !== null ? parsed.amount : undefined,
           prefillNote: smartNote,
           parsedMerchant,
@@ -322,6 +323,7 @@ export const RootNavigator = () => {
       }
 
       const navParams: any = {
+        prefillRawText: rawText,
         prefillAmount: parsed.amount !== null ? parsed.amount : undefined,
         prefillNote: smartNote,
         parsedMerchant,
@@ -379,6 +381,7 @@ export const RootNavigator = () => {
                 CommonActions.navigate({
                   name: 'AddTransaction',
                   params: {
+                    prefillRawText: rawText,
                     prefillAmount: refined.amount !== null ? refined.amount : undefined,
                     prefillNote: refinedSmartNote,
                     parsedMerchant: refinedMerchant,

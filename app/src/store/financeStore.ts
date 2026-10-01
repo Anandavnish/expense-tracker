@@ -436,7 +436,7 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
   borrows: [],
   budgets: [],
   budgetSummaries: [],
-  selectedMonth: new Date().toISOString().substring(0, 7), // 'YYYY-MM'
+  selectedMonth: getCurrentMonthString(), // 'YYYY-MM'
   categories: DEFAULT_STUDENT_CATEGORIES,
   currentUserId: null,
   isInitialLoading: true,
@@ -613,6 +613,7 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
           budgets,
           budgetSummaries: parsed.budgetSummaries || [],
           categories,
+          selectedMonth: getCurrentMonthString(),
           isInitialLoading: false,
         });
       } else {
@@ -623,6 +624,7 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
           budgets: [],
           budgetSummaries: [],
           categories,
+          selectedMonth: getCurrentMonthString(),
           isInitialLoading: false,
         });
       }
@@ -662,7 +664,8 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
   },
 
   fetchInitialData: async (userId: string) => {
-    set({ currentUserId: userId });
+    const month = getCurrentMonthString();
+    set({ currentUserId: userId, selectedMonth: month });
     if (isGuestUser(userId)) {
       await get().loadCachedData(userId);
       set({ isInitialLoading: false, syncStatus: 'synced', lastSyncedAt: new Date().toISOString() });
@@ -670,7 +673,6 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
     }
 
     try {
-      const month = get().selectedMonth;
 
       const [accountsRes, txRes, borrowsRes, budgetsRes, summaryRes, cachedOrder] = await Promise.all([
         supabase
@@ -2291,6 +2293,7 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
       budgets: [],
       budgetSummaries: [],
       categories: DEFAULT_STUDENT_CATEGORIES,
+      selectedMonth: getCurrentMonthString(),
       currentUserId: null,
       activeChannel: null,
       lastSyncedAt: null,

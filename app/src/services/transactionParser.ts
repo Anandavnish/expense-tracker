@@ -148,6 +148,14 @@ export const CATEGORY_KEYWORD_MAP: { keywords: string[]; category: string }[] = 
       'college', 'university', 'school', 'fee', 'fees',
     ],
   },
+  {
+    category: 'Credit Card Payment',
+    keywords: [
+      'credit card payment', 'cc payment', 'card bill', 'credit card bill',
+      'cred', 'card payment', 'autopay cc', 'cc bill', 'credit card outstanding',
+      'settlement', 'repayment', 'card settlement',
+    ],
+  },
 ];
 
 // Common Indian & financial alias mapping for normalizing categories
@@ -181,6 +189,13 @@ export const CATEGORY_ALIAS_MAP: Record<string, string> = {
   'shopping': 'Shopping',
   'subscriptions': 'Subscriptions',
   'subscription': 'Subscriptions',
+  'credit card': 'Credit Card Payment',
+  'credit card payment': 'Credit Card Payment',
+  'cc payment': 'Credit Card Payment',
+  'card bill': 'Credit Card Payment',
+  'cc bill': 'Credit Card Payment',
+  'card repayment': 'Credit Card Payment',
+  'debt settlement': 'Credit Card Payment',
   'health': 'Other',
   'medical': 'Other',
   'personal care': 'Other',
@@ -403,12 +418,12 @@ export function extractTransactionDate(text: string): string | null {
     dec: 12, december: 12,
   };
 
-  // Pattern 1: "Sep 29, 2026" or "September 29, 2026"
-  const monthFirstMatch = text.match(/\b([A-Za-z]{3,9})\s+(\d{1,2}),?\s+(\d{2,4})\b/i);
+  // Pattern 1: "Sep 29, 2026", "Sep 29th, 2026", "September 29", "Sep 29"
+  const monthFirstMatch = text.match(/\b([A-Za-z]{3,9})\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{2,4}))?\b/i);
   if (monthFirstMatch) {
     const month = monthMap[monthFirstMatch[1].toLowerCase()];
     const day = parseInt(monthFirstMatch[2], 10);
-    let year = parseInt(monthFirstMatch[3], 10);
+    let year = monthFirstMatch[3] ? parseInt(monthFirstMatch[3], 10) : currentYear;
     if (year < 100) year += 2000;
 
     if (month && day >= 1 && day <= 31 && year >= 2020 && year <= currentYear + 1) {
@@ -416,12 +431,12 @@ export function extractTransactionDate(text: string): string | null {
     }
   }
 
-  // Pattern 2: "29 Sep 2026" or "29-Sep-2026" or "29Sep26" or "29 September 2026"
-  const alphaMatch = text.match(/\b(\d{1,2})[-/ ]?([A-Za-z]{3,9})[-/ ]?(\d{2,4})\b/i);
+  // Pattern 2: "29 Sep 2026", "29 Sep, 2026", "29-Sep-2026", "29Sep26", "29th Sep", "29 Sep"
+  const alphaMatch = text.match(/\b(\d{1,2})(?:st|nd|rd|th)?[-/ ,]*([A-Za-z]{3,9})(?:[-/ ,]*(\d{2,4}))?\b/i);
   if (alphaMatch) {
     const day = parseInt(alphaMatch[1], 10);
     const month = monthMap[alphaMatch[2].toLowerCase()];
-    let year = parseInt(alphaMatch[3], 10);
+    let year = alphaMatch[3] ? parseInt(alphaMatch[3], 10) : currentYear;
     if (year < 100) year += 2000;
 
     if (month && day >= 1 && day <= 31 && year >= 2020 && year <= currentYear + 1) {

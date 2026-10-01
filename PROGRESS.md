@@ -4,9 +4,9 @@
 Foundational architecture build for a high-performance cross-platform personal finance mobile app built for Android using Expo Dev Client, React Native Reanimated, React Native Paper, Zustand, and Supabase.
 
 - **GitHub Repository**: [https://github.com/Anandavnish/expense-tracker](https://github.com/Anandavnish/expense-tracker)
-- **Latest Release**: [Expense Tracker v1.0.17 (Build 17)](https://github.com/Anandavnish/expense-tracker/releases/tag/v1.0.17)
-- **Direct APK Download**: [ExpenseTracker-v1.0.17.apk](https://github.com/Anandavnish/expense-tracker/releases/download/v1.0.17/ExpenseTracker-v1.0.17.apk)
-- **Previous Release**: [Expense Tracker v1.0.16 (Build 16)](https://github.com/Anandavnish/expense-tracker/releases/tag/v1.0.16)
+- **Latest Release**: [Expense Tracker v1.0.18 (Build 18)](https://github.com/Anandavnish/expense-tracker/releases/tag/v1.0.18)
+- **Direct APK Download**: [ExpenseTracker-v1.0.18.apk](https://github.com/Anandavnish/expense-tracker/releases/download/v1.0.18/ExpenseTracker-v1.0.18.apk)
+- **Previous Release**: [Expense Tracker v1.0.17 (Build 17)](https://github.com/Anandavnish/expense-tracker/releases/tag/v1.0.17)
 
 ---
 
@@ -40,7 +40,34 @@ Foundational architecture build for a high-performance cross-platform personal f
 
 ---
 
-## Architectural Confirmations & System Revisions (Sept 2026)
+## Architectural Confirmations & System Revisions (Sept/Oct 2026)
+
+### 000000. Month Auto-Landing, Debt Settlement Modeling, AI Format Button, & Tuned Date Parser (v1.0.18)
+- **Status**: **Implemented & Fully Verified**.
+- **Local Month Auto-Landing**:
+  - *Root Cause*: Previous implementations used UTC `new Date().toISOString().substring(0, 7)`. In India (IST UTC+5:30), early morning on the 1st of the month lands in the previous month in UTC (e.g. `2026-09` instead of `2026-10`).
+  - *Fix*: Integrated `getCurrentMonthString()` using local device `getFullYear()` and `getMonth() + 1` across `financeStore.ts` (`loadCachedData`, `fetchInitialData`, `resetForSignOut`) and `DashboardScreen.tsx` mount listener.
+- **Credit Card Repayment as Debt Settlement**:
+  - Aligned with `/grill-me` debt settlement model.
+  - While maintaining underlying database account trigger accuracy (`'expense'` debiting bank, `'income'` crediting credit card), the application layer excludes `'Credit Card Payment'` from operational Monthly Expenses, Monthly Income, Budgets, and Category Spend breakdown.
+  - Tagged transactions in `TransactionRow.tsx` with a neutral `SETTLEMENT` badge and `⇄` prefix.
+- **Budget Net Worth Ceiling Removed**:
+  - Removed arbitrary `limitAmount > totalNetWorth` capping, warning alerts, and "Max Net Worth" preset chip in `BudgetsScreen.tsx`.
+- **Transaction Card Heading Wrap**:
+  - Applied `numberOfLines={2}`, `flex: 1`, `lineHeight: 20`, and `alignItems: 'flex-start'` to merchant/payee title in `TransactionRow.tsx` to prevent cramped or truncated layouts.
+- **On-Device AI Format Button & Privacy-Preserving Extraction**:
+  - Added dedicated `AI` format button in the `AddTransactionScreen` header and an `AI Refine` action pill inside the OCR scan banner.
+  - Transmits strictly the on-device extracted text (`rawText` from `expo-mlkit-ocr` or shared SMS) to Gemini AI for structural formatting—never sending raw screenshot bytes.
+  - Automatically maps returned payee, amount, normalized category, date, and payer account.
+- **Tuned Date & Keyword Parser**:
+  - Added support for comma-separated dates (e.g. `"29 Sep, 2026"`), ordinals (`"Sep 29th, 2026"`), and missing year defaulting (`"29 Sep"` defaulting to current year).
+  - Added credit card repayment keyword rules and aliases (`cred`, `cc payment`, `card bill`, `autopay cc`, `card settlement`) into offline dictionary.
+- **Simplified Donut Chart**:
+  - Removed floating callout cards and bent elbow leader lines. Integrated high-contrast interactive center hub showing selected category name, amount, and percentage of total upon tap.
+- **Verification & Testing**:
+  - Pipeline verification suite (`node test_unified_pipeline.mjs`): All 10 test suites passed cleanly with all new date & category assertions.
+  - TypeScript compilation (`npx tsc --noEmit`): 0 errors.
+  - ESLint (`npm run lint`): 0 errors, 0 warnings.
 
 ### 00000. Multi-Account Gemini API Key Isolation & Cross-Account Leak Fix (v1.0.17)
 - **Status**: **Implemented & Fully Verified**.

@@ -27,7 +27,9 @@ import {
   parseTransactionWithPipeline,
   normalizeAndMatchCategory,
   normalizeDateToIso,
+  matchAccountToSource,
 } from '../../services/transactionParser';
+import { parseReceiptWithGemini } from '../../services/geminiService';
 import { useMerchantRulesStore } from '../../store/merchantRulesStore';
 import { MonthUnlockModal } from '../../components/MonthUnlockModal';
 
@@ -162,6 +164,8 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
   // OCR and Screenshot states
   const [source, setSource] = useState<TransactionSource>(params?.prefillSource || 'manual');
   const [isScanning, setIsScanning] = useState(Boolean(params?.isAnalyzing));
+  const [extractedText, setExtractedText] = useState<string>(params?.prefillRawText || '');
+  const [isAiFormatting, setIsAiFormatting] = useState(false);
   const [scanToast, setScanToast] = useState<{
     type: 'success' | 'error' | 'info';
     message: string;
@@ -235,6 +239,7 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
       accountId: params.accountId,
       date: params.prefillDate,
       source: params.prefillSource,
+      rawText: params.prefillRawText,
       isAnalyzing: params.isAnalyzing,
       tier: params.resolutionTier,
       stamp: params.dispatchTimestamp || params.scanMessage,
@@ -256,6 +261,10 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
 
     if (params.parsedMerchant) {
       setParsedMerchant(params.parsedMerchant);
+    }
+
+    if (params.prefillRawText) {
+      setExtractedText(params.prefillRawText);
     }
 
     if (params.isAnalyzing !== undefined) {
@@ -339,6 +348,7 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
 
       // 2. Perform on-device text & bounding box extraction via expo-mlkit-ocr (Boundary 1)
       const ocrRes = await extractTextFromImage(imageUri);
+      setExtractedText(ocrRes.text);
 
       // 3. Run shared transactionParser pipeline (Boundary 2)
       const { rules, recordGeminiRule } = useMerchantRulesStore.getState();
@@ -449,6 +459,120 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
       setScanToast({
         type: 'error',
         message: err?.message || "Couldn't read that screenshot — enter it manually",
+      });
+    }
+  };
+
+  const handleFormatWithAi = async () => {
+    const textToFormat = extractedText.trim() || note.trim();
+    if (!textToFormat) {
+      setScanToast({
+        type: 'info',
+        message: 'Scan a receipt or type transaction text in the note first to format with AI',
+      });
+      return;
+    }
+
+    if (!hasGeminiApiKey) {
+      setScanToast({
+        type: 'error',
+        message: 'Set up your Gemini API Key in Settings to use AI formatting',
+      });
+      return;
+    }
+
+    try {
+      setIsAiFormatting(true);
+      setScanToast({
+        type: 'info',
+        message: 'Formatting with Gemini AI (sending text only)...',
+      });
+
+      const res = await parseReceiptWithGemini({
+        text: textToFormat,
+        availableCategories: categories,
+      });
+
+      setIsAiFormatting(false);
+
+      if (!res.success || !res.data) {
+        setScanToast({
+          type: 'error',
+          message: res.message || 'AI could not format this text — please enter manually',
+        });
+        return;
+      }
+
+      const parsed = res.data;
+
+      // Update form values with AI extracted results
+      if (parsed.amount !== null && !isNaN(parsed.amount)) {
+        setAmount(String(parsed.amount));
+        setAmountTouched(false);
+      }
+
+      if (parsed.suggested_type) {
+        setType(parsed.suggested_type);
+        setTypeTouched(false);
+        if (parsed.suggested_type === 'borrow_given' || parsed.suggested_type === 'borrow_taken') {
+          setPersonName(parsed.merchant_or_person !== 'Unknown' ? parsed.merchant_or_person : '');
+        }
+      }
+
+      if (parsed.suggested_type === 'income') {
+        const smartNote = parsed.merchant_or_person !== 'Unknown' ? parsed.merchant_or_person : note;
+        if (smartNote) {
+          setNote(smartNote);
+          setNoteTouched(false);
+        }
+      } else if (parsed.merchant_or_person && parsed.merchant_or_person !== 'Unknown') {
+        setNote(parsed.merchant_or_person);
+        setParsedMerchant(parsed.merchant_or_person);
+        setNoteTouched(false);
+      }
+
+      if (parsed.suggested_category) {
+        const match = normalizeAndMatchCategory(parsed.suggested_category, categories);
+        if (match.isNew) {
+          useFinanceStore.getState().addCategory(match.category);
+        }
+        setCategory(match.category);
+        setCategoryTouched(false);
+      }
+
+      if (parsed.date_if_present) {
+        applyPrefillDate(parsed.date_if_present);
+      }
+
+      if (parsed.detected_bank_or_source) {
+        const matched = matchAccountToSource(parsed.detected_bank_or_source, accounts);
+        if (matched) {
+          setSelectedAccountId(matched);
+        }
+      }
+
+      // Record learned rule if merchant is recognized
+      if (
+        parsed.merchant_or_person &&
+        parsed.merchant_or_person !== 'Unknown' &&
+        parsed.suggested_category
+      ) {
+        useMerchantRulesStore.getState().recordGeminiRule(
+          parsed.merchant_or_person,
+          parsed.suggested_category,
+          parsed.suggested_type || 'expense'
+        );
+      }
+
+      setScanToast({
+        type: 'success',
+        message: `✨ AI formatted: ${parsed.merchant_or_person !== 'Unknown' ? parsed.merchant_or_person : 'Transaction'} • ₹${parsed.amount ?? '—'} (${parsed.suggested_category})`,
+      });
+    } catch (err: any) {
+      setIsAiFormatting(false);
+      setScanToast({
+        type: 'error',
+        message: err?.message || 'Error formatting with AI',
       });
     }
   };
@@ -650,24 +774,48 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
           </TouchableOpacity>
         )}
         <Text style={styles.headerTitle}>LOG TRANSACTION</Text>
-        <TouchableOpacity
-          onPress={handlePickAndScanImage}
-          disabled={isScanning}
-          style={[
-            styles.headerScanBtn,
-            { backgroundColor: colors.surfaceVariant, borderColor: colors.border },
-          ]}
-          activeOpacity={0.7}
-        >
-          {isScanning ? (
-            <ActivityIndicator size="small" color={colors.primary} />
-          ) : (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-              <Ionicons name="scan-outline" size={14} color={colors.primary} />
-              <Text style={[styles.headerScanText, { color: colors.primary }]}>Scan</Text>
-            </View>
-          )}
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <TouchableOpacity
+            onPress={handlePickAndScanImage}
+            disabled={isScanning || isAiFormatting}
+            style={[
+              styles.headerScanBtn,
+              { backgroundColor: colors.surfaceVariant, borderColor: colors.border },
+            ]}
+            activeOpacity={0.7}
+          >
+            {isScanning ? (
+              <ActivityIndicator size="small" color={colors.primary} />
+            ) : (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                <Ionicons name="scan-outline" size={14} color={colors.primary} />
+                <Text style={[styles.headerScanText, { color: colors.primary }]}>Scan</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={handleFormatWithAi}
+            disabled={isScanning || isAiFormatting}
+            style={[
+              styles.headerScanBtn,
+              {
+                backgroundColor: hasGeminiApiKey ? colors.primaryContainer : colors.surfaceVariant,
+                borderColor: hasGeminiApiKey ? colors.primary : colors.border,
+              },
+            ]}
+            activeOpacity={0.7}
+          >
+            {isAiFormatting ? (
+              <ActivityIndicator size="small" color={colors.primary} />
+            ) : (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                <Ionicons name="sparkles" size={13} color={colors.primary} />
+                <Text style={[styles.headerScanText, { color: colors.primary }]}>AI</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        </View>
       </View>
 
       <KeyboardAwareScrollView
@@ -755,6 +903,26 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
             >
               {scanToast.message}
             </Text>
+            {Boolean(extractedText) && (
+              <TouchableOpacity
+                onPress={handleFormatWithAi}
+                disabled={isAiFormatting || isScanning}
+                style={[
+                  styles.aiRefinePill,
+                  { backgroundColor: colors.surface, borderColor: colors.primary },
+                ]}
+                activeOpacity={0.7}
+              >
+                {isAiFormatting ? (
+                  <ActivityIndicator size="small" color={colors.primary} />
+                ) : (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                    <Ionicons name="sparkles" size={11} color={colors.primary} />
+                    <Text style={[styles.aiRefinePillText, { color: colors.primary }]}>AI Refine</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+            )}
             <TouchableOpacity onPress={() => setScanToast(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
               <Ionicons
                 name="close"
@@ -1342,6 +1510,19 @@ function getStyles(colors: ThemeColors) {
       flex: 1,
       fontSize: 12,
       fontWeight: '600',
+    },
+    aiRefinePill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 6,
+      borderWidth: 1,
+      marginLeft: 4,
+    },
+    aiRefinePillText: {
+      fontSize: 11,
+      fontWeight: '700',
     },
     keyboardContainer: {
       flex: 1,

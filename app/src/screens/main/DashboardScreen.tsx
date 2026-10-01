@@ -181,6 +181,15 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
   const [unlockModalVisible, setUnlockModalVisible] = useState(false);
   const [, setLockTick] = useState(0);
 
+  // Ensure the dashboard always opens on the current active running month
+  useEffect(() => {
+    const cur = getCurrentMonthString();
+    if (selectedMonth !== cur) {
+      setSelectedMonth(cur, user?.id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Monthly Budget Deletion State
   const [deleteBudgetModalVisible, setDeleteBudgetModalVisible] = useState(false);
   const [isDeletingBudget, setIsDeletingBudget] = useState(false);
@@ -492,37 +501,46 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
     };
   }, [accounts, borrows, transactions, previousMonthStr, fullNetWorth, isFutureMonth]);
 
+  // Live monthly expenses excluding Credit Card Payment debt settlements
+  const totalActualOperatingExpenses = useMemo(() => {
+    return transactions
+      .filter((t) => t.type === 'expense' && t.category !== 'Credit Card Payment' && t.date.startsWith(selectedMonth))
+      .reduce((sum, t) => sum + Number(t.amount || 0), 0);
+  }, [transactions, selectedMonth]);
+
   // This Month's Budget
   const overallBudget =
     budgetSummaries.find((b) => b.category === null) || budgetSummaries[0] || null;
 
-  const budgetSpent = overallBudget ? Number(overallBudget.spent) : 0;
+  const budgetSpent = totalActualOperatingExpenses;
   const budgetLimit = overallBudget ? Number(overallBudget.monthly_limit) : 0;
-  const budgetRemaining = overallBudget ? Number(overallBudget.remaining) : 0;
-  const budgetPct = overallBudget
-    ? Math.min(Number(overallBudget.spent_percentage) / 100, 1)
+  const budgetRemaining = budgetLimit > 0 ? Math.max(0, budgetLimit - budgetSpent) : 0;
+  const budgetPct = budgetLimit > 0
+    ? Math.min(budgetSpent / budgetLimit, 1)
     : 0;
 
   const budgetColor =
     budgetPct >= 1 ? colors.alert : budgetPct > 0.8 ? colors.warning : accent.hex;
 
-  // Category spending for selected month
+  // Category spending for selected month (excluding Credit Card Payment)
   const categorySpendingMap = useMemo(() => {
     const map: Record<string, number> = {};
-    categories.forEach((cat) => {
-      map[cat] = 0;
-    });
+    categories
+      .filter((cat) => cat !== 'Credit Card Payment')
+      .forEach((cat) => {
+        map[cat] = 0;
+      });
 
     // Check budgetSummaries first
     budgetSummaries.forEach((bs) => {
-      if (bs.category) {
+      if (bs.category && bs.category !== 'Credit Card Payment') {
         map[bs.category] = Number(bs.spent || 0);
       }
     });
 
     // Also scan transactions for that month to capture all categories
     transactions.forEach((tx) => {
-      if (tx.type === 'expense' && tx.date.startsWith(selectedMonth)) {
+      if (tx.type === 'expense' && tx.category !== 'Credit Card Payment' && tx.date.startsWith(selectedMonth)) {
         if (map[tx.category] !== undefined) {
           if (!budgetSummaries.some((bs) => bs.category === tx.category)) {
             map[tx.category] += Number(tx.amount);
@@ -541,7 +559,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
     let total = 0;
     const items: CategoryChartItem[] = [];
     Object.entries(categorySpendingMap).forEach(([cat, amt]) => {
-      if (amt > 0) {
+      if (amt > 0 && cat !== 'Credit Card Payment') {
         total += amt;
         items.push({
           category: cat,
@@ -613,6 +631,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
       const categoryMap: Record<string, number> = {};
 
       monthTransactions.forEach((t) => {
+        if (t.category === 'Credit Card Payment') return;
         const amt = Number(t.amount) || 0;
         if (t.type === 'income') {
           totalIncome += amt;
@@ -1734,15 +1753,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                           </Text>
                         </TouchableOpacity>
                       ) : null}
-                      <TouchableOpacity
-                        style={styles.cardExpenseActionPill}
-                        onPress={() =>
-                          navigation.navigate('AddTransaction', { accountId: card.id })
-                        }
-                      >
-                        <Ionicons name="add" size={13} color={colors.textSecondary} />
-                        <Text style={styles.cardExpenseActionPillText}>Expense</Text>
-                      </TouchableOpacity>
                     </View>
                   </View>
                 );

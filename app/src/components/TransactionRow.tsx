@@ -45,12 +45,16 @@ const TransactionRowComponent: React.FC<TransactionRowProps> = ({
   const isExpense = transaction.type === 'expense';
   const isBorrowTaken = transaction.type === 'borrow_taken';
   const isBorrowGiven = transaction.type === 'borrow_given';
+  const isCreditCardPayment = transaction.category === 'Credit Card Payment';
 
   let amountPrefix = '';
   // Refined palette: normal expenses are crisp neutral text (never shouting red)
   let amountColor = colors.textPrimary;
 
-  if (isIncome) {
+  if (isCreditCardPayment) {
+    amountPrefix = '⇄ ';
+    amountColor = colors.textSecondary;
+  } else if (isIncome) {
     amountPrefix = '+';
     amountColor = colors.success;
   } else if (isBorrowTaken) {
@@ -132,7 +136,7 @@ const TransactionRowComponent: React.FC<TransactionRowProps> = ({
           <View style={styles.titleRow}>
             <Text
               style={[styles.titleText, { color: colors.textPrimary }]}
-              numberOfLines={1}
+              numberOfLines={2}
             >
               {displayTitle}
             </Text>
@@ -228,8 +232,24 @@ const TransactionRowComponent: React.FC<TransactionRowProps> = ({
             {amountPrefix}₹{formattedAmount}
           </Text>
 
-          {/* Only non-expense types get a badge to avoid shouting red EXPENSE on every card */}
-          {!isExpense && (
+          {/* Non-expense types and Credit Card Payments get clean informative badges */}
+          {isCreditCardPayment ? (
+            <View
+              style={[
+                styles.typeBadge,
+                { backgroundColor: `${accent.hex}18` },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.typeBadgeText,
+                  { color: accent.hex },
+                ]}
+              >
+                SETTLEMENT
+              </Text>
+            </View>
+          ) : !isExpense ? (
             <View
               style={[
                 styles.typeBadge,
@@ -251,7 +271,7 @@ const TransactionRowComponent: React.FC<TransactionRowProps> = ({
                 {typeLabels[transaction.type]}
               </Text>
             </View>
-          )}
+          ) : null}
         </View>
       </View>
 
@@ -322,21 +342,25 @@ const styles = StyleSheet.create({
     flex: 1,
     marginRight: SPACING.sm,
     minWidth: 0,
+    justifyContent: 'center',
   },
   titleRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     marginBottom: 4,
   },
   titleText: {
+    flex: 1,
     fontSize: 15,
     fontWeight: '700',
     letterSpacing: 0.1,
+    lineHeight: 20,
   },
   metaRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    flexWrap: 'nowrap',
+    flexWrap: 'wrap',
+    gap: 4,
   },
   dateRow: {
     flexDirection: 'row',
