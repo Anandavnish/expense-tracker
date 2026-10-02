@@ -2,7 +2,7 @@
   "expo": {
     "name": "Expense Tracker",
     "slug": "expense-tracker",
-    "version": "1.0.18",
+    "version": "1.0.19",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "expensetracker",
@@ -10,10 +10,13 @@
     "backgroundColor": "#0C0D11",
     "android": {
       "package": "com.expensetracker.app",
-      "versionCode": 18,
+      "versionCode": 19,
       "backgroundColor": "#0C0D11",
       "adaptiveIcon": {
-        "backgroundColor": "#0C0D11"
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png",
+        "backgroundColor": "#E6F4FE"
       },
       "predictiveBackGestureEnabled": false
     },

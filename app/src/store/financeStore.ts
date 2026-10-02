@@ -1675,14 +1675,6 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
   },
 
   setBudgetOptimistic: async (budgetData) => {
-    // Enforce Rule: Budget limit cannot exceed total net worth (can be less or equal) for all types of budget
-    const netWorth = calculateNetWorth(get().accounts, get().borrows, get().transactions);
-    if (budgetData.monthly_limit > netWorth) {
-      const errorMsg = `Budget limit (₹${budgetData.monthly_limit.toLocaleString('en-IN')}) cannot exceed your total net worth (₹${Math.max(0, netWorth).toLocaleString('en-IN')}).`;
-      set({ inlineError: errorMsg });
-      return { success: false, error: errorMsg };
-    }
-
     const prevBudgets = [...get().budgets];
     const prevSummaries = [...get().budgetSummaries];
     const allTx = get().transactions;

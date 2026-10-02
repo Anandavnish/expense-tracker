@@ -741,9 +741,6 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
                 <Text style={[styles.billDueAmount, TYPOGRAPHY.tabularText]}>
                   ₹{spent.toLocaleString('en-IN')}
                 </Text>
-                <Text style={styles.billDueHelp}>
-                  Paying this bill reduces your credit card dues and deducts funds from your selected account.
-                </Text>
               </View>
 
               <Text style={styles.inputLabel}>AMOUNT TO PAY (₹)</Text>
@@ -852,7 +849,7 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
             <Text style={styles.deleteConfirmTitle}>Delete Money Source?</Text>
 
             <Text style={styles.deleteConfirmBody}>
-              Are you sure you want to delete <Text style={{ fontWeight: '700', color: colors.textPrimary }}>{account.name}</Text>? Past transaction records linked to this source will remain in your history.
+              Delete <Text style={{ fontWeight: '700', color: colors.textPrimary }}>{account.name}</Text>? Associated transactions will be preserved.
             </Text>
 
             <View style={styles.deleteActionButtons}>

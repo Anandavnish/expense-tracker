@@ -165,6 +165,9 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
   const [source, setSource] = useState<TransactionSource>(params?.prefillSource || 'manual');
   const [isScanning, setIsScanning] = useState(Boolean(params?.isAnalyzing));
   const [extractedText, setExtractedText] = useState<string>(params?.prefillRawText || '');
+  const [scannedImageUri, setScannedImageUri] = useState<string | null>(params?.imageUri || null);
+  const [scannedBase64, setScannedBase64] = useState<string | null>(null);
+  const [scannedMimeType, setScannedMimeType] = useState<string | undefined>(undefined);
   const [isAiFormatting, setIsAiFormatting] = useState(false);
   const [scanToast, setScanToast] = useState<{
     type: 'success' | 'error' | 'info';
@@ -240,6 +243,7 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
       date: params.prefillDate,
       source: params.prefillSource,
       rawText: params.prefillRawText,
+      imageUri: params.imageUri,
       isAnalyzing: params.isAnalyzing,
       tier: params.resolutionTier,
       stamp: params.dispatchTimestamp || params.scanMessage,
@@ -265,6 +269,10 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
 
     if (params.prefillRawText) {
       setExtractedText(params.prefillRawText);
+    }
+
+    if (params.imageUri) {
+      setScannedImageUri(params.imageUri);
     }
 
     if (params.isAnalyzing !== undefined) {
@@ -343,6 +351,9 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
       const asset = pickRes.assets[0];
       const imageUri = asset.uri;
       const base64 = asset.base64;
+      setScannedImageUri(imageUri);
+      setScannedBase64(base64 || null);
+      setScannedMimeType(asset.mimeType || undefined);
       setIsScanning(true);
       setScanToast({ type: 'info', message: 'Reading receipt with on-device OCR...' });
 
@@ -465,7 +476,7 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
 
   const handleFormatWithAi = async () => {
     const textToFormat = extractedText.trim() || note.trim();
-    if (!textToFormat) {
+    if (!textToFormat && !scannedImageUri && !scannedBase64) {
       setScanToast({
         type: 'info',
         message: 'Scan a receipt or type transaction text in the note first to format with AI',
@@ -483,13 +494,19 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
 
     try {
       setIsAiFormatting(true);
+      const isVisionMode = Boolean(scannedImageUri || scannedBase64);
       setScanToast({
         type: 'info',
-        message: 'Formatting with Gemini AI (sending text only)...',
+        message: isVisionMode
+          ? 'Deep scanning receipt with Gemini Vision...'
+          : 'Formatting with Gemini AI...',
       });
 
       const res = await parseReceiptWithGemini({
-        text: textToFormat,
+        text: textToFormat || undefined,
+        imageUri: scannedImageUri || undefined,
+        base64: scannedBase64 || undefined,
+        mimeType: scannedMimeType || undefined,
         availableCategories: categories,
       });
 
@@ -697,8 +714,8 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
       setFormError('Please select a source account to deduct from');
       return;
     }
-    if (isCreditCard && (type === 'borrow_given' || type === 'borrow_taken')) {
-      setFormError('Credit cards cannot be used for Lent/Borrowed entries. Please select a Bank or Cash account.');
+    if (isCreditCard && type === 'borrow_taken') {
+      setFormError('Credit cards cannot be used to receive borrowed money. Please select a Bank or Cash account.');
       return;
     }
     if ((type === 'borrow_given' || type === 'borrow_taken') && !personName.trim()) {
@@ -774,48 +791,24 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
           </TouchableOpacity>
         )}
         <Text style={styles.headerTitle}>LOG TRANSACTION</Text>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-          <TouchableOpacity
-            onPress={handlePickAndScanImage}
-            disabled={isScanning || isAiFormatting}
-            style={[
-              styles.headerScanBtn,
-              { backgroundColor: colors.surfaceVariant, borderColor: colors.border },
-            ]}
-            activeOpacity={0.7}
-          >
-            {isScanning ? (
-              <ActivityIndicator size="small" color={colors.primary} />
-            ) : (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                <Ionicons name="scan-outline" size={14} color={colors.primary} />
-                <Text style={[styles.headerScanText, { color: colors.primary }]}>Scan</Text>
-              </View>
-            )}
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            onPress={handleFormatWithAi}
-            disabled={isScanning || isAiFormatting}
-            style={[
-              styles.headerScanBtn,
-              {
-                backgroundColor: hasGeminiApiKey ? colors.primaryContainer : colors.surfaceVariant,
-                borderColor: hasGeminiApiKey ? colors.primary : colors.border,
-              },
-            ]}
-            activeOpacity={0.7}
-          >
-            {isAiFormatting ? (
-              <ActivityIndicator size="small" color={colors.primary} />
-            ) : (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                <Ionicons name="sparkles" size={13} color={colors.primary} />
-                <Text style={[styles.headerScanText, { color: colors.primary }]}>AI</Text>
-              </View>
-            )}
-          </TouchableOpacity>
-        </View>
+        <TouchableOpacity
+          onPress={handlePickAndScanImage}
+          disabled={isScanning || isAiFormatting}
+          style={[
+            styles.headerScanBtn,
+            { backgroundColor: colors.surfaceVariant, borderColor: colors.border },
+          ]}
+          activeOpacity={0.7}
+        >
+          {isScanning ? (
+            <ActivityIndicator size="small" color={colors.primary} />
+          ) : (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <Ionicons name="scan-outline" size={14} color={colors.primary} />
+              <Text style={[styles.headerScanText, { color: colors.primary }]}>Scan</Text>
+            </View>
+          )}
+        </TouchableOpacity>
       </View>
 
       <KeyboardAwareScrollView
@@ -903,7 +896,7 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
             >
               {scanToast.message}
             </Text>
-            {Boolean(extractedText) && (
+            {(Boolean(extractedText) || Boolean(scannedImageUri)) && (
               <TouchableOpacity
                 onPress={handleFormatWithAi}
                 disabled={isAiFormatting || isScanning}
@@ -918,7 +911,9 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
                 ) : (
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
                     <Ionicons name="sparkles" size={11} color={colors.primary} />
-                    <Text style={[styles.aiRefinePillText, { color: colors.primary }]}>AI Refine</Text>
+                    <Text style={[styles.aiRefinePillText, { color: colors.primary }]}>
+                      {scannedImageUri ? 'Deep AI Scan' : 'Format with AI'}
+                    </Text>
                   </View>
                 )}
               </TouchableOpacity>

@@ -408,27 +408,27 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation, rout
     {
       id: 'precision_obsidian',
       name: 'Precision Obsidian',
-      description: 'Indigo brand (#6366F1 / #4F46E5) • Warm near-black base',
+      description: 'Default indigo palette',
       brandColor: effectiveTheme === 'dark' ? '#6366F1' : '#4F46E5',
     },
     {
       id: 'warm_executive',
       name: 'Warm Executive',
-      description: 'Copper brand (#D97757 / #A85C32) • Umber & warm paper',
+      description: 'Warm copper & paper tones',
       brandColor: effectiveTheme === 'dark' ? '#D97757' : '#A85C32',
     },
     {
       id: 'swiss_minimal',
       name: 'Swiss Minimal',
-      description: 'Monochrome ink brand • Financial colors only',
+      description: 'High-contrast monochrome',
       brandColor: effectiveTheme === 'dark' ? '#F4F4F5' : '#18181B',
     },
     {
       id: 'system_wallpaper',
-      name: 'Match wallpaper (Android 12+)',
+      name: 'Match Wallpaper (Android 12+)',
       description: isDynamicSupported
-        ? 'Dynamic Material You wallpaper color integration'
-        : 'Material You dynamic theme (Auto-falls back to Precision Obsidian on this device)',
+        ? 'Dynamic Material You wallpaper colors'
+        : 'Auto-falls back to Precision Obsidian',
       brandColor: colors.primary,
       isDynamic: true,
     },
@@ -483,7 +483,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation, rout
                 {isGuest ? 'Guest Explorer' : user?.email}
               </Text>
               <Text style={[styles.accountIdText, { color: colors.textMuted }]}>
-                {isGuest ? 'Tap to backup data or set up cloud sync' : 'View security, password & sync status'}
+                {isGuest ? 'Tap to backup data or set up cloud sync' : 'Account security & cloud sync'}
               </Text>
             </View>
           </View>
@@ -492,10 +492,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation, rout
         {/* Appearance - Theme Mode (Dark / Light / System) */}
         <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>APPEARANCE MODE</Text>
-          <Text style={[styles.sectionSub, { color: colors.textSecondary }]}>
-            Switch between full dark and light mode variants for any selected style.
-          </Text>
-          <View style={styles.segmentedRow}>
+          <View style={[styles.segmentedRow, { marginTop: SPACING.xs }]}>
             {(['dark', 'light', 'system'] as const).map((mode) => {
               const active = themeMode === mode;
               return (
@@ -529,14 +526,8 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation, rout
         {/* Appearance - Multi-Style Theme Engine */}
         <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <View style={styles.sectionHeaderRow}>
-            <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>THEME SYSTEM</Text>
-            <View style={[styles.tagBadge, { backgroundColor: colors.primaryContainer }]}>
-              <Text style={[styles.tagBadgeText, { color: colors.primary }]}>MD3 PALETTES</Text>
-            </View>
+            <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>THEME PALETTES</Text>
           </View>
-          <Text style={[styles.sectionSub, { color: colors.textSecondary }]}>
-            Select a tailored design system. Every style preserves strictly locked financial semantic tokens.
-          </Text>
 
           <View style={styles.stylesList}>
             {styleOptions.map((opt) => {
@@ -643,8 +634,8 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation, rout
               </View>
               <Text style={[styles.placeholderSub, { color: colors.textMuted }]}>
                 {hasGeminiApiKey
-                  ? 'Key configured • Screenshot OCR & AI Overview active'
-                  : 'Add your free Gemini API key to unlock AI features'}
+                  ? 'Configured • Ready for scanning'
+                  : 'Connect free Gemini API key'}
               </Text>
             </View>
             <View
@@ -679,7 +670,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation, rout
                 Show AI Overview on Dashboard
               </Text>
               <Text style={[styles.placeholderSub, { color: colors.textMuted }]}>
-                Display on-demand monthly spending analysis card
+                Monthly spending insights
               </Text>
             </View>
             <Switch
@@ -704,7 +695,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation, rout
                 <Ionicons name="document-text-outline" size={14} color={colors.primary} />
               </View>
               <Text style={[styles.placeholderSub, { color: colors.textMuted }]}>
-                Custom date range (any month/year), accounts, types & categories
+                Export filtered transactions
               </Text>
             </View>
             <View style={[styles.actionBadge, { backgroundColor: colors.primaryContainer, borderColor: colors.primary }]}>
@@ -730,8 +721,8 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation, rout
               </View>
               <Text style={[styles.placeholderSub, { color: colors.textMuted }]}>
                 {rules.length === 0
-                  ? 'No learned rules yet (learns automatically from SMS & receipts)'
-                  : `${rules.length} vendor${rules.length === 1 ? '' : 's'} learned • View & edit`}
+                  ? 'Auto-learned vendor rules'
+                  : `${rules.length} custom rule${rules.length === 1 ? '' : 's'}`}
               </Text>
             </View>
             <View style={[styles.actionBadge, { backgroundColor: colors.surfaceVariant, borderColor: colors.border }]}>
@@ -757,7 +748,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation, rout
               <Text style={[styles.placeholderSub, { color: colors.textMuted }]}>
                 {isCheckingUpdates
                   ? 'Checking for latest release...'
-                  : `Version ${CURRENT_APP_VERSION} (Build ${CURRENT_VERSION_CODE})`}
+                  : `Version ${CURRENT_APP_VERSION} (${CURRENT_VERSION_CODE})`}
               </Text>
             </View>
             <View style={[styles.actionBadge, { backgroundColor: colors.surfaceVariant, borderColor: colors.border }]}>
@@ -780,11 +771,11 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation, rout
           activeOpacity={0.7}
         >
           <Ionicons name="person-circle-outline" size={18} color={colors.textSecondary} style={{ marginRight: 6 }} />
-          <Text style={[styles.signOutBtnText, { color: colors.textSecondary }]}>Account, Security & Sign Out</Text>
+          <Text style={[styles.signOutBtnText, { color: colors.textSecondary }]}>Account & Security</Text>
         </TouchableOpacity>
 
         <Text style={styles.versionFooter}>
-          Expense Tracker v{CURRENT_APP_VERSION} (Build {CURRENT_VERSION_CODE}) • Material Design 3 Architecture
+          Expense Tracker v{CURRENT_APP_VERSION} ({CURRENT_VERSION_CODE})
         </Text>
       </ScrollView>
 
@@ -1115,13 +1106,12 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation, rout
             >
               {/* Plain-Language Explanation */}
               <View style={[styles.byokExplainCard, { backgroundColor: colors.surfaceVariant, borderColor: colors.border }]}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-                  <Ionicons name="shield-checkmark-outline" size={16} color={colors.primary} />
-                  <Text style={[styles.byokExplainTitle, { color: colors.textPrimary }]}>Private & Free</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Ionicons name="shield-checkmark-outline" size={15} color={colors.primary} />
+                  <Text style={[styles.byokExplainText, { color: colors.textSecondary, marginBottom: 0 }]}>
+                    Your free Gemini API key is stored securely on your device.
+                  </Text>
                 </View>
-                <Text style={[styles.byokExplainText, { color: colors.textSecondary }]}>
-                  Add your own free Gemini API key to unlock screenshot scanning and AI spending summaries. Your key is private to your account. Transaction text is sent to Google's Gemini API using your key to process it.
-                </Text>
               </View>
 
               {/* Step-by-Step Instructions */}
@@ -1138,11 +1128,9 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation, rout
                 </View>
 
                 {[
-                  { step: '1', text: 'Go to aistudio.google.com/apikey' },
-                  { step: '2', text: 'Sign in with any Google account' },
-                  { step: '3', text: 'Tap Create API key' },
-                  { step: '4', text: 'Copy it' },
-                  { step: '5', text: 'Paste below' },
+                  { step: '1', text: 'Open Google AI Studio' },
+                  { step: '2', text: 'Create free API key' },
+                  { step: '3', text: 'Copy & paste below' },
                 ].map((item) => (
                   <View key={item.step} style={styles.byokStepRow}>
                     <View style={[styles.byokStepNum, { backgroundColor: colors.primaryContainer }]}>

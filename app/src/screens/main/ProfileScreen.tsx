@@ -250,7 +250,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ navigation }) => {
               </View>
             </View>
             <Text style={[styles.cardDescription, { color: colors.textSecondary }]}>
-              You are currently using Expense Tracker offline as a guest. Sign in with Google or Email at any time to automatically migrate and sync all your current local accounts, transactions, and budgets to the cloud!
+              Sign in to sync your local accounts, transactions, and budgets to the cloud.
             </Text>
 
             <View style={{ gap: SPACING.sm, marginTop: SPACING.md }}>
@@ -294,8 +294,8 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ navigation }) => {
             </View>
             <Text style={[styles.cardDescription, { color: colors.textSecondary }]}>
               {isGoogleUser
-                ? 'You logged in with Google. Set a custom password here so you can log in directly using either Google or your email & password in the future.'
-                : 'Update your account password for secure email & password login.'}
+                ? 'Set a password to enable email & password sign-in alongside Google.'
+                : 'Update your account password.'}
             </Text>
 
             {passwordFeedback && (
@@ -444,8 +444,8 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ navigation }) => {
 
           <Text style={[styles.cardDescription, { color: colors.textSecondary }]}>
             {isGuest
-              ? 'Local cache is active. All your finances are stored safely in high-speed device storage.'
-              : 'Offline-first database architecture. All transactions write to device cache instantly and synchronize to Supabase cloud in the background.'}
+              ? 'Data is stored locally on this device.'
+              : 'Changes save locally and sync with the cloud automatically.'}
           </Text>
 
           <View style={[styles.syncMetaBox, { backgroundColor: colors.surfaceVariant, borderColor: colors.border }]}>
@@ -453,12 +453,6 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ navigation }) => {
               <Text style={[styles.syncMetaLabel, { color: colors.textMuted }]}>Last Synced:</Text>
               <Text style={[styles.syncMetaValue, { color: colors.textPrimary }]}>
                 {formatLastSync()}
-              </Text>
-            </View>
-            <View style={styles.syncMetaRow}>
-              <Text style={[styles.syncMetaLabel, { color: colors.textMuted }]}>Device Engine:</Text>
-              <Text style={[styles.syncMetaValue, { color: colors.textPrimary }]}>
-                AsyncStorage Cache v2 + Supabase
               </Text>
             </View>
           </View>
@@ -512,7 +506,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ navigation }) => {
             </View>
           </View>
           <Text style={[styles.cardDescription, { color: colors.textSecondary }]}>
-            Gemini AI uses a Bring-Your-Own-Key (BYOK) architecture. Monthly financial totals are aggregated entirely on your device and sent directly to Google AI Studio. This means AI features (OCR receipt parsing & spending summaries) work completely privately in both Guest mode and Cloud mode!
+            Power receipt scanning and smart financial insights using your personal API key.
           </Text>
 
           <TouchableOpacity
@@ -565,7 +559,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ navigation }) => {
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                 <Ionicons name="trash-outline" size={16} color={colors.alert} />
                 <Text style={[styles.dangerActionBtnText, { color: colors.alert, fontWeight: '700' }]}>
-                  {isGuest ? 'Clear Local Data' : 'Delete Account & Clear Cloud Data'}
+                  {isGuest ? 'Clear Local Data' : 'Delete Account'}
                 </Text>
               </View>
             )}
@@ -573,7 +567,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ navigation }) => {
         </View>
 
         <Text style={[styles.footerText, { color: colors.textMuted }]}>
-          Expense Tracker • Built with offline-first local cache & Supabase
+          Expense Tracker
         </Text>
       </KeyboardAwareScrollView>
     </View>

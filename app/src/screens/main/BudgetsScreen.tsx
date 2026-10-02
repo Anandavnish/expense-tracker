@@ -23,7 +23,6 @@ import { useSettingsStore } from '../../store/settingsStore';
 import { COLORS, SPACING, TYPOGRAPHY } from '../../theme/tokens';
 import { InlineError } from '../../components/InlineError';
 import { TactileButton } from '../../components/TactileButton';
-import { ReanimatedNumber } from '../../components/ReanimatedNumber';
 import { KeyboardAwareScrollView } from '../../components/KeyboardAwareScrollView';
 import { EditButton, EditIcon } from '../../components/EditButton';
 import { getCategoryIcon, getCategoryColor } from '../../utils/categoryIcons';
@@ -555,8 +554,10 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
         extraScrollHeight={80}
         showsVerticalScrollIndicator={false}
       >
-        {/* Alive Budget Overview Cockpit */}
-        <View
+        {/* Master Overall Budget & Health Cockpit */}
+        <TouchableOpacity
+          onPress={() => handleOpenForm('Overall Budget')}
+          activeOpacity={overallSummary ? 0.95 : 0.8}
           style={[
             styles.cockpitCard,
             {
@@ -573,58 +574,164 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
                   { backgroundColor: accent.muted },
                 ]}
               >
-                <Ionicons name="sparkles" size={16} color={accent.hex} />
+                <Ionicons
+                  name={overallSummary ? 'pie-chart' : 'sparkles'}
+                  size={16}
+                  color={accent.hex}
+                />
               </View>
               <View>
                 <Text style={[styles.cockpitSubtitle, { color: colors.textMuted }]}>
-                  MONTHLY BUDGET HEALTH
+                  {overallSummary ? 'OVERALL BUDGET' : 'MONTHLY BUDGET HEALTH'}
                 </Text>
                 <Text style={[styles.cockpitTitle, { color: colors.textPrimary }]}>
                   {totalBudgetLimit > 0
                     ? `₹${totalSpent.toLocaleString('en-IN')} of ₹${totalBudgetLimit.toLocaleString('en-IN')}`
-                    : 'No limits set yet'}
+                    : 'No overall budget set'}
                 </Text>
               </View>
             </View>
 
-            {totalBudgetLimit > 0 && (
-              <View
-                style={[
-                  styles.statusBadge,
-                  {
-                    backgroundColor:
-                      overallPct >= 100
-                        ? colors.alertMuted
-                        : overallPct >= 80
-                        ? colors.warningMuted
-                        : accent.muted,
-                  },
-                ]}
-              >
-                <Text
+            {overallSummary && Number(overallSummary.monthly_limit) > 0 ? (
+              <View style={styles.cardHeaderRight}>
+                <View
                   style={[
-                    styles.statusBadgeText,
+                    styles.statusBadge,
                     {
-                      color:
+                      backgroundColor:
                         overallPct >= 100
-                          ? colors.alert
+                          ? colors.alertMuted
                           : overallPct >= 80
-                          ? colors.warning
-                          : accent.hex,
+                          ? colors.warningMuted
+                          : accent.muted,
                     },
                   ]}
                 >
-                  {overallPct >= 100
-                    ? 'Over Budget'
-                    : overallPct >= 80
-                    ? 'Approaching Limit'
-                    : 'On Track'}
+                  <Text
+                    style={[
+                      styles.statusBadgeText,
+                      {
+                        color:
+                          overallPct >= 100
+                            ? colors.alert
+                            : overallPct >= 80
+                            ? colors.warning
+                            : accent.hex,
+                      },
+                    ]}
+                  >
+                    {overallPct >= 100
+                      ? 'Over Budget'
+                      : overallPct >= 80
+                      ? 'Approaching'
+                      : 'On Track'}
+                  </Text>
+                </View>
+                <Text
+                  style={[
+                    styles.pctBadgeText,
+                    TYPOGRAPHY.tabularText,
+                    {
+                      color: getStatusColor(overallPct),
+                      marginLeft: 2,
+                    },
+                  ]}
+                >
+                  {overallPct}%
+                </Text>
+                <View style={[styles.cardActionsCluster, { marginLeft: 4 }]}>
+                  <EditButton
+                    size={26}
+                    iconSize={13}
+                    onPress={() => handleOpenForm('Overall Budget')}
+                  />
+                  <TouchableOpacity
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      promptDeleteBudget('Overall Budget');
+                    }}
+                    style={[
+                      styles.cardDeletePill,
+                      {
+                        borderColor: colors.alert + '40',
+                        backgroundColor: colors.alertMuted,
+                      },
+                    ]}
+                    hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
+                  >
+                    <Ionicons name="trash-outline" size={12} color={colors.alert} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : totalBudgetLimit > 0 ? (
+              <View style={styles.cardHeaderRight}>
+                <View
+                  style={[
+                    styles.statusBadge,
+                    {
+                      backgroundColor:
+                        overallPct >= 100
+                          ? colors.alertMuted
+                          : overallPct >= 80
+                          ? colors.warningMuted
+                          : accent.muted,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.statusBadgeText,
+                      {
+                        color:
+                          overallPct >= 100
+                            ? colors.alert
+                            : overallPct >= 80
+                            ? colors.warning
+                            : accent.hex,
+                      },
+                    ]}
+                  >
+                    {overallPct >= 100
+                      ? 'Over Budget'
+                      : overallPct >= 80
+                      ? 'Approaching'
+                      : 'On Track'}
+                  </Text>
+                </View>
+                <Text
+                  style={[
+                    styles.pctBadgeText,
+                    TYPOGRAPHY.tabularText,
+                    {
+                      color: getStatusColor(overallPct),
+                      marginLeft: 2,
+                    },
+                  ]}
+                >
+                  {overallPct}%
                 </Text>
               </View>
+            ) : (
+              <TouchableOpacity
+                onPress={() => handleOpenForm('Overall Budget')}
+                style={[
+                  styles.emptyActionPill,
+                  {
+                    backgroundColor: accent.muted,
+                    borderColor: accent.hex,
+                    paddingVertical: 4,
+                    paddingHorizontal: 10,
+                  },
+                ]}
+              >
+                <Text style={[styles.emptyActionText, { color: accent.hex, fontSize: 11 }]}>
+                  + Set Limit
+                </Text>
+              </TouchableOpacity>
             )}
           </View>
 
-          {totalBudgetLimit > 0 && (
+          {totalBudgetLimit > 0 ? (
             <>
               <ProgressBar
                 progress={Math.min(overallPct / 100, 1)}
@@ -675,8 +782,12 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
                 )}
               </View>
             </>
+          ) : (
+            <Text style={[styles.emptySubtitle, { color: colors.textSecondary, textAlign: 'left', marginTop: SPACING.xs, marginBottom: 0 }]}>
+              Tap to set an overall monthly spending limit for {selectedMonth}.
+            </Text>
           )}
-        </View>
+        </TouchableOpacity>
 
         {/* Set Budget Form (Collapsible with Smooth Animation) */}
         {showForm && (
@@ -1120,178 +1231,8 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
           </View>
         )}
 
-        {/* 1. Overall Monthly Budget Card */}
-        <View style={styles.sectionHeader}>
-          <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>
-            OVERALL MONTHLY SPEND
-          </Text>
-        </View>
-
-        {overallSummary ? (
-          <TouchableOpacity
-            onPress={() => handleOpenForm('Overall Budget')}
-            style={[
-              styles.budgetCard,
-              {
-                backgroundColor: colors.surface,
-                borderColor: colors.border,
-              },
-            ]}
-            activeOpacity={0.8}
-          >
-            <View style={styles.cardHeader}>
-              <View style={styles.cardHeaderTitleRow}>
-                <View
-                  style={[
-                    styles.cardHeaderIconCircle,
-                    { backgroundColor: accent.muted },
-                  ]}
-                >
-                  <Ionicons name="pie-chart" size={17} color={accent.hex} />
-                </View>
-                <View style={styles.cardHeaderTitleTextCol}>
-                  <Text
-                    style={[styles.budgetCardName, { color: colors.textPrimary }]}
-                    numberOfLines={2}
-                  >
-                    Overall Budget
-                  </Text>
-                </View>
-              </View>
-              <View style={styles.cardHeaderRight}>
-                <Text
-                  style={[
-                    styles.pctBadgeText,
-                    TYPOGRAPHY.tabularText,
-                    {
-                      color: getStatusColor(
-                        Number(overallSummary.spent_percentage)
-                      ),
-                    },
-                  ]}
-                >
-                  {Math.round(Number(overallSummary.spent_percentage))}%
-                </Text>
-                <View style={styles.cardActionsCluster}>
-                  <EditButton
-                    size={26}
-                    iconSize={13}
-                    onPress={() => handleOpenForm('Overall Budget')}
-                  />
-                  <TouchableOpacity
-                    onPress={(e) => {
-                      e.stopPropagation();
-                      promptDeleteBudget('Overall Budget');
-                    }}
-                    style={[
-                      styles.cardDeletePill,
-                      {
-                        borderColor: colors.alert + '40',
-                        backgroundColor: colors.alertMuted,
-                      },
-                    ]}
-                    hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
-                  >
-                    <Ionicons name="trash-outline" size={12} color={colors.alert} />
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </View>
-
-            <View style={styles.numbersRow}>
-              <View>
-                <Text style={[styles.label, { color: colors.textMuted }]}>
-                  SPENT
-                </Text>
-                <ReanimatedNumber
-                  value={Number(overallSummary.spent)}
-                  style={[styles.spentNumber, { color: colors.textPrimary }]}
-                  decimals={0}
-                />
-              </View>
-              <View style={styles.rightAlign}>
-                <Text style={[styles.label, { color: colors.textMuted }]}>
-                  LIMIT
-                </Text>
-                <ReanimatedNumber
-                  value={Number(overallSummary.monthly_limit)}
-                  style={[styles.limitNumber, { color: colors.textSecondary }]}
-                  decimals={0}
-                />
-              </View>
-            </View>
-
-            <ProgressBar
-              progress={Math.min(
-                Number(overallSummary.spent_percentage) / 100,
-                1
-              )}
-              color={getStatusColor(Number(overallSummary.spent_percentage))}
-              style={styles.progressBar}
-            />
-
-            <View style={styles.footerRow}>
-              <Text style={[styles.remainingLabel, { color: colors.textSecondary }]}>
-                Remaining Budget
-              </Text>
-              <Text
-                style={[
-                  styles.remainingValue,
-                  TYPOGRAPHY.tabularText,
-                  {
-                    color:
-                      Number(overallSummary.remaining) >= 0
-                        ? accent.hex
-                        : colors.alert,
-                  },
-                ]}
-              >
-                {Number(overallSummary.remaining) >= 0 ? '₹' : '-₹'}
-                {Math.abs(Number(overallSummary.remaining)).toLocaleString('en-IN')}
-              </Text>
-            </View>
-          </TouchableOpacity>
-        ) : (
-          <TouchableOpacity
-            onPress={() => handleOpenForm('Overall Budget')}
-            style={[
-              styles.emptyCard,
-              {
-                backgroundColor: colors.surface,
-                borderColor: colors.border,
-              },
-            ]}
-            activeOpacity={0.8}
-          >
-            <View
-              style={[
-                styles.emptyIconCircle,
-                { backgroundColor: accent.muted },
-              ]}
-            >
-              <Ionicons name="pie-chart-outline" size={24} color={accent.hex} />
-            </View>
-            <Text style={[styles.emptyTitle, { color: colors.textPrimary }]}>
-              No overall budget configured
-            </Text>
-            <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
-              Tap to set an overall monthly spending limit for {selectedMonth}.
-            </Text>
-            <View
-              style={[
-                styles.emptyActionPill,
-                { backgroundColor: accent.muted, borderColor: accent.hex },
-              ]}
-            >
-              <Text style={[styles.emptyActionText, { color: accent.hex }]}>
-                + Set Monthly Limit
-              </Text>
-            </View>
-          </TouchableOpacity>
-        )}
-
-        {/* 2. Category Budgets Section */}
-        <View style={[styles.sectionHeader, { marginTop: SPACING.lg }]}>
+        {/* Category Budgets Section */}
+        <View style={[styles.sectionHeader, { marginTop: SPACING.md }]}>
           <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>
             CATEGORY BREAKDOWN
           </Text>
