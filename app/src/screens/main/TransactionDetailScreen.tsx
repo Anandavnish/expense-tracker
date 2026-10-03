@@ -101,7 +101,7 @@ export const TransactionDetailScreen = () => {
     if (transaction) {
       setEditAmount(String(transaction.amount));
       setEditType(transaction.type);
-      setEditAccountId(transaction.account_id);
+      setEditAccountId(transaction.account_id || '');
       setEditCategory(transaction.category);
       setEditDate(transaction.date);
       setEditNote(transaction.note || '');
@@ -221,7 +221,7 @@ export const TransactionDetailScreen = () => {
       setErrorMessage('Please enter a valid amount greater than 0');
       return;
     }
-    if (!editAccountId) {
+    if (!editAccountId && !transaction.paid_by_friend) {
       setErrorMessage('Please select a payment account');
       return;
     }
@@ -240,7 +240,7 @@ export const TransactionDetailScreen = () => {
     const res = await updateTransactionOptimistic(transaction.id, {
       amount: numAmount,
       type: editType,
-      account_id: editAccountId,
+      account_id: editAccountId || transaction.account_id || (null as any),
       category: editCategory.trim(),
       date: editDate.trim(),
       note: editNote.trim() || null,
@@ -437,7 +437,9 @@ export const TransactionDetailScreen = () => {
               {/* Payment Account */}
               <View style={styles.infoRow}>
                 <View style={styles.infoLabelGroup}>
-                  {account ? (
+                  {transaction.paid_by_friend ? (
+                    <Ionicons name="people-outline" size={18} color={colors.warning} />
+                  ) : account ? (
                     <BankLogo account={account} name={account.name} size={18} />
                   ) : (
                     <Ionicons name="wallet-outline" size={18} color={colors.textSecondary} />
@@ -445,12 +447,32 @@ export const TransactionDetailScreen = () => {
                   <Text style={styles.infoLabel}>Money Source</Text>
                 </View>
                 <View style={styles.infoValueRight}>
-                  <Text style={styles.infoValuePrimary}>{account?.name || 'Unknown Account'}</Text>
-                  <View style={styles.accountTypeTag}>
-                    <Text style={styles.accountTypeTagText}>
-                      {account?.type ? account.type.toUpperCase() : 'ACCOUNT'}
-                    </Text>
-                  </View>
+                  {transaction.paid_by_friend ? (
+                    <>
+                      <Text style={[styles.infoValuePrimary, { color: linkedBorrow?.status === 'settled' ? colors.income : colors.warning }]}>
+                        Paid by {transaction.friend_name || 'Friend'}
+                      </Text>
+                      <View style={[styles.accountTypeTag, { backgroundColor: linkedBorrow?.status === 'settled' ? `${colors.income}20` : `${colors.warning}20` }]}>
+                        <Text style={[styles.accountTypeTagText, { color: linkedBorrow?.status === 'settled' ? colors.income : colors.warning }]}>
+                          {linkedBorrow?.status === 'settled' ? 'BORROWED DEBT (SETTLED)' : 'BORROWED DEBT (PENDING)'}
+                        </Text>
+                      </View>
+                      {account ? (
+                        <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }}>
+                          Default Settlement: {account.name}
+                        </Text>
+                      ) : null}
+                    </>
+                  ) : (
+                    <>
+                      <Text style={styles.infoValuePrimary}>{account?.name || 'Unknown Account'}</Text>
+                      <View style={styles.accountTypeTag}>
+                        <Text style={styles.accountTypeTagText}>
+                          {account?.type ? account.type.toUpperCase() : 'ACCOUNT'}
+                        </Text>
+                      </View>
+                    </>
+                  )}
                 </View>
               </View>
 

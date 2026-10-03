@@ -14,6 +14,9 @@ export interface Account {
   credit_limit: number | null;
   bank_preset?: string | null;
   card_issuer?: string | null;
+  billing_cycle_day?: number | null;
+  payment_due_day?: number | null;
+  current_statement_billed_due?: number | null;
   custom_icon?: string | null;
   custom_color?: string | null;
   display_order?: number;
@@ -27,13 +30,15 @@ export type TransactionSource = 'manual' | 'screenshot' | 'sms';
 export interface Transaction {
   id: string;
   user_id: string;
-  account_id: string;
+  account_id?: string | null;
   type: TransactionType;
   amount: number;
   category: string;
   note: string | null;
   date: string; // YYYY-MM-DD
   source: TransactionSource;
+  paid_by_friend?: boolean | null;
+  friend_name?: string | null;
   created_at: string;
 }
 

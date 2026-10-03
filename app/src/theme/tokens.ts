@@ -520,6 +520,36 @@ export const CATEGORY_TOKENS: Record<string, CategoryToken> = {
   },
 };
 
+export const DYNAMIC_CATEGORY_PALETTE = [
+  '#06B6D4', // Cyan
+  '#EC4899', // Pink
+  '#8B5CF6', // Purple
+  '#10B981', // Emerald
+  '#F59E0B', // Amber
+  '#6366F1', // Indigo
+  '#14B8A6', // Teal
+  '#F97316', // Orange
+  '#3B82F6', // Blue
+  '#A855F7', // Violet
+  '#E11D48', // Rose
+  '#84CC16', // Lime
+  '#D946EF', // Fuchsia
+  '#0EA5E9', // Sky
+  '#EAB308', // Yellow
+  '#475569', // Slate
+];
+
+export const getCategoryColorHash = (name: string): string => {
+  let hash = 0;
+  const str = (name || '').trim().toLowerCase();
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash << 5) - hash + str.charCodeAt(i);
+    hash |= 0;
+  }
+  const idx = Math.abs(hash) % DYNAMIC_CATEGORY_PALETTE.length;
+  return DYNAMIC_CATEGORY_PALETTE[idx];
+};
+
 export const getCategoryToken = (categoryName: string): CategoryToken => {
   const lower = (categoryName || '').toLowerCase();
   if (lower.includes('food') || lower.includes('dining') || lower.includes('eat') || lower.includes('cafe')) {
@@ -555,6 +585,19 @@ export const getCategoryToken = (categoryName: string): CategoryToken => {
   if (lower.includes('grocer')) {
     return CATEGORY_TOKENS.groceries;
   }
+
+  // If no predefined keyword match, generate a deterministic, vibrant category token
+  if (categoryName && categoryName.trim().length > 0 && lower !== 'uncategorized' && lower !== 'other') {
+    const dynamicColor = getCategoryColorHash(categoryName);
+    return {
+      key: lower.replace(/\s+/g, '_'),
+      label: categoryName,
+      color: dynamicColor,
+      bg: `${dynamicColor}20`,
+      text: dynamicColor,
+    };
+  }
+
   return CATEGORY_TOKENS.default;
 };
 

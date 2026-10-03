@@ -106,7 +106,10 @@ export function generateStatementHtml(options: StatementExportOptions): string {
             amountColor = '#0284C7';
           }
 
-          const accountName = (tx as any).account?.name || accountMap[tx.account_id] || 'Source Account';
+          const accountName =
+            (tx as any).account?.name ||
+            (tx.account_id ? accountMap[tx.account_id] : '') ||
+            (tx.paid_by_friend ? `Paid by ${tx.friend_name || 'Friend'}` : 'Source Account');
           const rowBg = idx % 2 === 0 ? '#FFFFFF' : '#FAFAFA';
 
           // Extract time if available in created_at

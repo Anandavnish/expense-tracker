@@ -97,12 +97,31 @@ export const RootNavigator = () => {
     }
   }, []);
 
-  // Surface shared transactions: safely posts a tappable notification if backgrounded
-  // (compliant with Android 10+ Background Activity Launch restrictions), or directly navigates if active
+  // Surface shared transactions: persists draft to AsyncStorage, always navigates/queues,
+  // and posts an OS notification as fallback if backgrounded
   const surfaceSharedTransaction = useCallback(
     async (navParams: any, summaryTitle: string, summaryBody: string) => {
-      const isBackgrounded = AppState.currentState !== 'active';
+      // 1. ALWAYS persist the shared payload to AsyncStorage so it survives app standby or kill
+      try {
+        await AsyncStorage.setItem(
+          '@pending_shared_transaction_draft_v1',
+          JSON.stringify({
+            navParams,
+            summaryTitle,
+            summaryBody,
+            timestamp: Date.now(),
+          })
+        );
+      } catch (e) {
+        console.warn('[RootNavigator] Failed to cache shared draft:', e);
+      }
 
+      // 2. ALWAYS dispatch navigation (or queue it for when container is ready)
+      pendingNavRef.current = { screen: 'AddTransaction', params: navParams };
+      navigateOrQueue('AddTransaction', navParams);
+
+      // 3. If currently backgrounded, also trigger OS notification so user can tap it from notifications tray
+      const isBackgrounded = AppState.currentState !== 'active';
       if (isBackgrounded && Notifications) {
         try {
           await Notifications.scheduleNotificationAsync({
@@ -119,12 +138,45 @@ export const RootNavigator = () => {
         } catch (e) {
           console.warn('[RootNavigator] Failed to schedule notification:', e);
         }
-      } else {
-        navigateOrQueue('AddTransaction', navParams);
       }
     },
     [navigateOrQueue]
   );
+
+  // Listen for app coming to foreground to immediately fulfill any pending shared transaction
+  useEffect(() => {
+    const handleAppStateChange = async (nextAppState: string) => {
+      if (nextAppState === 'active') {
+        if (pendingNavRef.current) {
+          const { screen, params } = pendingNavRef.current;
+          pendingNavRef.current = null;
+          navigateOrQueue(screen, params);
+          return;
+        }
+
+        // If there's an unconsumed recent shared draft in storage, navigate to AddTransaction
+        try {
+          const stored = await AsyncStorage.getItem('@pending_shared_transaction_draft_v1');
+          if (stored) {
+            const parsed = JSON.parse(stored);
+            if (parsed?.navParams && Date.now() - (parsed.timestamp || 0) < 15 * 60 * 1000) {
+              const currentRoute = navigationRef.isReady() ? navigationRef.getCurrentRoute()?.name : null;
+              if (currentRoute !== 'AddTransaction') {
+                navigateOrQueue('AddTransaction', parsed.navParams);
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('[RootNavigator] Failed checking shared draft on active:', e);
+        }
+      }
+    };
+
+    const sub = AppState.addEventListener('change', handleAppStateChange);
+    return () => {
+      sub.remove();
+    };
+  }, [navigateOrQueue]);
 
   // Listen for user taps on the transaction notification to route cleanly from background
   useEffect(() => {
@@ -276,13 +328,13 @@ export const RootNavigator = () => {
 
         surfaceSharedTransaction(navParams, title, body);
       } catch {
-        if (AppState.currentState === 'active') {
-          navigateOrQueue('AddTransaction', {
-            imageUri: uri,
-            isAnalyzing: false,
-            scanError: "Couldn't read that screenshot — enter it manually",
-          });
-        }
+        const errorParams = {
+          imageUri: uri,
+          isAnalyzing: false,
+          scanError: "Couldn't read that screenshot — enter it manually",
+        };
+        pendingNavRef.current = { screen: 'AddTransaction', params: errorParams };
+        navigateOrQueue('AddTransaction', errorParams);
       }
     },
     [hasGeminiApiKey, user, navigateOrQueue, surfaceSharedTransaction]

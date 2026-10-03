@@ -40,6 +40,10 @@ const TransactionRowComponent: React.FC<TransactionRowProps> = ({
   const account = useFinanceStore(
     React.useCallback((s) => s.accounts.find((a) => a.id === transaction.account_id), [transaction.account_id])
   );
+  const linkedBorrow = useFinanceStore(
+    React.useCallback((s) => s.borrows.find((b) => b.linked_transaction_id === transaction.id), [transaction.id])
+  );
+  const isBorrowSettled = linkedBorrow?.status === 'settled';
 
   const isIncome = transaction.type === 'income';
   const isExpense = transaction.type === 'expense';
@@ -153,7 +157,37 @@ const TransactionRowComponent: React.FC<TransactionRowProps> = ({
                   {transaction.category.toUpperCase()}
                 </Text>
 
-                {accountName ? (
+                {transaction.paid_by_friend ? (
+                  <>
+                    <Text style={[styles.metaDot, { color: colors.textMuted }]}>·</Text>
+                    <View
+                      style={[
+                        styles.accountBadge,
+                        {
+                          backgroundColor: isBorrowSettled ? `${colors.income}18` : `${colors.warning}18`,
+                          borderColor: isBorrowSettled ? `${colors.income}44` : `${colors.warning}44`,
+                          borderWidth: StyleSheet.hairlineWidth,
+                        },
+                      ]}
+                    >
+                      <Ionicons
+                        name={isBorrowSettled ? 'checkmark-circle-outline' : 'people-outline'}
+                        size={13}
+                        color={isBorrowSettled ? colors.income : colors.warning}
+                        style={{ marginRight: 4 }}
+                      />
+                      <Text
+                        style={[
+                          styles.accountBadgeText,
+                          { color: isBorrowSettled ? colors.income : colors.warning, fontWeight: '600' },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        Paid by {transaction.friend_name || 'Friend'}{isBorrowSettled ? ' · Settled' : ' · Debt Pending'}
+                      </Text>
+                    </View>
+                  </>
+                ) : accountName ? (
                   <>
                     <Text style={[styles.metaDot, { color: colors.textMuted }]}>·</Text>
                     <View
@@ -188,7 +222,37 @@ const TransactionRowComponent: React.FC<TransactionRowProps> = ({
             </>
           ) : (
             <View style={styles.metaRow}>
-              {accountName ? (
+              {transaction.paid_by_friend ? (
+                <>
+                  <View
+                    style={[
+                      styles.accountBadge,
+                      {
+                        backgroundColor: isBorrowSettled ? `${colors.income}18` : `${colors.warning}18`,
+                        borderColor: isBorrowSettled ? `${colors.income}44` : `${colors.warning}44`,
+                        borderWidth: StyleSheet.hairlineWidth,
+                      },
+                    ]}
+                  >
+                    <Ionicons
+                      name={isBorrowSettled ? 'checkmark-circle-outline' : 'people-outline'}
+                      size={13}
+                      color={isBorrowSettled ? colors.income : colors.warning}
+                      style={{ marginRight: 4 }}
+                    />
+                    <Text
+                      style={[
+                        styles.accountBadgeText,
+                        { color: isBorrowSettled ? colors.income : colors.warning, fontWeight: '600' },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      Paid by {transaction.friend_name || 'Friend'}{isBorrowSettled ? ' · Settled' : ' · Debt Pending'}
+                    </Text>
+                  </View>
+                  <Text style={[styles.metaDot, { color: colors.textMuted }]}>·</Text>
+                </>
+              ) : accountName ? (
                 <>
                   <View
                     style={[

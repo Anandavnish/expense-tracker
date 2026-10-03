@@ -61,6 +61,27 @@ export const getCategoryIcon = (
   if (lower.includes('care') || lower.includes('salon') || lower.includes('beauty')) {
     return 'sparkles-outline';
   }
+  if (lower.includes('friend') || lower.includes('frnd') || lower.includes('split') || lower.includes('peer')) {
+    return 'people-outline';
+  }
+  if (lower.includes('college') || lower.includes('clg') || lower.includes('course') || lower.includes('tuition') || lower.includes('exam')) {
+    return 'school-outline';
+  }
+  if (lower.includes('bill') || lower.includes('utilit') || lower.includes('electric') || lower.includes('gas') || lower.includes('water') || lower.includes('power')) {
+    return 'flash-outline';
+  }
+  if (lower.includes('gym') || lower.includes('fitness') || lower.includes('workout') || lower.includes('sport')) {
+    return 'barbell-outline';
+  }
+  if (lower.includes('invest') || lower.includes('stock') || lower.includes('crypto') || lower.includes('mutual') || lower.includes('gold')) {
+    return 'trending-up-outline';
+  }
+  if (lower.includes('gift') || lower.includes('donation') || lower.includes('charity')) {
+    return 'gift-outline';
+  }
+  if (lower.includes('gadget') || lower.includes('tech') || lower.includes('laptop') || lower.includes('pc') || lower.includes('phone')) {
+    return 'hardware-chip-outline';
+  }
 
   return 'pricetag-outline';
 };
@@ -109,3 +130,16 @@ export const DEFAULT_BORROW_CATEGORIES = [
   'Emergency',
   'Other',
 ];
+
+export const POPULAR_CATEGORY_TEMPLATES = [
+  'Groceries',
+  'Health & Medical',
+  'Personal Care',
+  'Bills & Utilities',
+  'Education/College',
+  'Investments',
+  'Gifts & Celebrations',
+  'For Friends / Split',
+  'Fitness & Gym',
+  'Gadgets & Tech',
+] as const;

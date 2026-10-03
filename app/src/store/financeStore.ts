@@ -25,6 +25,138 @@ export const getAccountOrderKey = (userId?: string | null) => {
   return `@finance_account_order_${userId || 'default'}_v1`;
 };
 
+export const getAccountMetaKey = (userId?: string | null) => {
+  return `@account_metadata_${userId || 'default'}_v1`;
+};
+
+export interface AccountMetadata {
+  billing_cycle_day?: number | null;
+  payment_due_day?: number | null;
+  current_statement_billed_due?: number | null;
+  bank_preset?: string | null;
+  card_issuer?: string | null;
+  custom_icon?: string | null;
+  custom_color?: string | null;
+}
+
+// Module-level in-memory metadata cache to guarantee metadata is NEVER lost or stripped
+// even across realtime database events, account clones, or optimistic mutations.
+let inMemoryAccountMetadata: Record<string, AccountMetadata> = {};
+const GLOBAL_ACCOUNT_META_KEY = '@account_metadata_global_v1';
+
+export const getInMemoryAccountMetadata = () => inMemoryAccountMetadata;
+
+export const saveAccountMetadata = async (
+  userId: string | null | undefined,
+  accountId: string,
+  meta: AccountMetadata
+) => {
+  try {
+    inMemoryAccountMetadata[accountId] = {
+      ...(inMemoryAccountMetadata[accountId] || {}),
+      ...meta,
+    };
+    // 1. Save to user-scoped key
+    const key = getAccountMetaKey(userId);
+    const existingRaw = await AsyncStorage.getItem(key);
+    const map: Record<string, AccountMetadata> = existingRaw ? JSON.parse(existingRaw) : {};
+    map[accountId] = {
+      ...(map[accountId] || {}),
+      ...meta,
+    };
+    await AsyncStorage.setItem(key, JSON.stringify(map));
+
+    // 2. Also save to global fallback key
+    const globalRaw = await AsyncStorage.getItem(GLOBAL_ACCOUNT_META_KEY);
+    const globalMap: Record<string, AccountMetadata> = globalRaw ? JSON.parse(globalRaw) : {};
+    globalMap[accountId] = {
+      ...(globalMap[accountId] || {}),
+      ...meta,
+    };
+    await AsyncStorage.setItem(GLOBAL_ACCOUNT_META_KEY, JSON.stringify(globalMap));
+  } catch {}
+};
+
+export const loadAllAccountMetadata = async (
+  userId: string | null | undefined
+): Promise<Record<string, AccountMetadata>> => {
+  try {
+    const key = getAccountMetaKey(userId);
+    const [raw, globalRaw] = await Promise.all([
+      AsyncStorage.getItem(key),
+      AsyncStorage.getItem(GLOBAL_ACCOUNT_META_KEY),
+    ]);
+    const parsed = raw ? JSON.parse(raw) : {};
+    const parsedGlobal = globalRaw ? JSON.parse(globalRaw) : {};
+    const merged = { ...parsedGlobal, ...parsed };
+    inMemoryAccountMetadata = { ...inMemoryAccountMetadata, ...merged };
+    return merged;
+  } catch {
+    return inMemoryAccountMetadata;
+  }
+};
+
+export const removeAccountMetadata = async (
+  userId: string | null | undefined,
+  accountId: string
+) => {
+  try {
+    delete inMemoryAccountMetadata[accountId];
+    const key = getAccountMetaKey(userId);
+    const existingRaw = await AsyncStorage.getItem(key);
+    if (!existingRaw) return;
+    const map: Record<string, AccountMetadata> = JSON.parse(existingRaw);
+    delete map[accountId];
+    await AsyncStorage.setItem(key, JSON.stringify(map));
+  } catch {}
+};
+
+export const hydrateTransactions = (
+  transactions: Transaction[],
+  borrows: Borrow[]
+): Transaction[] => {
+  const borrowMap = new Map<string, Borrow>();
+  borrows.forEach((b) => {
+    if (b.linked_transaction_id) {
+      borrowMap.set(b.linked_transaction_id, b);
+    }
+  });
+
+  return transactions.map((tx) => {
+    const linkedBorrow = borrowMap.get(tx.id);
+    let friendName = tx.friend_name || null;
+    let isPaidByFriend = Boolean(tx.paid_by_friend);
+
+    if (
+      linkedBorrow &&
+      (linkedBorrow.type === 'borrowed' || linkedBorrow.person_name?.startsWith('[BORROWED]'))
+    ) {
+      isPaidByFriend = true;
+      if (!friendName) {
+        friendName = linkedBorrow.person_name.replace(/^\[BORROWED\]\s*/i, '').trim();
+      }
+    } else if (tx.note && /\[Paid by ([^\]]+)\]/i.test(tx.note)) {
+      const match = tx.note.match(/\[Paid by ([^\]]+)\]/i);
+      if (match && match[1]) {
+        isPaidByFriend = true;
+        if (!friendName) {
+          friendName = match[1].trim();
+        }
+      }
+    }
+
+    if (isPaidByFriend) {
+      return {
+        ...tx,
+        paid_by_friend: true,
+        friend_name: friendName || 'Friend',
+      };
+    }
+
+    return tx;
+  });
+};
+
 const persistFinanceCache = (
   state: {
     accounts: Account[];
@@ -69,6 +201,63 @@ export const DEFAULT_STUDENT_CATEGORIES = [
   'Entertainment',
   'Other',
 ];
+
+export const mergeCategoriesWithDefaults = (
+  savedCategories?: string[] | null,
+  transactions?: Transaction[] | null,
+  budgets?: Budget[] | null,
+  extraCategories?: (string | null | undefined)[] | null
+): string[] => {
+  const categorySet = new Set<string>();
+  const merged: string[] = [];
+
+  const addCat = (c?: string | null) => {
+    if (!c) return;
+    const clean = c.trim();
+    if (
+      !clean ||
+      clean === 'Credit Card Payment' ||
+      clean === 'Overall Budget' ||
+      clean.toLowerCase() === 'uncategorized'
+    ) {
+      return;
+    }
+    const lower = clean.toLowerCase();
+    if (!categorySet.has(lower)) {
+      categorySet.add(lower);
+      merged.push(clean);
+    }
+  };
+
+  // 1. Saved custom categories in user's preferred order
+  if (savedCategories && Array.isArray(savedCategories)) {
+    savedCategories.forEach(addCat);
+  }
+
+  // 2. Extra categories (e.g. current in-memory categories)
+  if (extraCategories && Array.isArray(extraCategories)) {
+    extraCategories.forEach(addCat);
+  }
+
+  // 3. Categories actively present in transactions
+  if (transactions && Array.isArray(transactions)) {
+    transactions.forEach((tx) => {
+      if (tx.type === 'expense') {
+        addCat(tx.category);
+      }
+    });
+  }
+
+  // 4. Categories actively present in budgets
+  if (budgets && Array.isArray(budgets)) {
+    budgets.forEach((b) => addCat(b.category));
+  }
+
+  // 5. Default categories
+  DEFAULT_STUDENT_CATEGORIES.forEach(addCat);
+
+  return merged;
+};
 
 export const parseBorrowDetails = (
   borrow: Borrow,
@@ -145,6 +334,214 @@ export const calculateNetWorth = (
   return liquidTotal + totalLent - totalBorrowed - totalCreditDebt;
 };
 
+export interface CreditCardCycleDues {
+  totalDues: number;
+  billedDues: number;
+  unbilledDues: number;
+  isSplitActive: boolean;
+  billingCycleDay: number | null;
+  paymentDueDay: number | null;
+  statementDateStr: string | null;
+  paymentDueDateStr: string | null;
+  daysUntilDue: number | null;
+  isOverdue: boolean;
+}
+
+export const calculateCreditCardCycleDues = (
+  card: Account,
+  transactions: Transaction[],
+  refDateStr?: string
+): CreditCardCycleDues => {
+  const totalDues = Math.abs(Math.min(0, Number(card.current_balance || 0)));
+  const meta = inMemoryAccountMetadata[card.id];
+  const rawBDay = card.billing_cycle_day ?? meta?.billing_cycle_day;
+  const rawPDay = card.payment_due_day ?? meta?.payment_due_day;
+  const bDay = rawBDay != null && !isNaN(Number(rawBDay)) ? Number(rawBDay) : null;
+  const pDay = rawPDay != null && !isNaN(Number(rawPDay)) ? Number(rawPDay) : null;
+
+  if (!bDay || bDay < 1 || bDay > 31 || totalDues <= 0) {
+    return {
+      totalDues,
+      billedDues: totalDues,
+      unbilledDues: 0,
+      isSplitActive: false,
+      billingCycleDay: bDay || null,
+      paymentDueDay: pDay || null,
+      statementDateStr: null,
+      paymentDueDateStr: null,
+      daysUntilDue: null,
+      isOverdue: false,
+    };
+  }
+
+  let now: Date;
+  if (refDateStr && /^\d{4}-\d{2}-\d{2}$/.test(refDateStr)) {
+    const [y, m, d] = refDateStr.split('-').map(Number);
+    now = new Date(y, m - 1, d);
+  } else if (refDateStr) {
+    now = new Date(refDateStr);
+  } else {
+    now = new Date();
+  }
+
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth(); // 0-indexed (0=Jan, 9=Oct)
+  const currentDay = now.getDate();
+  const nowZero = new Date(currentYear, currentMonth, currentDay);
+
+  // Clamp day to maximum available days in month
+  const getClampedDate = (year: number, month: number, day: number) => {
+    const maxDays = new Date(year, month + 1, 0).getDate();
+    return new Date(year, month, Math.min(day, maxDays));
+  };
+
+  const formatDateIso = (d: Date) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
+  let statementDate: Date;
+  let paymentDueDate: Date;
+
+  if (currentDay >= bDay) {
+    // Current cycle statement generated on bDay of this month
+    statementDate = getClampedDate(currentYear, currentMonth, bDay);
+    const dueMonth = (pDay || 5) <= bDay ? currentMonth + 1 : currentMonth;
+    paymentDueDate = getClampedDate(currentYear, dueMonth, pDay || 5);
+  } else {
+    // Current day is before bDay, so latest statement was generated in previous month
+    statementDate = getClampedDate(currentYear, currentMonth - 1, bDay);
+    const dueMonth = (pDay || 5) <= bDay ? currentMonth : currentMonth - 1;
+    paymentDueDate = getClampedDate(currentYear, dueMonth, pDay || 5);
+  }
+
+  const statementDateStr = formatDateIso(statementDate);
+  const paymentDueDateStr = formatDateIso(paymentDueDate);
+
+  const statementZero = new Date(statementDate.getFullYear(), statementDate.getMonth(), statementDate.getDate());
+  const dueZero = new Date(paymentDueDate.getFullYear(), paymentDueDate.getMonth(), paymentDueDate.getDate());
+
+  // Window checks
+  const isInCycleWindow = nowZero.getTime() >= statementZero.getTime() && nowZero.getTime() <= dueZero.getTime();
+  const isPastDueDate = nowZero.getTime() > dueZero.getTime();
+  const diffMs = dueZero.getTime() - nowZero.getTime();
+  const daysUntilDue = Math.round(diffMs / (1000 * 60 * 60 * 24));
+
+  // Card transactions
+  const cardTx = transactions.filter((t) => t.account_id === card.id);
+  let unbilledSpend = 0;
+
+  const normalizeIso = (raw: string): string => {
+    if (!raw) return '';
+    const str = raw.trim().slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+    if (/^\d{4}\/\d{2}\/\d{2}$/.test(str)) return str.replace(/\//g, '-');
+    if (/^\d{2}-\d{2}-\d{4}$/.test(str)) {
+      const [d, m, y] = str.split('-');
+      return `${y}-${m}-${d}`;
+    }
+    if (/^\d{2}\/\d{2}\/\d{4}$/.test(str)) {
+      const [d, m, y] = str.split('/');
+      return `${y}-${m}-${d}`;
+    }
+    return str;
+  };
+
+  cardTx.forEach((tx) => {
+    const txDate = normalizeIso(tx.date || tx.created_at || '');
+    const amt = Number(tx.amount || 0);
+
+    // Spends strictly after statementDateStr belong to running cycle (unbilled)
+    if ((tx.type === 'expense' || tx.type === 'borrow_given') && txDate > statementDateStr) {
+      unbilledSpend += amt;
+    }
+  });
+
+  // Capped Billed Amount determination & split calculation
+  let billedDues: number;
+  let unbilledDues: number;
+
+  const rawBilledSnap =
+    card.current_statement_billed_due !== undefined && card.current_statement_billed_due !== null
+      ? card.current_statement_billed_due
+      : meta?.current_statement_billed_due;
+
+  if (rawBilledSnap !== undefined && rawBilledSnap !== null && !isNaN(Number(rawBilledSnap))) {
+    // Explicit statement snapshot calibrated by user (capped 1st amount)
+    billedDues = Math.min(totalDues, Math.max(0, Number(rawBilledSnap)));
+    unbilledDues = Math.max(0, totalDues - billedDues);
+  } else {
+    // Automatic calibration: unbilledSpend is running cycle spend strictly after statement date.
+    // Billed due is capped at (totalDues - unbilledSpend), and all remaining debt belongs to unbilled.
+    billedDues = Math.max(0, totalDues - unbilledSpend);
+    unbilledDues = Math.max(0, totalDues - billedDues);
+  }
+
+  // Active Split Condition:
+  // Strictly active between Billing Date and Due Date (isInCycleWindow) when there is debt.
+  // Once Due Date passes, amounts merge into a single total due (flagged as overdue if billed debt remains).
+  const isSplitActive = isInCycleWindow && totalDues > 0;
+  const isOverdue = isPastDueDate && billedDues > 0;
+
+  return {
+    totalDues,
+    billedDues,
+    unbilledDues,
+    isSplitActive,
+    billingCycleDay: bDay,
+    paymentDueDay: pDay || null,
+    statementDateStr,
+    paymentDueDateStr,
+    daysUntilDue,
+    isOverdue,
+  };
+};
+
+export const calculateAggregateCreditCycleDues = (
+  creditAccounts: Account[],
+  transactions: Transaction[],
+  refDateStr?: string
+) => {
+  let totalDues = 0;
+  let billedDues = 0;
+  let unbilledDues = 0;
+  let nearestDueDays: number | null = null;
+  let hasBilledDues = false;
+  let hasActiveSplit = false;
+  let hasOverdue = false;
+
+  creditAccounts.forEach((acc) => {
+    const dues = calculateCreditCardCycleDues(acc, transactions, refDateStr);
+    totalDues += dues.totalDues;
+    billedDues += dues.billedDues;
+    unbilledDues += dues.unbilledDues;
+    if (dues.isSplitActive) {
+      hasActiveSplit = true;
+    }
+    if (dues.isOverdue) {
+      hasOverdue = true;
+    }
+    if (dues.billedDues > 0 && dues.daysUntilDue !== null) {
+      hasBilledDues = true;
+      if (nearestDueDays === null || dues.daysUntilDue < nearestDueDays) {
+        nearestDueDays = dues.daysUntilDue;
+      }
+    }
+  });
+
+  return {
+    totalDues,
+    billedDues,
+    unbilledDues,
+    nearestDueDays,
+    hasBilledDues,
+    isSplitActive: hasActiveSplit,
+    isOverdue: hasOverdue,
+  };
+};
+
 export const getCurrentMonthString = (): string => {
   const d = new Date();
   const year = d.getFullYear();
@@ -178,6 +575,7 @@ export const getHistoricalAccountBalances = (
 
   const deltasByAccount: Record<string, number> = {};
   futureTransactions.forEach((tx) => {
+    if (!tx.account_id) return;
     let delta = 0;
     if (tx.type === 'income' || tx.type === 'borrow_taken') {
       delta = Number(tx.amount || 0);
@@ -384,6 +782,16 @@ interface FinanceState {
     note?: string | null;
   }) => Promise<{ success: boolean; borrow?: Borrow; error?: string }>;
 
+  addPaidByFriendExpenseOptimistic: (params: {
+    user_id: string;
+    amount: number;
+    category: string;
+    friend_name: string;
+    date: string;
+    account_id?: string | null;
+    note?: string | null;
+  }) => Promise<{ success: boolean; error?: string }>;
+
   setBudgetOptimistic: (
     budgetData: Omit<Budget, 'id' | 'created_at' | 'updated_at'>
   ) => Promise<{ success: boolean; error?: string }>;
@@ -569,12 +977,12 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
         AsyncStorage.getItem(getAccountOrderKey(effectiveUserId)),
       ]);
 
-      let categories = DEFAULT_STUDENT_CATEGORIES;
+      let parsedCustomCats: string[] = [];
       if (cachedCats) {
         try {
           const parsedCats = JSON.parse(cachedCats);
           if (Array.isArray(parsedCats) && parsedCats.length > 0) {
-            categories = parsedCats;
+            parsedCustomCats = parsedCats;
           }
         } catch {}
       }
@@ -589,12 +997,27 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
       if (cached) {
         const parsed = JSON.parse(cached);
 
+        const metaMap = await loadAllAccountMetadata(effectiveUserId);
         const rawAccounts = ((parsed.accounts || []) as Account[]).filter(
           (a) => a.user_id === effectiveUserId
         );
-        const accounts = sortAccountsByOrder(deduplicateAccounts(rawAccounts), orderIds);
+        const accountsWithMeta = rawAccounts.map((acc) => {
+          const meta = metaMap[acc.id];
+          if (!meta) return acc;
+          return {
+            ...acc,
+            billing_cycle_day: acc.billing_cycle_day ?? meta.billing_cycle_day ?? null,
+            payment_due_day: acc.payment_due_day ?? meta.payment_due_day ?? null,
+            current_statement_billed_due: acc.current_statement_billed_due ?? meta.current_statement_billed_due ?? null,
+            bank_preset: acc.bank_preset ?? meta.bank_preset ?? null,
+            card_issuer: acc.card_issuer ?? meta.card_issuer ?? null,
+            custom_icon: acc.custom_icon ?? meta.custom_icon ?? null,
+            custom_color: acc.custom_color ?? meta.custom_color ?? null,
+          };
+        });
+        const accounts = sortAccountsByOrder(deduplicateAccounts(accountsWithMeta), orderIds);
 
-        const transactions = deduplicateTransactions(
+        const rawTransactions = deduplicateTransactions(
           ((parsed.transactions || []) as Transaction[]).filter(
             (t) => t.user_id === effectiveUserId
           )
@@ -602,8 +1025,16 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
         const borrows = ((parsed.borrows || []) as Borrow[]).filter(
           (b) => b.user_id === effectiveUserId
         );
+        const transactions = hydrateTransactions(rawTransactions, borrows);
         const budgets = ((parsed.budgets || []) as Budget[]).filter(
           (bg) => bg.user_id === effectiveUserId
+        );
+
+        const categories = mergeCategoriesWithDefaults(
+          parsedCustomCats,
+          rawTransactions,
+          budgets,
+          get().categories
         );
 
         set({
@@ -616,7 +1047,19 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
           selectedMonth: getCurrentMonthString(),
           isInitialLoading: false,
         });
+
+        AsyncStorage.setItem(
+          getCategoriesKey(effectiveUserId),
+          JSON.stringify(categories)
+        ).catch(() => {});
       } else {
+        const categories = mergeCategoriesWithDefaults(
+          parsedCustomCats,
+          [],
+          [],
+          get().categories
+        );
+
         set({
           accounts: [],
           transactions: [],
@@ -627,6 +1070,11 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
           selectedMonth: getCurrentMonthString(),
           isInitialLoading: false,
         });
+
+        AsyncStorage.setItem(
+          getCategoriesKey(effectiveUserId),
+          JSON.stringify(categories)
+        ).catch(() => {});
       }
     } catch {
       set({ isInitialLoading: false });
@@ -674,7 +1122,7 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
 
     try {
 
-      const [accountsRes, txRes, borrowsRes, budgetsRes, summaryRes, cachedOrder] = await Promise.all([
+      const [accountsRes, txRes, borrowsRes, budgetsRes, summaryRes, cachedOrder, cachedCats] = await Promise.all([
         supabase
           .from('accounts')
           .select('*')
@@ -703,6 +1151,7 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
           .eq('user_id', userId)
           .eq('month', month),
         AsyncStorage.getItem(getAccountOrderKey(userId)),
+        AsyncStorage.getItem(getCategoriesKey(userId)),
       ]);
 
       let orderIds: string[] | null = null;
@@ -712,10 +1161,36 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
         } catch {}
       }
 
+      let parsedCustomCats: string[] = [];
+      if (cachedCats) {
+        try {
+          const parsed = JSON.parse(cachedCats);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            parsedCustomCats = parsed;
+          }
+        } catch {}
+      }
+
+      const metaMap = await loadAllAccountMetadata(userId);
       const rawAccounts = (accountsRes.data as Account[]) || [];
-      const accounts = sortAccountsByOrder(deduplicateAccounts(rawAccounts), orderIds);
-      const transactions = deduplicateTransactions((txRes.data as Transaction[]) || []);
+      const accountsWithMeta = rawAccounts.map((acc) => {
+        const meta = metaMap[acc.id];
+        if (!meta) return acc;
+        return {
+          ...acc,
+          billing_cycle_day: acc.billing_cycle_day ?? meta.billing_cycle_day ?? null,
+          payment_due_day: acc.payment_due_day ?? meta.payment_due_day ?? null,
+          current_statement_billed_due: acc.current_statement_billed_due ?? meta.current_statement_billed_due ?? null,
+          bank_preset: acc.bank_preset ?? meta.bank_preset ?? null,
+          card_issuer: acc.card_issuer ?? meta.card_issuer ?? null,
+          custom_icon: acc.custom_icon ?? meta.custom_icon ?? null,
+          custom_color: acc.custom_color ?? meta.custom_color ?? null,
+        };
+      });
+      const accounts = sortAccountsByOrder(deduplicateAccounts(accountsWithMeta), orderIds);
+      const rawTransactions = deduplicateTransactions((txRes.data as Transaction[]) || []);
       const borrows = (borrowsRes.data as Borrow[]) || [];
+      const transactions = hydrateTransactions(rawTransactions, borrows);
       let budgets = (budgetsRes.data as Budget[]) || [];
       let budgetSummaries = (summaryRes.data as BudgetSummary[]) || [];
 
@@ -758,16 +1233,29 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
         }
       }
 
+      const categories = mergeCategoriesWithDefaults(
+        parsedCustomCats,
+        rawTransactions,
+        budgets,
+        get().categories
+      );
+
       set({
         accounts,
         transactions,
         borrows,
         budgets,
         budgetSummaries,
+        categories,
         isInitialLoading: false,
         syncStatus: 'synced',
         lastSyncedAt: new Date().toISOString(),
       });
+
+      AsyncStorage.setItem(
+        getCategoriesKey(userId),
+        JSON.stringify(categories)
+      ).catch(() => {});
 
       AsyncStorage.setItem(
         getStorageKey(userId),
@@ -784,13 +1272,12 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
 
   subscribeRealtime: (userId: string) => {
     if (isGuestUser(userId)) return;
-    const { activeChannel } = get();
-    if (activeChannel) {
-      supabase.removeChannel(activeChannel);
-    }
+    try {
+      supabase.removeAllChannels();
+    } catch {}
 
     const channel = supabase
-      .channel(`realtime_finance_${userId}`)
+      .channel(`realtime_finance_${userId}_${Date.now()}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'accounts', filter: `user_id=eq.${userId}` },
@@ -807,22 +1294,118 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
             if (tempMatch) {
               set({
                 accounts: deduplicateAccounts(
-                  current.map((a) => (a.id === tempMatch.id ? newAcc : a))
+                  current.map((a) =>
+                    a.id === tempMatch.id
+                      ? {
+                          ...tempMatch,
+                          ...newAcc,
+                          billing_cycle_day: tempMatch.billing_cycle_day ?? newAcc.billing_cycle_day ?? null,
+                          payment_due_day: tempMatch.payment_due_day ?? newAcc.payment_due_day ?? null,
+                          current_statement_billed_due:
+                            tempMatch.current_statement_billed_due ?? newAcc.current_statement_billed_due ?? null,
+                          bank_preset: tempMatch.bank_preset ?? newAcc.bank_preset ?? null,
+                          card_issuer: tempMatch.card_issuer ?? newAcc.card_issuer ?? null,
+                          custom_icon: tempMatch.custom_icon ?? newAcc.custom_icon ?? null,
+                          custom_color: tempMatch.custom_color ?? newAcc.custom_color ?? null,
+                        }
+                      : a
+                  )
                 ),
               });
+              persistFinanceCache(get());
             } else {
               set({ accounts: deduplicateAccounts([...current, newAcc]) });
+              persistFinanceCache(get());
             }
           } else if (payload.eventType === 'UPDATE') {
             const updatedAcc = payload.new as Account;
-            set({
-              accounts: deduplicateAccounts(
-                current.map((a) => (a.id === updatedAcc.id ? updatedAcc : a))
-              ),
+            const meta = inMemoryAccountMetadata[updatedAcc.id] || {};
+            set((state) => {
+              const existingAcc = state.accounts.find((a) => a.id === updatedAcc.id);
+              return {
+                accounts: deduplicateAccounts(
+                  state.accounts.map((a) => {
+                    if (a.id !== updatedAcc.id) return a;
+                    // ALWAYS preserve existing in-memory metadata not stored in the DB columns
+                    return {
+                      ...a,
+                      ...updatedAcc,
+                      billing_cycle_day:
+                        existingAcc?.billing_cycle_day ??
+                        a.billing_cycle_day ??
+                        meta.billing_cycle_day ??
+                        updatedAcc.billing_cycle_day ??
+                        null,
+                      payment_due_day:
+                        existingAcc?.payment_due_day ??
+                        a.payment_due_day ??
+                        meta.payment_due_day ??
+                        updatedAcc.payment_due_day ??
+                        null,
+                      current_statement_billed_due:
+                        existingAcc?.current_statement_billed_due ??
+                        a.current_statement_billed_due ??
+                        meta.current_statement_billed_due ??
+                        updatedAcc.current_statement_billed_due ??
+                        null,
+                      bank_preset:
+                        existingAcc?.bank_preset ??
+                        a.bank_preset ??
+                        meta.bank_preset ??
+                        updatedAcc.bank_preset ??
+                        null,
+                      card_issuer:
+                        existingAcc?.card_issuer ??
+                        a.card_issuer ??
+                        meta.card_issuer ??
+                        updatedAcc.card_issuer ??
+                        null,
+                      custom_icon:
+                        existingAcc?.custom_icon ??
+                        a.custom_icon ??
+                        meta.custom_icon ??
+                        updatedAcc.custom_icon ??
+                        null,
+                      custom_color:
+                        existingAcc?.custom_color ??
+                        a.custom_color ??
+                        meta.custom_color ??
+                        updatedAcc.custom_color ??
+                        null,
+                    };
+                  })
+                ),
+              };
             });
+            persistFinanceCache(get());
+
+            // Guarantee fresh metadata sync from storage as backup
+            loadAllAccountMetadata(userId).then((freshMeta) => {
+              const freshAccMeta = freshMeta[updatedAcc.id];
+              if (freshAccMeta) {
+                set((state) => ({
+                  accounts: state.accounts.map((a) =>
+                    a.id === updatedAcc.id
+                      ? {
+                          ...a,
+                          billing_cycle_day: a.billing_cycle_day ?? freshAccMeta.billing_cycle_day ?? null,
+                          payment_due_day: a.payment_due_day ?? freshAccMeta.payment_due_day ?? null,
+                          current_statement_billed_due:
+                            a.current_statement_billed_due ?? freshAccMeta.current_statement_billed_due ?? null,
+                          bank_preset: a.bank_preset ?? freshAccMeta.bank_preset ?? null,
+                          card_issuer: a.card_issuer ?? freshAccMeta.card_issuer ?? null,
+                          custom_icon: a.custom_icon ?? freshAccMeta.custom_icon ?? null,
+                          custom_color: a.custom_color ?? freshAccMeta.custom_color ?? null,
+                        }
+                      : a
+                  ),
+                }));
+              }
+            }).catch(() => {});
           } else if (payload.eventType === 'DELETE') {
             const oldId = payload.old.id;
             set({ accounts: current.filter((a) => a.id !== oldId) });
+            persistFinanceCache(get());
           }
         }
       )
@@ -926,11 +1509,10 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
   },
 
   unsubscribeRealtime: () => {
-    const { activeChannel } = get();
-    if (activeChannel) {
-      supabase.removeChannel(activeChannel);
-      set({ activeChannel: null });
-    }
+    try {
+      supabase.removeAllChannels();
+    } catch {}
+    set({ activeChannel: null });
   },
 
   addTransactionOptimistic: async (txData) => {
@@ -946,6 +1528,7 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
     const prevSummaries = [...get().budgetSummaries];
 
     const updatedAccounts = prevAccounts.map((acc) => {
+      const meta = inMemoryAccountMetadata[acc.id];
       if (acc.id === txData.account_id) {
         let delta = 0;
         if (txData.type === 'income' || txData.type === 'borrow_taken') {
@@ -953,9 +1536,37 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
         } else if (txData.type === 'expense' || txData.type === 'borrow_given') {
           delta = -Number(txData.amount);
         }
+        let nextBilled = acc.current_statement_billed_due ?? meta?.current_statement_billed_due ?? null;
+        if (
+          acc.type === 'credit_card' &&
+          (txData.type === 'income' || txData.type === 'borrow_taken') &&
+          nextBilled != null
+        ) {
+          nextBilled = Math.max(0, Number(nextBilled) - Number(txData.amount));
+          saveAccountMetadata(acc.user_id, acc.id, { current_statement_billed_due: nextBilled });
+        }
         return {
           ...acc,
+          billing_cycle_day: acc.billing_cycle_day ?? meta?.billing_cycle_day ?? null,
+          payment_due_day: acc.payment_due_day ?? meta?.payment_due_day ?? null,
+          bank_preset: acc.bank_preset ?? meta?.bank_preset ?? null,
+          card_issuer: acc.card_issuer ?? meta?.card_issuer ?? null,
+          custom_icon: acc.custom_icon ?? meta?.custom_icon ?? null,
+          custom_color: acc.custom_color ?? meta?.custom_color ?? null,
           current_balance: Number(acc.current_balance) + delta,
+          current_statement_billed_due: nextBilled,
+        };
+      }
+      if (meta) {
+        return {
+          ...acc,
+          billing_cycle_day: acc.billing_cycle_day ?? meta.billing_cycle_day ?? null,
+          payment_due_day: acc.payment_due_day ?? meta.payment_due_day ?? null,
+          current_statement_billed_due: acc.current_statement_billed_due ?? meta.current_statement_billed_due ?? null,
+          bank_preset: acc.bank_preset ?? meta.bank_preset ?? null,
+          card_issuer: acc.card_issuer ?? meta.card_issuer ?? null,
+          custom_icon: acc.custom_icon ?? meta.custom_icon ?? null,
+          custom_color: acc.custom_color ?? meta.custom_color ?? null,
         };
       }
       return acc;
@@ -987,6 +1598,20 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
       inlineError: null,
     });
     persistFinanceCache(get());
+
+    if (txData.type === 'expense' && txData.category) {
+      const cleanCat = txData.category.trim();
+      if (
+        cleanCat &&
+        cleanCat !== 'Credit Card Payment' &&
+        cleanCat.toLowerCase() !== 'uncategorized'
+      ) {
+        const currentCats = get().categories;
+        if (!currentCats.some((c) => c.toLowerCase() === cleanCat.toLowerCase())) {
+          get().addCategory(cleanCat);
+        }
+      }
+    }
 
     if (isGuestUser(txData.user_id)) {
       return { success: true };
@@ -1113,17 +1738,30 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
     }
 
     try {
+      const validTxDbFields = ['account_id', 'type', 'amount', 'category', 'note', 'date', 'source'];
+      const dbUpdates: Record<string, any> = {};
+      for (const field of validTxDbFields) {
+        if (field in updates) {
+          dbUpdates[field] = (updates as any)[field];
+        }
+      }
+
       const { data, error } = await supabase
         .from('transactions')
-        .update(updates)
+        .update(dbUpdates)
         .eq('id', transactionId)
         .select()
         .single();
 
       if (error) throw error;
       if (data) {
+        const returnedTx: Transaction = {
+          ...(data as Transaction),
+          paid_by_friend: newTx.paid_by_friend,
+          friend_name: newTx.friend_name,
+        };
         set((state) => ({
-          transactions: state.transactions.map((t) => (t.id === transactionId ? (data as Transaction) : t)),
+          transactions: state.transactions.map((t) => (t.id === transactionId ? returnedTx : t)),
         }));
         persistFinanceCache(get());
       }
@@ -1148,22 +1786,33 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
     const prevSummaries = [...get().budgetSummaries];
     const prevBorrows = [...get().borrows];
 
-    // Revert account balance effect
-    const updatedAccounts = prevAccounts.map((acc) => {
-      if (acc.id === targetTx.account_id) {
-        let delta = 0;
-        if (targetTx.type === 'income' || targetTx.type === 'borrow_taken') {
-          delta = -Number(targetTx.amount);
-        } else if (targetTx.type === 'expense' || targetTx.type === 'borrow_given') {
-          delta = Number(targetTx.amount);
-        }
-        return {
-          ...acc,
-          current_balance: Number(acc.current_balance) + delta,
-        };
-      }
-      return acc;
-    });
+    const isFriendPaidTx =
+      Boolean(targetTx.paid_by_friend) ||
+      Boolean(targetTx.note?.startsWith('[Paid by ')) ||
+      prevBorrows.some(
+        (b) =>
+          b.linked_transaction_id === transactionId &&
+          (b.type === 'borrowed' || b.person_name?.startsWith('[BORROWED]'))
+      );
+
+    // Revert account balance effect (only for transactions that actually altered account balances)
+    const updatedAccounts = isFriendPaidTx
+      ? prevAccounts
+      : prevAccounts.map((acc) => {
+          if (acc.id === targetTx.account_id) {
+            let delta = 0;
+            if (targetTx.type === 'income' || targetTx.type === 'borrow_taken') {
+              delta = -Number(targetTx.amount);
+            } else if (targetTx.type === 'expense' || targetTx.type === 'borrow_given') {
+              delta = Number(targetTx.amount);
+            }
+            return {
+              ...acc,
+              current_balance: Number(acc.current_balance) + delta,
+            };
+          }
+          return acc;
+        });
 
     // Revert budget spent effect if expense
     const updatedSummaries = prevSummaries.map((bs) => {
@@ -1185,9 +1834,11 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
       return bs;
     });
 
-    const updatedBorrows = prevBorrows.map((b) =>
-      b.linked_transaction_id === transactionId ? { ...b, linked_transaction_id: null } : b
-    );
+    const updatedBorrows = isFriendPaidTx
+      ? prevBorrows.filter((b) => b.linked_transaction_id !== transactionId)
+      : prevBorrows.map((b) =>
+          b.linked_transaction_id === transactionId ? { ...b, linked_transaction_id: null } : b
+        );
 
     set({
       transactions: prevTransactions.filter((t) => t.id !== transactionId),
@@ -1203,6 +1854,9 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
     }
 
     try {
+      if (isFriendPaidTx) {
+        await supabase.from('borrows').delete().eq('linked_transaction_id', transactionId);
+      }
       const { error } = await supabase
         .from('transactions')
         .delete()
@@ -1674,6 +2328,136 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
     }
   },
 
+  addPaidByFriendExpenseOptimistic: async (params) => {
+    const prevTransactions = [...get().transactions];
+    const prevBorrows = [...get().borrows];
+    const prevSummaries = [...get().budgetSummaries];
+
+    const tempTxId = `temp_tx_${Date.now()}`;
+    const tempBorrowId = `temp_borrow_${Date.now()}`;
+    const cleanFriendName = params.friend_name.trim();
+
+    const optimisticTx: Transaction = {
+      id: tempTxId,
+      user_id: params.user_id,
+      account_id: params.account_id || null,
+      type: 'expense',
+      amount: Number(params.amount),
+      category: params.category,
+      note: params.note ? `[Paid by ${cleanFriendName}] ${params.note}` : `[Paid by ${cleanFriendName}]`,
+      date: params.date,
+      source: 'manual',
+      paid_by_friend: true,
+      friend_name: cleanFriendName,
+      created_at: new Date().toISOString(),
+    };
+
+    const optimisticBorrow: Borrow = {
+      id: tempBorrowId,
+      user_id: params.user_id,
+      person_name: `[BORROWED] ${cleanFriendName}`,
+      amount: Number(params.amount),
+      status: 'pending',
+      type: 'borrowed',
+      linked_transaction_id: tempTxId,
+      date: params.date,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    // Update budget summaries for this expense
+    const updatedSummaries = prevSummaries.map((bs) => {
+      const matchesCategory = bs.category === params.category || bs.category === null;
+      if (matchesCategory) {
+        const newSpent = Number(bs.spent) + Number(params.amount);
+        const newRemaining = Number(bs.monthly_limit) - newSpent;
+        const newPct =
+          bs.monthly_limit > 0 ? Math.round((newSpent / Number(bs.monthly_limit)) * 100) : 0;
+        return {
+          ...bs,
+          spent: newSpent,
+          remaining: newRemaining,
+          spent_percentage: newPct,
+        };
+      }
+      return bs;
+    });
+
+    set({
+      transactions: [optimisticTx, ...prevTransactions],
+      borrows: [optimisticBorrow, ...prevBorrows],
+      budgetSummaries: updatedSummaries,
+      inlineError: null,
+    });
+    persistFinanceCache(get());
+
+    if (isGuestUser(params.user_id)) {
+      return { success: true };
+    }
+
+    try {
+      // 1. Insert transaction into Supabase without non-schema columns (paid_by_friend, friend_name)
+      const { data: txData, error: txError } = await supabase
+        .from('transactions')
+        .insert({
+          user_id: params.user_id,
+          account_id: params.account_id || null,
+          type: 'expense',
+          amount: params.amount,
+          category: params.category,
+          note: params.note ? `[Paid by ${cleanFriendName}] ${params.note}` : `[Paid by ${cleanFriendName}]`,
+          date: params.date,
+          source: 'manual',
+        })
+        .select()
+        .single();
+
+      if (txError) throw txError;
+      const realTx: Transaction = {
+        ...(txData as Transaction),
+        paid_by_friend: true,
+        friend_name: cleanFriendName,
+      };
+
+      // 2. Insert borrow linked to real transaction
+      const { data: borrowData, error: borrowError } = await supabase
+        .from('borrows')
+        .insert({
+          user_id: params.user_id,
+          person_name: `[BORROWED] ${cleanFriendName}`,
+          amount: params.amount,
+          status: 'pending',
+          type: 'borrowed',
+          linked_transaction_id: realTx.id,
+          date: params.date,
+        })
+        .select()
+        .single();
+
+      if (borrowError) throw borrowError;
+      const realBorrow = {
+        ...(borrowData as Borrow),
+        type: 'borrowed' as const,
+      };
+
+      set((state) => ({
+        transactions: state.transactions.map((t) => (t.id === tempTxId ? realTx : t)),
+        borrows: state.borrows.map((b) => (b.id === tempBorrowId ? realBorrow : b)),
+      }));
+      persistFinanceCache(get());
+
+      return { success: true };
+    } catch (err: any) {
+      set({
+        transactions: prevTransactions,
+        borrows: prevBorrows,
+        budgetSummaries: prevSummaries,
+        inlineError: `Could not save friend-paid expense: ${err.message || 'Network error'}. Changes rolled back.`,
+      });
+      return { success: false, error: err.message };
+    }
+  },
+
   setBudgetOptimistic: async (budgetData) => {
     const prevBudgets = [...get().budgets];
     const prevSummaries = [...get().budgetSummaries];
@@ -1883,6 +2667,17 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
     });
     persistFinanceCache(get());
 
+    const meta: AccountMetadata = {
+      billing_cycle_day: accData.billing_cycle_day,
+      payment_due_day: accData.payment_due_day,
+      current_statement_billed_due: (accData as any).current_statement_billed_due,
+      bank_preset: accData.bank_preset,
+      card_issuer: accData.card_issuer,
+      custom_icon: accData.custom_icon,
+      custom_color: accData.custom_color,
+    };
+    saveAccountMetadata(accData.user_id, tempId, meta);
+
     if (isGuestUser(accData.user_id)) {
       return { success: true, account: optimisticAcc };
     }
@@ -1905,6 +2700,8 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
       if (error) throw error;
 
       const realAcc = { ...optimisticAcc, ...(data as Account) };
+      saveAccountMetadata(accData.user_id, realAcc.id, meta);
+
       set((state) => {
         const alreadyHasReal = state.accounts.some((a) => a.id === realAcc.id);
         let updated: Account[];
@@ -1915,6 +2712,7 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
         }
         return { accounts: deduplicateAccounts(updated) };
       });
+      persistFinanceCache(get());
 
       return { success: true, account: realAcc };
     } catch (err: any) {
@@ -1937,25 +2735,66 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
     persistFinanceCache(get());
 
     const targetAcc = prevAccounts.find((a) => a.id === accountId);
+    const metaUpdates: AccountMetadata = {};
+    if ('billing_cycle_day' in updates) metaUpdates.billing_cycle_day = updates.billing_cycle_day;
+    if ('payment_due_day' in updates) metaUpdates.payment_due_day = updates.payment_due_day;
+    if ('current_statement_billed_due' in updates) metaUpdates.current_statement_billed_due = updates.current_statement_billed_due;
+    if ('bank_preset' in updates) metaUpdates.bank_preset = updates.bank_preset;
+    if ('card_issuer' in updates) metaUpdates.card_issuer = updates.card_issuer;
+    if ('custom_icon' in updates) metaUpdates.custom_icon = updates.custom_icon;
+    if ('custom_color' in updates) metaUpdates.custom_color = updates.custom_color;
+
+    if (Object.keys(metaUpdates).length > 0) {
+      saveAccountMetadata(targetAcc?.user_id || get().currentUserId, accountId, metaUpdates);
+    }
+
     if (targetAcc && isGuestUser(targetAcc.user_id)) {
       return { success: true };
     }
 
     try {
-      const validDbFields = ['name', 'type', 'current_balance', 'credit_limit'];
+      const candidateFields = [
+        'name',
+        'type',
+        'current_balance',
+        'credit_limit',
+        'billing_cycle_day',
+        'payment_due_day',
+        'current_statement_billed_due',
+        'bank_preset',
+        'card_issuer',
+        'custom_icon',
+        'custom_color',
+      ];
       const dbUpdates: Record<string, any> = { updated_at: new Date().toISOString() };
-      for (const field of validDbFields) {
+      for (const field of candidateFields) {
         if (field in updates) {
           dbUpdates[field] = (updates as any)[field];
         }
       }
 
-      const { error } = await supabase
+      const { error: fullError } = await supabase
         .from('accounts')
         .update(dbUpdates)
         .eq('id', accountId);
 
-      if (error) throw error;
+      if (fullError) {
+        // If Supabase schema lacks optional metadata columns, fallback to core fields
+        const coreFields = ['name', 'type', 'current_balance', 'credit_limit'];
+        const coreUpdates: Record<string, any> = { updated_at: new Date().toISOString() };
+        for (const field of coreFields) {
+          if (field in updates) {
+            coreUpdates[field] = (updates as any)[field];
+          }
+        }
+        const { error: coreError } = await supabase
+          .from('accounts')
+          .update(coreUpdates)
+          .eq('id', accountId);
+
+        if (coreError) throw coreError;
+      }
+
       return { success: true };
     } catch (err: any) {
       set({
@@ -1968,13 +2807,15 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
 
   deleteAccountOptimistic: async (accountId) => {
     const prevAccounts = [...get().accounts];
+    const targetAcc = prevAccounts.find((a) => a.id === accountId);
     set({
       accounts: prevAccounts.filter((a) => a.id !== accountId),
       inlineError: null,
     });
     persistFinanceCache(get());
 
-    const targetAcc = prevAccounts.find((a) => a.id === accountId);
+    removeAccountMetadata(targetAcc?.user_id || get().currentUserId, accountId);
+
     if (targetAcc && isGuestUser(targetAcc.user_id)) {
       return { success: true };
     }
@@ -2052,10 +2893,23 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
         return { ...a, current_balance: Number(a.current_balance) - paymentAmount };
       }
       if (a.id === creditCardId) {
-        return { ...a, current_balance: Number(a.current_balance) + paymentAmount };
+        const nextBilled = a.current_statement_billed_due != null
+          ? Math.max(0, Number(a.current_statement_billed_due) - paymentAmount)
+          : a.current_statement_billed_due;
+        return {
+          ...a,
+          current_balance: Number(a.current_balance) + paymentAmount,
+          current_statement_billed_due: nextBilled,
+        };
       }
       return a;
     });
+
+    if (card.current_statement_billed_due != null) {
+      saveAccountMetadata(userId, creditCardId, {
+        current_statement_billed_due: Math.max(0, Number(card.current_statement_billed_due) - paymentAmount),
+      });
+    }
 
     set({
       accounts: updatedAccounts,
@@ -2268,6 +3122,7 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
       AsyncStorage.removeItem(getStorageKey(uid)),
       AsyncStorage.removeItem(getCategoriesKey(uid)),
       AsyncStorage.removeItem(getAccountOrderKey(uid)),
+      AsyncStorage.removeItem(getAccountMetaKey(uid)),
     ]);
   },
 

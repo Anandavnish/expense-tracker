@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,13 +9,14 @@ import {
   Modal,
   ActivityIndicator,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { TextInput } from 'react-native-paper';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
 import { useAuthStore } from '../../store/authStore';
-import { useFinanceStore, getCurrentMonthString } from '../../store/financeStore';
+import { useFinanceStore, getCurrentMonthString, parseBorrowDetails } from '../../store/financeStore';
 import { useSettingsStore } from '../../store/settingsStore';
 import { SPACING, TYPOGRAPHY, ThemeColors } from '../../theme/tokens';
 import { TactileButton } from '../../components/TactileButton';
@@ -32,6 +33,7 @@ import {
 import { parseReceiptWithGemini } from '../../services/geminiService';
 import { useMerchantRulesStore } from '../../store/merchantRulesStore';
 import { MonthUnlockModal } from '../../components/MonthUnlockModal';
+import { getCategoryIcon, POPULAR_CATEGORY_TEMPLATES } from '../../utils/categoryIcons';
 
 interface AddTransactionScreenProps {
   navigation: any;
@@ -79,10 +81,30 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
   const {
     accounts,
     categories,
+    transactions,
+    borrows,
+    addCategory,
     addTransactionOptimistic,
     addBorrowWithTransactionOptimistic,
+    addPaidByFriendExpenseOptimistic,
     isMonthLocked,
   } = useFinanceStore();
+
+  const [isPaidByFriend, setIsPaidByFriend] = useState(false);
+  const [friendPaidName, setFriendPaidName] = useState('');
+  const [showAddCategoryModal, setShowAddCategoryModal] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
+
+  const friendSuggestions = useMemo(() => {
+    const names = new Set<string>();
+    borrows.forEach((b) => {
+      const { displayName } = parseBorrowDetails(b);
+      if (displayName && displayName !== 'Borrow' && displayName !== 'Unknown') {
+        names.add(displayName);
+      }
+    });
+    return Array.from(names).slice(0, 5);
+  }, [borrows]);
 
   const scrollViewRef = useRef<ScrollView>(null);
 
@@ -330,9 +352,111 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
     } else if (params.scanError) {
       setScanToast({ type: 'error', message: params.scanError });
     }
+
+    // Clear pending shared draft now that route params have been applied
+    AsyncStorage.removeItem('@pending_shared_transaction_draft_v1').catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params, categories]);
   /* eslint-enable react-hooks/set-state-in-effect */
+
+  // Restore pending shared transaction or saved uncommitted draft on mount if params are absent
+  useEffect(() => {
+    // If route params were passed, they take precedence and draft is cleared above
+    if (params && (params.prefillAmount !== undefined || params.prefillNote || params.imageUri || params.prefillRawText)) {
+      return;
+    }
+
+    const restoreDraft = async () => {
+      try {
+        // 1. Check for pending shared draft first (e.g. app opened from background/standby after share intent)
+        const sharedDraftJson = await AsyncStorage.getItem('@pending_shared_transaction_draft_v1');
+        if (sharedDraftJson) {
+          const sharedDraft = JSON.parse(sharedDraftJson);
+          if (sharedDraft?.navParams && Date.now() - (sharedDraft.timestamp || 0) < 24 * 60 * 60 * 1000) {
+            const p = sharedDraft.navParams;
+            if (p.parsedMerchant) setParsedMerchant(p.parsedMerchant);
+            if (p.prefillRawText) setExtractedText(p.prefillRawText);
+            if (p.imageUri) setScannedImageUri(p.imageUri);
+            if (p.prefillAmount !== undefined && p.prefillAmount !== null) setAmount(String(p.prefillAmount));
+            if (p.prefillNote !== undefined && p.prefillNote !== null) setNote(String(p.prefillNote));
+            if (p.prefillPersonName !== undefined && p.prefillPersonName !== null) setPersonName(String(p.prefillPersonName));
+            if (p.prefillType) setType(p.prefillType);
+            if (p.prefillCategory) {
+              const match = normalizeAndMatchCategory(p.prefillCategory, categories);
+              setCategory(match.category);
+            }
+            if (p.accountId) setSelectedAccountId(p.accountId);
+            if (p.prefillDate) applyPrefillDate(p.prefillDate);
+            if (p.prefillSource) setSource(p.prefillSource);
+            if (p.scanMessage) setScanToast({ type: 'success', message: p.scanMessage });
+            await AsyncStorage.removeItem('@pending_shared_transaction_draft_v1');
+            return;
+          }
+        }
+
+        // 2. Check for uncommitted user form draft (e.g. killed app or standby mid-fill)
+        const formDraftJson = await AsyncStorage.getItem('@add_transaction_screen_draft_v1');
+        if (formDraftJson) {
+          const formDraft = JSON.parse(formDraftJson);
+          // Restore if within last 24 hours
+          if (Date.now() - (formDraft.timestamp || 0) < 24 * 60 * 60 * 1000) {
+            if (formDraft.amount) setAmount(formDraft.amount);
+            if (formDraft.note) setNote(formDraft.note);
+            if (formDraft.personName) setPersonName(formDraft.personName);
+            if (formDraft.type) setType(formDraft.type);
+            if (formDraft.category) setCategory(formDraft.category);
+            if (formDraft.selectedAccountId) setSelectedAccountId(formDraft.selectedAccountId);
+            if (formDraft.date) setDate(formDraft.date);
+            if (formDraft.extractedText) setExtractedText(formDraft.extractedText);
+            if (formDraft.source) setSource(formDraft.source);
+            if (formDraft.isPaidByFriend) setIsPaidByFriend(formDraft.isPaidByFriend);
+            if (formDraft.friendPaidName) setFriendPaidName(formDraft.friendPaidName);
+            if (formDraft.scannedImageUri) setScannedImageUri(formDraft.scannedImageUri);
+          }
+        }
+      } catch (e) {
+        console.warn('[AddTransactionScreen] Failed to restore draft:', e);
+      }
+    };
+
+    restoreDraft();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Auto-save in-progress draft so background kill or standby never loses entered data
+  useEffect(() => {
+    if (amount.trim() || note.trim() || extractedText.trim() || personName.trim() || friendPaidName.trim()) {
+      const draft = {
+        amount,
+        note,
+        personName,
+        type,
+        category,
+        selectedAccountId,
+        date,
+        extractedText,
+        source,
+        isPaidByFriend,
+        friendPaidName,
+        scannedImageUri,
+        timestamp: Date.now(),
+      };
+      AsyncStorage.setItem('@add_transaction_screen_draft_v1', JSON.stringify(draft)).catch(() => {});
+    }
+  }, [
+    amount,
+    note,
+    personName,
+    type,
+    category,
+    selectedAccountId,
+    date,
+    extractedText,
+    source,
+    isPaidByFriend,
+    friendPaidName,
+    scannedImageUri,
+  ]);
 
   const handlePickAndScanImage = async () => {
     try {
@@ -672,6 +796,9 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
 
   const handleTypeChange = (newType: TransactionType) => {
     setType(newType);
+    if (newType !== 'expense') {
+      setIsPaidByFriend(false);
+    }
     if (newType === 'expense') {
       if (
         !category ||
@@ -690,10 +817,31 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
 
   const getAvailableCategories = () => {
     let list: string[];
-    if (isCreditCard && type === 'income') list = CREDIT_CARD_INCOME_CATEGORIES;
-    else if (type === 'expense') list = categories;
-    else if (type === 'income') list = INCOME_CATEGORIES;
-    else list = BORROW_CATEGORIES;
+    if (isCreditCard && type === 'income') {
+      list = CREDIT_CARD_INCOME_CATEGORIES;
+    } else if (type === 'expense') {
+      const set = new Set<string>();
+      const res: string[] = [];
+      const add = (c?: string | null) => {
+        if (!c) return;
+        const clean = c.trim();
+        if (!clean || clean === 'Credit Card Payment' || clean.toLowerCase() === 'uncategorized') return;
+        const lower = clean.toLowerCase();
+        if (!set.has(lower)) {
+          set.add(lower);
+          res.push(clean);
+        }
+      };
+      categories.forEach(add);
+      transactions.forEach((tx) => {
+        if (tx.type === 'expense') add(tx.category);
+      });
+      list = res;
+    } else if (type === 'income') {
+      list = INCOME_CATEGORIES;
+    } else {
+      list = BORROW_CATEGORIES;
+    }
 
     list = list.filter((c) => c.toLowerCase() !== 'uncategorized');
 
@@ -710,14 +858,23 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
       setFormError('Please enter a valid amount greater than 0');
       return;
     }
-    if (!selectedAccountId) {
-      setFormError('Please select a source account to deduct from');
-      return;
+
+    if (type === 'expense' && isPaidByFriend) {
+      if (!friendPaidName.trim()) {
+        setFormError('Please enter who paid for this expense');
+        return;
+      }
+    } else {
+      if (!selectedAccountId) {
+        setFormError('Please select a source account to deduct from');
+        return;
+      }
+      if (isCreditCard && type === 'borrow_taken') {
+        setFormError('Credit cards cannot be used to receive borrowed money. Please select a Bank or Cash account.');
+        return;
+      }
     }
-    if (isCreditCard && type === 'borrow_taken') {
-      setFormError('Credit cards cannot be used to receive borrowed money. Please select a Bank or Cash account.');
-      return;
-    }
+
     if ((type === 'borrow_given' || type === 'borrow_taken') && !personName.trim()) {
       setFormError('Please enter person name for borrow entry');
       return;
@@ -737,7 +894,17 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
 
     setFormError(null);
 
-    if (type === 'borrow_given' || type === 'borrow_taken') {
+    if (type === 'expense' && isPaidByFriend) {
+      addPaidByFriendExpenseOptimistic({
+        user_id: user.id,
+        account_id: effectiveAccountId || selectedAccountId || (accounts.length > 0 ? accounts[0].id : null),
+        amount: numAmount,
+        category,
+        friend_name: friendPaidName.trim(),
+        date,
+        note: note.trim() || null,
+      });
+    } else if (type === 'borrow_given' || type === 'borrow_taken') {
       addBorrowWithTransactionOptimistic({
         user_id: user.id,
         person_name: personName.trim(),
@@ -766,10 +933,16 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
       useMerchantRulesStore.getState().recordUserRule(parsedMerchant, category, type);
     }
 
-    // 3. Reset form and navigate back immediately (non-blocking)
+    // 3. Clear drafts and reset form and navigate back immediately (non-blocking)
+    AsyncStorage.multiRemove([
+      '@add_transaction_screen_draft_v1',
+      '@pending_shared_transaction_draft_v1',
+    ]).catch(() => {});
     setAmount('');
     setNote('');
     setPersonName('');
+    setFriendPaidName('');
+    setIsPaidByFriend(false);
     if (navigation.canGoBack()) {
       navigation.goBack();
     } else {
@@ -782,7 +955,13 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
       <View style={styles.header}>
         {navigation.canGoBack() && (
           <TouchableOpacity
-            onPress={() => navigation.goBack()}
+            onPress={() => {
+              AsyncStorage.multiRemove([
+                '@add_transaction_screen_draft_v1',
+                '@pending_shared_transaction_draft_v1',
+              ]).catch(() => {});
+              navigation.goBack();
+            }}
             style={styles.backBtn}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
@@ -998,7 +1177,9 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
           {/* 3. Account / Money Source Picker (Source to deduct from - Wrapping Grid) */}
           <View style={styles.section}>
             <Text style={styles.sectionLabel}>
-              MONEY SOURCE (DEDUCT FROM){!selectedAccountId ? ' • Select source' : ''}
+              {isPaidByFriend
+                ? 'MONEY SOURCE (DEFAULT ACCOUNT TO SETTLE FROM)'
+                : `MONEY SOURCE (DEDUCT FROM)${!selectedAccountId ? ' • Select source' : ''}`}
             </Text>
             <View style={styles.moneySourcesGrid}>
               {accounts.map((acc) => {
@@ -1062,7 +1243,134 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
                   </TouchableOpacity>
                 );
               })}
+
+              {type === 'expense' && (
+                <TouchableOpacity
+                  key="paid_by_friend_source"
+                  onPress={() => {
+                    setFormError(null);
+                    const next = !isPaidByFriend;
+                    setIsPaidByFriend(next);
+                    if (next && !selectedAccountId && accounts.length > 0) {
+                      setSelectedAccountId(accounts[0].id);
+                    }
+                  }}
+                  activeOpacity={0.7}
+                  style={[
+                    styles.sourceCard,
+                    isPaidByFriend && {
+                      borderColor: accent.hex,
+                      backgroundColor: accent.hex + '14',
+                    },
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.friendSourceBubble,
+                      { backgroundColor: isPaidByFriend ? accent.hex : colors.surfaceVariant },
+                    ]}
+                  >
+                    <Ionicons
+                      name="people"
+                      size={16}
+                      color={isPaidByFriend ? '#FFFFFF' : colors.textMuted}
+                    />
+                  </View>
+
+                  <View style={styles.sourceTextCol}>
+                    <Text
+                      style={[
+                        styles.sourceName,
+                        isPaidByFriend && { color: colors.textPrimary, fontWeight: '700' },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      Paid by Friend
+                    </Text>
+                    <Text
+                      style={[
+                        styles.sourceBalance,
+                        isPaidByFriend && { color: accent.hex, fontWeight: '700' },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {isPaidByFriend ? 'Active • Debt in Borrows' : 'Tap to enable'}
+                    </Text>
+                  </View>
+
+                  {isPaidByFriend && (
+                    <Ionicons
+                      name="checkmark-circle"
+                      size={16}
+                      color={accent.hex}
+                      style={styles.sourceCheckIcon}
+                    />
+                  )}
+                </TouchableOpacity>
+              )}
             </View>
+
+            {type === 'expense' && isPaidByFriend && (
+              <>
+                <View style={styles.friendBoxContainer}>
+                  <Text style={styles.friendInputLabel}>WHO PAID FOR THIS?</Text>
+                  <TextInput
+                    value={friendPaidName}
+                    onChangeText={(val) => {
+                      setFriendPaidName(val);
+                      setFormError(null);
+                    }}
+                    placeholder="Enter friend or person's name (e.g. Sidd)"
+                    placeholderTextColor={colors.textMuted}
+                    mode="outlined"
+                    outlineColor={colors.border}
+                    activeOutlineColor={accent.hex}
+                    textColor={colors.textPrimary}
+                    style={styles.textInput}
+                  />
+                  {friendSuggestions.length > 0 && (
+                    <View style={styles.suggestionsContainer}>
+                      <Text style={styles.suggestionsTitle}>Recent:</Text>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+                        {friendSuggestions.map((name) => (
+                          <TouchableOpacity
+                            key={name}
+                            onPress={() => {
+                              setFriendPaidName(name);
+                              setFormError(null);
+                            }}
+                            style={[
+                              styles.suggestionPill,
+                              { backgroundColor: colors.surfaceVariant, borderColor: colors.border },
+                              friendPaidName === name && {
+                                borderColor: accent.hex,
+                                backgroundColor: accent.muted,
+                              },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.suggestionPillText,
+                                { color: friendPaidName === name ? accent.hex : colors.textPrimary },
+                              ]}
+                            >
+                              {name}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                    </View>
+                  )}
+                </View>
+
+                <View style={styles.friendInfoCallout}>
+                  <Ionicons name="information-circle-outline" size={16} color={accent.hex} style={{ marginTop: 1 }} />
+                  <Text style={styles.friendInfoCalloutText}>
+                    Won't debit {accounts.find((a) => a.id === effectiveAccountId)?.name || 'this account'} now. An expense and a borrowed debt to {friendPaidName.trim() || 'your friend'} will be recorded. You will choose which account to repay from when settling in the Borrows tab.
+                  </Text>
+                </View>
+              </>
+            )}
           </View>
 
           {/* If borrow, show Person Name input */}
@@ -1122,6 +1430,7 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
                   </TouchableOpacity>
                 );
               })}
+
             </View>
           </View>
 
@@ -1408,6 +1717,100 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
             }}
           />
         )}
+        {/* Quick Add Category & Templates Modal */}
+        <Modal
+          visible={showAddCategoryModal}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setShowAddCategoryModal(false)}
+        >
+          <View style={styles.addCatModalBackdrop}>
+            <View style={styles.addCatModalCard}>
+              <View style={styles.addCatModalHeader}>
+                <Text style={styles.addCatModalTitle}>Add Category</Text>
+                <TouchableOpacity
+                  onPress={() => setShowAddCategoryModal(false)}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Ionicons name="close" size={20} color={colors.textSecondary} />
+                </TouchableOpacity>
+              </View>
+
+              <Text style={styles.addCatSectionSub}>QUICK TEMPLATES</Text>
+              <View style={styles.addCatTemplatesWrap}>
+                {POPULAR_CATEGORY_TEMPLATES.map((tmpl) => {
+                  const alreadyHas = categories.some((c) => c.toLowerCase() === tmpl.toLowerCase());
+                  return (
+                    <TouchableOpacity
+                      key={tmpl}
+                      onPress={() => {
+                        addCategory(tmpl);
+                        setCategory(tmpl);
+                        setCategoryTouched(true);
+                        setShowAddCategoryModal(false);
+                      }}
+                      style={[
+                        styles.addCatTemplateChip,
+                        alreadyHas && { opacity: 0.6 },
+                      ]}
+                    >
+                      <Ionicons
+                        name={getCategoryIcon(tmpl)}
+                        size={12}
+                        color={colors.textSecondary}
+                        style={{ marginRight: 4 }}
+                      />
+                      <Text style={styles.addCatTemplateText}>
+                        {tmpl} {alreadyHas ? '✓' : ''}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              <Text style={[styles.addCatSectionSub, { marginTop: 12 }]}>CUSTOM NAME</Text>
+              <TextInput
+                value={newCategoryName}
+                onChangeText={setNewCategoryName}
+                placeholder="e.g. For friend, College fee..."
+                placeholderTextColor={colors.textMuted}
+                mode="outlined"
+                outlineColor={colors.border}
+                activeOutlineColor={accent.hex}
+                textColor={colors.textPrimary}
+                theme={{ colors: { background: colors.surfaceLight } }}
+                style={{ height: 42, fontSize: 13, backgroundColor: colors.surfaceLight }}
+              />
+
+              <View style={styles.addCatModalActions}>
+                <TouchableOpacity
+                  onPress={() => setShowAddCategoryModal(false)}
+                  style={styles.addCatCancelBtn}
+                >
+                  <Text style={styles.addCatCancelBtnText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => {
+                    const trimmed = newCategoryName.trim();
+                    if (!trimmed) return;
+                    addCategory(trimmed);
+                    setCategory(trimmed);
+                    setCategoryTouched(true);
+                    setNewCategoryName('');
+                    setShowAddCategoryModal(false);
+                  }}
+                  disabled={!newCategoryName.trim()}
+                  style={[
+                    styles.addCatConfirmBtn,
+                    { backgroundColor: accent.hex, opacity: newCategoryName.trim() ? 1 : 0.5 },
+                  ]}
+                >
+                  <Text style={styles.addCatConfirmBtnText}>Add & Select</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
       </View>
   );
 };
@@ -1672,6 +2075,67 @@ function getStyles(colors: ThemeColors) {
     sourceCheckIcon: {
       marginLeft: 2,
     },
+    friendSourceBubble: {
+      width: 30,
+      height: 30,
+      borderRadius: 15,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    friendBoxContainer: {
+      marginTop: SPACING.md,
+      backgroundColor: colors.surfaceLight,
+      padding: SPACING.md,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+      gap: 6,
+    },
+    friendInfoCallout: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      backgroundColor: colors.surfaceLight,
+      borderColor: colors.border,
+      borderWidth: 1,
+      borderRadius: 8,
+      padding: SPACING.sm + 2,
+      marginTop: SPACING.sm,
+      gap: 8,
+    },
+    friendInfoCalloutText: {
+      flex: 1,
+      fontSize: 12,
+      color: colors.textSecondary,
+      lineHeight: 17,
+    },
+    friendInputLabel: {
+      fontSize: 10,
+      fontWeight: '700',
+      letterSpacing: 0.8,
+      color: colors.textMuted,
+      marginBottom: 2,
+    },
+    suggestionsContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      marginTop: 4,
+    },
+    suggestionsTitle: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: colors.textMuted,
+    },
+    suggestionPill: {
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      borderRadius: 12,
+      borderWidth: 1,
+    },
+    suggestionPillText: {
+      fontSize: 12,
+      fontWeight: '600',
+    },
     categoriesGrid: {
       flexDirection: 'row',
       flexWrap: 'wrap',
@@ -1802,6 +2266,89 @@ function getStyles(colors: ThemeColors) {
       color: colors.textInverse,
       fontSize: 15,
       fontWeight: '700',
+    },
+    addCatModalBackdrop: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.6)',
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: SPACING.lg,
+    },
+    addCatModalCard: {
+      width: '100%',
+      maxWidth: 380,
+      backgroundColor: colors.surface,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: colors.border,
+      padding: SPACING.md,
+      gap: 8,
+    },
+    addCatModalHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 4,
+    },
+    addCatModalTitle: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: colors.textPrimary,
+    },
+    addCatSectionSub: {
+      fontSize: 10,
+      fontWeight: '700',
+      color: colors.textMuted,
+      letterSpacing: 0.6,
+    },
+    addCatTemplatesWrap: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 6,
+    },
+    addCatTemplateChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 8,
+      paddingVertical: 5,
+      borderRadius: 8,
+      backgroundColor: colors.surfaceLight,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    addCatTemplateText: {
+      fontSize: 11,
+      color: colors.textSecondary,
+      fontWeight: '600',
+    },
+    addCatModalActions: {
+      flexDirection: 'row',
+      justifyContent: 'flex-end',
+      gap: 8,
+      marginTop: 8,
+    },
+    addCatCancelBtn: {
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      borderRadius: 6,
+      backgroundColor: colors.surfaceLight,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    addCatCancelBtnText: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: colors.textSecondary,
+    },
+    addCatConfirmBtn: {
+      paddingHorizontal: 14,
+      paddingVertical: 8,
+      borderRadius: 6,
+    },
+    addCatConfirmBtnText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: colors.textInverse,
     },
   });
 }

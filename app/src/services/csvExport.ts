@@ -103,7 +103,10 @@ export function generateCsvContent(transactions: Transaction[], accountMap: Reco
       }
     }
 
-    const accountName = (tx as any).account?.name || accountMap[tx.account_id] || 'Unknown Account';
+    const accountName =
+      (tx as any).account?.name ||
+      (tx.account_id ? accountMap[tx.account_id] : '') ||
+      (tx.paid_by_friend ? `Paid by ${tx.friend_name || 'Friend'}` : 'Unknown Account');
     const personName = (tx as any).person_name || '';
 
     return [

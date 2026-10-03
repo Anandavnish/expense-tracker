@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { ProgressBar, TextInput } from 'react-native-paper';
@@ -28,6 +29,8 @@ import {
   getHistoricalAccountBalances,
   getHistoricalBorrows,
   calculateHistoricalNetWorth,
+  calculateCreditCardCycleDues,
+  calculateAggregateCreditCycleDues,
 } from '../../store/financeStore';
 import { useSettingsStore } from '../../store/settingsStore';
 import { MonthUnlockModal } from '../../components/MonthUnlockModal';
@@ -40,8 +43,9 @@ import {
   CARD_BRAND_COLORS,
   CUSTOM_PALETTE_COLORS,
   getCategoryToken,
+  DYNAMIC_CATEGORY_PALETTE,
 } from '../../theme/tokens';
-import { getCategoryIcon } from '../../utils/categoryIcons';
+import { getCategoryIcon, POPULAR_CATEGORY_TEMPLATES } from '../../utils/categoryIcons';
 import { TactileButton } from '../../components/TactileButton';
 import { InlineError } from '../../components/InlineError';
 import { YouTubeStyleDraggableList } from '../../components/YouTubeStyleDraggableList';
@@ -49,6 +53,7 @@ import { KeyboardAwareScrollView } from '../../components/KeyboardAwareScrollVie
 import { BankLogo } from '../../components/BankLogo';
 import { EditButton } from '../../components/EditButton';
 import { CategoryDonutChart, CategoryChartItem } from '../../components/CategoryDonutChart';
+import { AnimatedTrendArrow } from '../../components/AnimatedTrendArrow';
 import { Account, AccountType, BankPresetCode, CreditCardIssuerCode } from '../../types/database';
 
 interface DashboardScreenProps {
@@ -252,6 +257,9 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
   const [editCustomIcon, setEditCustomIcon] = useState<keyof typeof Ionicons.glyphMap>('business-outline');
   const [editBalance, setEditBalance] = useState('');
   const [editCreditLimit, setEditCreditLimit] = useState('');
+  const [editBillingCycleDay, setEditBillingCycleDay] = useState('');
+  const [editPaymentDueDay, setEditPaymentDueDay] = useState('');
+  const [editCurrentStatementBilledDue, setEditCurrentStatementBilledDue] = useState('');
   const [isAddingNewSource, setIsAddingNewSource] = useState(false);
   const [isSavingSource, setIsSavingSource] = useState(false);
   const [showNetWorthDeltaCallout, setShowNetWorthDeltaCallout] = useState(false);
@@ -306,11 +314,20 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
   // Reorder Drag State (locks scroll while dragging)
   const [isSourcesDragging, setIsSourcesDragging] = useState(false);
   const [isCategoriesDragging, setIsCategoriesDragging] = useState(false);
+  const [trendAnimationKey, setTrendAnimationKey] = useState(0);
+
+  // Trigger animation on screen focus / app open
+  useFocusEffect(
+    useCallback(() => {
+      setTrendAnimationKey((k) => k + 1);
+    }, [])
+  );
 
   const onRefresh = async () => {
     if (!user) return;
     setInlineError(null);
     setRefreshing(true);
+    setTrendAnimationKey((k) => k + 1);
     await fetchInitialData(user.id);
     setRefreshing(false);
   };
@@ -432,7 +449,9 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
   });
 
   // 3. Credit Card Accounts calculations
-  const creditAccounts = effectiveAccounts.filter((a) => a.type === 'credit_card');
+  const creditAccounts = useMemo(() => {
+    return effectiveAccounts.filter((a) => a.type === 'credit_card');
+  }, [effectiveAccounts]);
   const totalCreditLimit = creditAccounts.reduce(
     (sum, a) => sum + Number(a.credit_limit || 0),
     0
@@ -444,6 +463,20 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
   );
   // Available limit remaining after spend (fixed limit - debt)
   const totalAvailCredit = Math.max(0, totalCreditLimit - totalCreditDebt);
+
+  // Credit card cycle dues split (Billed Dues + Unbilled Dues)
+  const creditCycleDues = useMemo(() => {
+    if (isFutureMonth) {
+      return { totalDues: 0, billedDues: 0, unbilledDues: 0, nearestDueDays: null, hasBilledDues: false, isSplitActive: false, isOverdue: false };
+    }
+    let refDate: string | undefined;
+    if (isPastMonth) {
+      const [yStr, mStr] = selectedMonth.split('-');
+      const lastDay = new Date(parseInt(yStr, 10), parseInt(mStr, 10), 0).getDate();
+      refDate = `${selectedMonth}-${String(lastDay).padStart(2, '0')}`;
+    }
+    return calculateAggregateCreditCycleDues(creditAccounts, transactions, refDate);
+  }, [creditAccounts, transactions, isFutureMonth, isPastMonth, selectedMonth]);
 
   // Net Worth: Liquid (Bank + Cash) + Lent - Borrowed - Credit Card Dues
   const fullNetWorth = useMemo(() => {
@@ -558,13 +591,26 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
   const { categoryChartData, totalCategoryExpenses } = useMemo(() => {
     let total = 0;
     const items: CategoryChartItem[] = [];
+    const usedColors = new Set<string>();
+
     Object.entries(categorySpendingMap).forEach(([cat, amt]) => {
       if (amt > 0 && cat !== 'Credit Card Payment') {
         total += amt;
+        let color = getCategoryToken(cat).color;
+
+        // If this color is already in use by another category in this chart, pick an unused fallback color
+        if (usedColors.has(color.toLowerCase())) {
+          const alternate = DYNAMIC_CATEGORY_PALETTE.find((c) => !usedColors.has(c.toLowerCase()));
+          if (alternate) {
+            color = alternate;
+          }
+        }
+        usedColors.add(color.toLowerCase());
+
         items.push({
           category: cat,
           amount: amt,
-          color: getCategoryToken(cat).color,
+          color,
         });
       }
     });
@@ -574,11 +620,52 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
     };
   }, [categorySpendingMap]);
 
+  // Map category name to its exact color in CategoryDonutChart
+  const categoryColorMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    categoryChartData.forEach((item) => {
+      map[item.category.toLowerCase()] = item.color;
+    });
+    return map;
+  }, [categoryChartData]);
+
   // Max spend for category progress relative calculation
   const maxCategorySpend = useMemo(() => {
     const vals = Object.values(categorySpendingMap);
     return Math.max(1, ...vals);
   }, [categorySpendingMap]);
+
+  // Dynamic display categories: user store categories + any category with active spending or budgets
+  const displayCategories = useMemo(() => {
+    const set = new Set<string>();
+    const list: string[] = [];
+    const addCat = (c?: string | null) => {
+      if (!c) return;
+      const clean = c.trim();
+      if (!clean || clean === 'Credit Card Payment' || clean === 'Overall Budget') return;
+      const lower = clean.toLowerCase();
+      if (!set.has(lower)) {
+        set.add(lower);
+        list.push(clean);
+      }
+    };
+    categories.forEach(addCat);
+    Object.entries(categorySpendingMap).forEach(([cat, amt]) => {
+      if (amt > 0) addCat(cat);
+    });
+    budgetSummaries.forEach((bs) => addCat(bs.category));
+    return list;
+  }, [categories, categorySpendingMap, budgetSummaries]);
+
+  // Self-heal store categories if any active transaction/spending category was unlisted
+  useEffect(() => {
+    const existing = new Set(categories.map((c) => c.toLowerCase()));
+    displayCategories.forEach((cat) => {
+      if (!existing.has(cat.toLowerCase())) {
+        addCategory(cat);
+      }
+    });
+  }, [displayCategories, categories, addCategory]);
 
   // Month transactions and distinct categories for gating & overview
   const monthTransactions = useMemo(() => {
@@ -669,7 +756,13 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
       // Check credit limit & debt across all credit cards
       const totalCreditLimit = creditAccounts.reduce((sum, c) => sum + Number(c.credit_limit || 0), 0);
 
-      // Construct compact summary with strict omission of budget variance if no budget exists
+      // Financial status & balance sheet calculations for real-touch financial health evaluation
+      const totalDebtObligations = totalBorrowed + totalCreditDebt;
+      const debtToLiquidityRatioPercent = liquidTotal > 0
+        ? Math.round((totalDebtObligations / liquidTotal) * 100)
+        : totalDebtObligations > 0 ? 999 : 0;
+
+      // Construct compact summary with comprehensive financial health & balance sheet data
       const compactSummary: Record<string, any> = {
         month: formattedMonthLabel,
         currency: 'INR (₹)',
@@ -678,16 +771,31 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
         periodStatus: isHistorical
           ? `Historical closed and finalized period for ${formattedMonthLabel}`
           : `Active in-progress period for ${formattedMonthLabel}`,
+        // Cashflow
         totalIncome,
         totalExpense,
         netSavings: totalIncome - totalExpense,
         transactionCount: monthTransactions.length,
         distinctCategoriesCount,
         topSpendingCategories: topCategories,
+        // Balance Sheet & Solvency Health
+        netWorth: fullNetWorth,
+        liquidCashAndBank: liquidTotal,
+        receivablesLent: totalLent,
+        pendingLentCount,
+        liabilitiesBorrowed: totalBorrowed,
+        pendingBorrowedCount,
+        creditCardTotalDebt: totalCreditDebt,
+        creditCardBilledDue: creditCycleDues.billedDues,
+        creditCardUnbilledDue: creditCycleDues.unbilledDues,
+        totalOutstandingDebts: totalDebtObligations,
+        debtToLiquidityRatioPercent,
         ...(daysRemainingInMonth !== null ? { daysRemainingInMonth } : {}),
         ...(totalCreditLimit > 0
           ? {
               creditCardUtilizationPercent: Math.round((totalCreditDebt / totalCreditLimit) * 100),
+              creditLimit: totalCreditLimit,
+              availableCredit: totalAvailCredit,
             }
           : {}),
       };
@@ -838,6 +946,13 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
         setEditBalance(bal !== 0 ? String(bal) : '');
       }
       setEditCreditLimit(account.credit_limit ? String(account.credit_limit) : '');
+      setEditBillingCycleDay(account.billing_cycle_day ? String(account.billing_cycle_day) : '');
+      setEditPaymentDueDay(account.payment_due_day ? String(account.payment_due_day) : '');
+      setEditCurrentStatementBilledDue(
+        account.current_statement_billed_due !== undefined && account.current_statement_billed_due !== null
+          ? String(account.current_statement_billed_due)
+          : ''
+      );
       setIsAddingNewSource(false);
     } else {
       setEditingAccount(null);
@@ -849,14 +964,18 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
       setEditCustomIcon('business-outline');
       setEditBalance('');
       setEditCreditLimit('');
+      setEditBillingCycleDay('');
+      setEditPaymentDueDay('');
+      setEditCurrentStatementBilledDue('');
       setIsAddingNewSource(true);
     }
   };
 
   const handleOpenPayBill = (card: Account) => {
     setPayingCard(card);
-    const spent = Math.abs(Math.min(0, Number(card.current_balance || 0)));
-    setPayAmount(spent > 0 ? String(spent) : '');
+    const dues = calculateCreditCardCycleDues(card, transactions);
+    const suggested = dues.isSplitActive && dues.billedDues > 0 ? dues.billedDues : dues.totalDues;
+    setPayAmount(suggested > 0 ? String(suggested) : '');
     const defaultSource = liquidAccounts.find((a) => a.type === 'bank') || liquidAccounts[0];
     setPaySourceAccountId(defaultSource?.id || '');
     setPayBillModalVisible(true);
@@ -961,6 +1080,15 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
     const rawVal = parseFloat(editBalance) || 0;
     const parsedBalance = editType === 'credit_card' ? -Math.abs(rawVal) : rawVal;
     const parsedLimit = editCreditLimit ? parseFloat(editCreditLimit) || null : null;
+    const parsedBillingDay = editType === 'credit_card' && editBillingCycleDay
+      ? Math.min(31, Math.max(1, parseInt(editBillingCycleDay, 10) || 1))
+      : null;
+    const parsedDueDay = editType === 'credit_card' && editPaymentDueDay
+      ? Math.min(31, Math.max(1, parseInt(editPaymentDueDay, 10) || 1))
+      : null;
+    const parsedBilledDue = editType === 'credit_card' && editCurrentStatementBilledDue.trim()
+      ? Math.max(0, parseFloat(editCurrentStatementBilledDue) || 0)
+      : null;
 
     setIsSavingSource(true);
     try {
@@ -971,6 +1099,9 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
           type: editType,
           current_balance: parsedBalance,
           credit_limit: parsedLimit,
+          billing_cycle_day: parsedBillingDay,
+          payment_due_day: parsedDueDay,
+          current_statement_billed_due: parsedBilledDue,
           bank_preset: editType === 'bank' ? editBankPreset : null,
           card_issuer: editType === 'credit_card' ? editCardIssuer : null,
           custom_color:
@@ -998,6 +1129,9 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
           type: editType,
           current_balance: parsedBalance,
           credit_limit: parsedLimit,
+          billing_cycle_day: parsedBillingDay,
+          payment_due_day: parsedDueDay,
+          current_statement_billed_due: parsedBilledDue,
           bank_preset: editType === 'bank' ? editBankPreset : null,
           card_issuer: editType === 'credit_card' ? editCardIssuer : null,
           custom_color:
@@ -1186,23 +1320,27 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                   {formattedNetWorth}
                 </Text>
                 {netWorthDelta && !isFutureMonth && (
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                    <Ionicons
-                      name={
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <AnimatedTrendArrow
+                      direction={
                         netWorthDelta.diff > 0
-                          ? 'arrow-up-circle'
+                          ? 'up'
                           : netWorthDelta.diff < 0
-                          ? 'arrow-down-circle'
-                          : 'remove-circle'
+                          ? 'down'
+                          : 'neutral'
                       }
-                      size={16}
+                      size={24}
                       color={
                         netWorthDelta.diff > 0
-                          ? colors.success
+                          ? colors.income
                           : netWorthDelta.diff < 0
                           ? colors.alert
                           : colors.textMuted
                       }
+                      triggerKey={trendAnimationKey}
+                      onPress={() => {
+                        setShowNetWorthDeltaCallout((prev) => !prev);
+                      }}
                     />
                     <TouchableOpacity
                       onPress={() => {
@@ -1297,10 +1435,11 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
 
           <View style={styles.netWorthDivider} />
 
+          {/* Net Worth Breakdown Row (Reverted clean single row) */}
           <View style={styles.breakdownRow}>
             <View style={styles.breakdownItem}>
               <Text style={styles.breakdownLabel}>Cash & Bank</Text>
-              <Text style={[styles.breakdownValue, TYPOGRAPHY.tabularText]}>
+              <Text style={[styles.breakdownValue, TYPOGRAPHY.tabularText]} numberOfLines={1} adjustsFontSizeToFit>
                 ₹{liquidTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
               </Text>
             </View>
@@ -1320,6 +1459,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                   TYPOGRAPHY.tabularText,
                   { color: totalLent > 0 ? colors.success : colors.textSecondary },
                 ]}
+                numberOfLines={1}
+                adjustsFontSizeToFit
               >
                 {totalLent > 0 ? `+₹${totalLent.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '₹0'}
               </Text>
@@ -1340,25 +1481,55 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                   TYPOGRAPHY.tabularText,
                   { color: totalBorrowed > 0 ? colors.warning : colors.textSecondary },
                 ]}
+                numberOfLines={1}
+                adjustsFontSizeToFit
               >
                 {totalBorrowed > 0 ? `−₹${totalBorrowed.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '₹0'}
               </Text>
             </TouchableOpacity>
 
-            <View style={styles.breakdownItem}>
-              <Text style={styles.breakdownLabel}>Card Dues</Text>
+            <TouchableOpacity
+              style={styles.breakdownItem}
+              onPress={() => {
+                if (creditAccounts.length > 0) {
+                  navigation.navigate('AccountDetail', { accountId: creditAccounts[0].id });
+                }
+              }}
+              activeOpacity={0.7}
+            >
+              <View style={styles.breakdownLabelRow}>
+                <Text style={styles.breakdownLabel}>Card Dues</Text>
+                {creditCycleDues.isOverdue && (
+                  <View style={{ backgroundColor: colors.alert + '20', paddingHorizontal: 4, paddingVertical: 1, borderRadius: 3 }}>
+                    <Text style={{ fontSize: 8, fontWeight: '800', color: colors.alert }}>OVERDUE</Text>
+                  </View>
+                )}
+                {creditAccounts.length > 0 && (
+                  <Ionicons name="chevron-forward" size={10} color={colors.textMuted} />
+                )}
+              </View>
               <Text
                 style={[
                   styles.breakdownValue,
                   TYPOGRAPHY.tabularText,
-                  { color: totalCreditDebt > 0 ? colors.warning : colors.textSecondary },
+                  {
+                    color: creditCycleDues.isOverdue
+                      ? colors.alert
+                      : (creditCycleDues.billedDues > 0 || creditCycleDues.unbilledDues > 0 || creditCycleDues.totalDues > 0)
+                      ? colors.warning
+                      : colors.textSecondary,
+                  },
                 ]}
+                numberOfLines={1}
+                adjustsFontSizeToFit
               >
-                {totalCreditDebt > 0
-                  ? `−₹${totalCreditDebt.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
+                {creditAccounts.length > 0
+                  ? creditCycleDues.isSplitActive
+                    ? `₹${creditCycleDues.billedDues.toLocaleString('en-IN', { maximumFractionDigits: 0 })} + ₹${creditCycleDues.unbilledDues.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
+                    : `₹${creditCycleDues.totalDues.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
                   : '₹0'}
               </Text>
-            </View>
+            </TouchableOpacity>
           </View>
         </View>
 
@@ -1620,10 +1791,10 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                   >
                     <View style={styles.sourceLeft}>
                       <BankLogo account={acc} name={title} size={36} />
-                      <View>
-                        <Text style={styles.sourceName}>{title}</Text>
+                      <View style={{ flexShrink: 1 }}>
+                        <Text style={styles.sourceName} numberOfLines={1}>{title}</Text>
                         {subtitle ? (
-                          <Text style={styles.sourceSub}>{subtitle}</Text>
+                          <Text style={styles.sourceSub} numberOfLines={1}>{subtitle}</Text>
                         ) : null}
                       </View>
                     </View>
@@ -1695,6 +1866,13 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                 const usedRatio = limit > 0 ? Math.min(spent / limit, 1) : 0;
                 const barColor = isOverspent ? colors.alert : usedRatio > 0.8 ? colors.warning : accent.hex;
                 const { title } = getAccountDisplay(card);
+                let cardRefDate: string | undefined;
+                if (isPastMonth) {
+                  const [yStr, mStr] = selectedMonth.split('-');
+                  const lastDay = new Date(parseInt(yStr, 10), parseInt(mStr, 10), 0).getDate();
+                  cardRefDate = `${selectedMonth}-${String(lastDay).padStart(2, '0')}`;
+                }
+                const cardDues = calculateCreditCardCycleDues(card, transactions, cardRefDate);
 
                 return (
                   <View key={card.id} style={styles.creditCardSourceContainer}>
@@ -1709,27 +1887,79 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                       <View style={styles.sourceRow}>
                         <View style={styles.sourceLeft}>
                           <BankLogo account={card} name={title} size={36} />
-                          <View>
-                            <Text style={styles.sourceName}>{title}</Text>
-                            <Text style={styles.sourceSub}>
+                          <View style={{ flexShrink: 1 }}>
+                            <Text style={styles.sourceName} numberOfLines={1}>{title}</Text>
+                            <Text style={styles.sourceSub} numberOfLines={1}>
                               {isOverspent
                                 ? `Overspent: ₹${(spent - limit).toLocaleString('en-IN')}`
-                                : `Avail: ₹${available.toLocaleString('en-IN')} of ₹${limit.toLocaleString('en-IN')}`}
+                                : `Avail: ₹${available.toLocaleString('en-IN')}`}
                             </Text>
                           </View>
                         </View>
                         <View style={styles.sourceRightCol}>
-                          <Text
-                            style={[
-                              styles.sourceAmount,
-                              TYPOGRAPHY.tabularText,
-                              { color: spent > 0 ? colors.warning : colors.success },
-                            ]}
-                          >
-                            {spent > 0
-                              ? `₹${spent.toLocaleString('en-IN')} Due`
-                              : '₹0 Due'}
-                          </Text>
+                          <View style={{ alignItems: 'flex-end' }}>
+                            {cardDues.isSplitActive ? (
+                              <View style={{ alignItems: 'flex-end' }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+                                  <Text
+                                    style={[
+                                      styles.sourceAmount,
+                                      TYPOGRAPHY.tabularText,
+                                      {
+                                        color: cardDues.isOverdue
+                                          ? colors.alert
+                                          : (cardDues.billedDues > 0 ? colors.warning : colors.success),
+                                        fontSize: 13,
+                                      },
+                                    ]}
+                                  >
+                                    ₹{cardDues.billedDues.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                                  </Text>
+                                  <Text style={{ color: colors.textMuted, fontSize: 11, fontWeight: '700' }}> + </Text>
+                                  <Text
+                                    style={[
+                                      styles.sourceAmount,
+                                      TYPOGRAPHY.tabularText,
+                                      {
+                                        color: colors.textSecondary,
+                                        fontSize: 13,
+                                      },
+                                    ]}
+                                  >
+                                    ₹{cardDues.unbilledDues.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                                  </Text>
+                                </View>
+                                <Text style={{ fontSize: 9, color: colors.textMuted, fontWeight: '700', letterSpacing: 0.3, marginTop: 1 }}>
+                                  BILLED + UNBILLED
+                                </Text>
+                              </View>
+                            ) : (
+                              <Text
+                                style={[
+                                  styles.sourceAmount,
+                                  TYPOGRAPHY.tabularText,
+                                  {
+                                    color: cardDues.isOverdue
+                                      ? colors.alert
+                                      : (cardDues.totalDues > 0 || spent > 0)
+                                      ? colors.warning
+                                      : colors.success,
+                                    fontSize: 14,
+                                  },
+                                ]}
+                                numberOfLines={1}
+                              >
+                                {(cardDues.totalDues > 0 || spent > 0)
+                                  ? `₹${(cardDues.totalDues > 0 ? cardDues.totalDues : spent).toLocaleString('en-IN', { maximumFractionDigits: 0 })} Due`
+                                  : '₹0 Due'}
+                              </Text>
+                            )}
+                            {cardDues.isOverdue && (
+                              <View style={{ backgroundColor: colors.alert + '20', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 3, marginTop: 2 }}>
+                                <Text style={{ fontSize: 9, fontWeight: '800', color: colors.alert, letterSpacing: 0.5 }}>OVERDUE</Text>
+                              </View>
+                            )}
+                          </View>
                           <Ionicons name="chevron-forward" size={14} color={colors.textMuted} />
                         </View>
                       </View>
@@ -1742,7 +1972,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
 
                     {/* Quick Action Pill Row */}
                     <View style={styles.cardActionsRow}>
-                      {spent > 0 ? (
+                      {spent > 0 || cardDues.totalDues > 0 ? (
                         <TouchableOpacity
                           style={[styles.payBillActionPill, { borderColor: accent.hex }]}
                           onPress={() => handleOpenPayBill(card)}
@@ -1906,7 +2136,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
           />
 
           <View style={styles.categoriesList}>
-            {categories.map((cat) => {
+            {displayCategories.map((cat) => {
               const spent = categorySpendingMap[cat] || 0;
               const catBudget = budgetSummaries.find((b) => b.category === cat);
               const hasBudget = !!catBudget && Number(catBudget.monthly_limit) > 0;
@@ -1917,22 +2147,24 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                 ? spent / maxCategorySpend
                 : 0;
               const isOver = hasBudget && spent > limit;
+              const chartColor = categoryColorMap[cat.toLowerCase()] || getCategoryToken(cat).color;
               const barColor = isOver
                 ? colors.alert
                 : hasBudget && ratio > 0.8
                 ? colors.warning
                 : spent > 0
-                ? accent.hex
+                ? chartColor
                 : colors.border;
 
               const catIcon = getCategoryIconProps(cat);
+              const iconColor = chartColor || catIcon.color;
 
               return (
                 <View key={cat} style={styles.categorySpendRow}>
                   <View style={styles.categorySpendHeader}>
                     <View style={styles.categorySpendLeft}>
-                      <View style={[styles.categoryMiniIconBadge, { backgroundColor: catIcon.color + '15' }]}>
-                        <Ionicons name={catIcon.name} size={14} color={catIcon.color} />
+                      <View style={[styles.categoryMiniIconBadge, { backgroundColor: iconColor + '15' }]}>
+                        <Ionicons name={catIcon.name} size={14} color={iconColor} />
                       </View>
                       <Text style={styles.categorySpendName}>{cat}</Text>
                     </View>
@@ -2489,6 +2721,58 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                       theme={{ colors: { background: colors.surfaceLight } }}
                       style={styles.modalInput}
                     />
+
+                    <View style={{ flexDirection: 'row', gap: 12 }}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.inputSectionLabel}>BILLING DAY (1-31)</Text>
+                        <TextInput
+                          value={editBillingCycleDay}
+                          onChangeText={setEditBillingCycleDay}
+                          placeholder="e.g. 15"
+                          keyboardType="number-pad"
+                          mode="outlined"
+                          outlineColor={colors.border}
+                          activeOutlineColor={accent.hex}
+                          textColor={colors.textPrimary}
+                          theme={{ colors: { background: colors.surfaceLight } }}
+                          style={styles.modalInput}
+                        />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.inputSectionLabel}>DUE DAY (1-31)</Text>
+                        <TextInput
+                          value={editPaymentDueDay}
+                          onChangeText={setEditPaymentDueDay}
+                          placeholder="e.g. 5"
+                          keyboardType="number-pad"
+                          mode="outlined"
+                          outlineColor={colors.border}
+                          activeOutlineColor={accent.hex}
+                          textColor={colors.textPrimary}
+                          theme={{ colors: { background: colors.surfaceLight } }}
+                          style={styles.modalInput}
+                        />
+                      </View>
+                    </View>
+
+                    <View style={{ marginTop: SPACING.xs }}>
+                      <Text style={styles.inputSectionLabel}>CURRENT STATEMENT BILLED DUE (₹) (OPTIONAL)</Text>
+                      <TextInput
+                        value={editCurrentStatementBilledDue}
+                        onChangeText={setEditCurrentStatementBilledDue}
+                        placeholder="e.g. 5000 (calculated from history if empty)"
+                        keyboardType="decimal-pad"
+                        mode="outlined"
+                        outlineColor={colors.border}
+                        activeOutlineColor={accent.hex}
+                        textColor={colors.textPrimary}
+                        theme={{ colors: { background: colors.surfaceLight } }}
+                        style={styles.modalInput}
+                      />
+                      <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }}>
+                        Leave blank to let the app calculate billed dues automatically from your past transactions before the billing date.
+                      </Text>
+                    </View>
                   </>
                 )}
 
@@ -2634,9 +2918,12 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                                   },
                                 ]}
                               >
-                                {acc.type === 'credit_card'
-                                  ? `₹${Math.abs(Math.min(0, Number(acc.current_balance || 0))).toLocaleString('en-IN')} Due`
-                                  : `₹${Number(acc.current_balance).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`}
+                                {acc.type === 'credit_card' ? (() => {
+                                  const dues = calculateCreditCardCycleDues(acc, transactions);
+                                  return dues.isSplitActive
+                                    ? `₹${dues.billedDues.toLocaleString('en-IN', { maximumFractionDigits: 0 })} + ₹${dues.unbilledDues.toLocaleString('en-IN', { maximumFractionDigits: 0 })} Due`
+                                    : `₹${(dues.totalDues > 0 ? dues.totalDues : Math.abs(Math.min(0, Number(acc.current_balance || 0)))).toLocaleString('en-IN', { maximumFractionDigits: 0 })} Due`;
+                                })() : `₹${Number(acc.current_balance).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`}
                               </Text>
                             </View>
                           </View>
@@ -2796,6 +3083,49 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                       style={styles.categoryInputField}
                       autoFocus
                     />
+                  </View>
+                  {/* Category Template Quick Pickers */}
+                  <View style={styles.templatesSection}>
+                    <Text style={styles.templatesHeaderLabel}>POPULAR TEMPLATES</Text>
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      contentContainerStyle={styles.templatesRow}
+                    >
+                      {POPULAR_CATEGORY_TEMPLATES.map((tmpl) => {
+                        const isAdded = categories.some((c) => c.toLowerCase() === tmpl.toLowerCase());
+                        const isCurrent = categoryInputValue.trim().toLowerCase() === tmpl.toLowerCase();
+                        return (
+                          <TouchableOpacity
+                            key={tmpl}
+                            onPress={() => {
+                              Haptics.selectionAsync().catch(() => {});
+                              setCategoryInputValue(tmpl);
+                            }}
+                            style={[
+                              styles.templateChip,
+                              isCurrent && { borderColor: accent.hex, backgroundColor: accent.hex + '1A' },
+                              isAdded && !isCurrent && { opacity: 0.6 },
+                            ]}
+                          >
+                            <Ionicons
+                              name={getCategoryIcon(tmpl)}
+                              size={12}
+                              color={isCurrent ? accent.hex : colors.textSecondary}
+                              style={{ marginRight: 4 }}
+                            />
+                            <Text
+                              style={[
+                                styles.templateChipText,
+                                isCurrent && { color: accent.hex, fontWeight: '700' },
+                              ]}
+                            >
+                              {tmpl} {isAdded ? '✓' : ''}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </ScrollView>
                   </View>
                   <View style={styles.categoryInputButtonsRow}>
                     <TouchableOpacity
@@ -3309,7 +3639,7 @@ function getStyles(colors: ThemeColors) {
   },
   breakdownItem: {
     flex: 1,
-    minWidth: 80,
+    minWidth: 70,
   },
   breakdownLabelRow: {
     flexDirection: 'row',
@@ -3326,7 +3656,7 @@ function getStyles(colors: ThemeColors) {
   },
   breakdownValue: {
     color: colors.textPrimary,
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '700',
   },
   card: {
@@ -3612,6 +3942,8 @@ function getStyles(colors: ThemeColors) {
     flexDirection: 'row',
     alignItems: 'center',
     gap: SPACING.sm,
+    flexShrink: 1,
+    marginRight: SPACING.sm,
   },
   sourceIconBadge: {
     width: 32,
@@ -3645,6 +3977,7 @@ function getStyles(colors: ThemeColors) {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
+    flexShrink: 0,
   },
   creditCardSourceRow: {
     gap: 6,
@@ -4492,6 +4825,36 @@ function getStyles(colors: ThemeColors) {
     color: colors.textInverse,
     fontSize: 12,
     fontWeight: '700',
+  },
+  templatesSection: {
+    marginVertical: 4,
+  },
+  templatesHeaderLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.textMuted,
+    letterSpacing: 0.6,
+    marginBottom: 6,
+  },
+  templatesRow: {
+    flexDirection: 'row',
+    gap: 6,
+    paddingVertical: 2,
+  },
+  templateChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    backgroundColor: colors.surfaceLight,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  templateChipText: {
+    fontSize: 11,
+    color: colors.textSecondary,
+    fontWeight: '600',
   },
   categorySpendLeft: {
     flexDirection: 'row',

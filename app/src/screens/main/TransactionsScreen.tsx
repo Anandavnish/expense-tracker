@@ -269,7 +269,10 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({ navigati
         const personMatch = ((tx as any).person_name || '').toLowerCase().includes(query);
         const catMatch = (tx.category || '').toLowerCase().includes(query);
         const amountMatch = String(tx.amount).includes(query);
-        const accountMatch = (accountMap[tx.account_id] || '').toLowerCase().includes(query);
+        const accountMatch = (
+          (tx.account_id ? accountMap[tx.account_id] : '') ||
+          (tx.paid_by_friend ? `paid by ${tx.friend_name || 'friend'}` : '')
+        ).toLowerCase().includes(query);
         if (!noteMatch && !personMatch && !catMatch && !amountMatch && !accountMatch) {
           return false;
         }
@@ -350,7 +353,7 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({ navigati
   // Render Transaction Item using redesigned TransactionRow (memoized)
   const renderItem = useCallback(
     ({ item }: { item: Transaction }) => {
-      const sourceAccountName = accountMap[item.account_id];
+      const sourceAccountName = item.account_id ? accountMap[item.account_id] : undefined;
       return (
         <TransactionRow
           transaction={item}

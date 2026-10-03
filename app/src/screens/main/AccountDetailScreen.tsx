@@ -13,7 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { ProgressBar, TextInput } from 'react-native-paper';
 import { useAuthStore } from '../../store/authStore';
-import { useFinanceStore } from '../../store/financeStore';
+import { useFinanceStore, calculateCreditCardCycleDues } from '../../store/financeStore';
 import { useSettingsStore } from '../../store/settingsStore';
 import { SPACING, TYPOGRAPHY, ThemeColors } from '../../theme/tokens';
 import { TactileButton } from '../../components/TactileButton';
@@ -102,6 +102,11 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
       .reduce((sum, t) => sum + Number(t.amount || 0), 0);
   }, [accountTransactions]);
 
+  const cycleDues = useMemo(() => {
+    if (!account || account.type !== 'credit_card') return null;
+    return calculateCreditCardCycleDues(account, transactions);
+  }, [account, transactions]);
+
   // Comprehensive Edit Modal state
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editName, setEditName] = useState('');
@@ -109,6 +114,9 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
   const [editBankPreset, setEditBankPreset] = useState<BankPreset>('HDFC');
   const [editBalance, setEditBalance] = useState('');
   const [editCreditLimit, setEditCreditLimit] = useState('');
+  const [editBillingCycleDay, setEditBillingCycleDay] = useState('');
+  const [editPaymentDueDay, setEditPaymentDueDay] = useState('');
+  const [editCurrentStatementBilledDue, setEditCurrentStatementBilledDue] = useState('');
   const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   // Pay Bill Modal State
@@ -123,8 +131,9 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
 
   const handleOpenPayBill = () => {
     if (!account) return;
-    const spent = Math.abs(Math.min(0, Number(account.current_balance || 0)));
-    setPayAmount(spent > 0 ? String(spent) : '');
+    const dues = calculateCreditCardCycleDues(account, transactions);
+    const suggested = dues.isSplitActive && dues.billedDues > 0 ? dues.billedDues : dues.totalDues;
+    setPayAmount(suggested > 0 ? String(suggested) : '');
     setPaySourceAccountId(liquidAccounts[0]?.id || '');
     setPayBillModalVisible(true);
   };
@@ -152,6 +161,13 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
     setEditType(account.type);
     setEditBankPreset((account.bank_preset as BankPreset) || 'HDFC');
     setEditCreditLimit(account.credit_limit ? String(account.credit_limit) : '');
+    setEditBillingCycleDay(account.billing_cycle_day ? String(account.billing_cycle_day) : '');
+    setEditPaymentDueDay(account.payment_due_day ? String(account.payment_due_day) : '');
+    setEditCurrentStatementBilledDue(
+      account.current_statement_billed_due !== undefined && account.current_statement_billed_due !== null
+        ? String(account.current_statement_billed_due)
+        : ''
+    );
     if (account.type === 'credit_card') {
       const outstanding = Math.abs(Math.min(0, Number(account.current_balance || 0)));
       setEditBalance(outstanding > 0 ? String(outstanding) : '');
@@ -178,6 +194,18 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
       const rawVal = parseFloat(editBalance) || 0;
       const parsedBalance = editType === 'credit_card' ? -Math.abs(rawVal) : rawVal;
       const parsedLimit = editCreditLimit ? parseFloat(editCreditLimit) || null : null;
+      const parsedBillingDay =
+        editType === 'credit_card' && editBillingCycleDay
+          ? Math.min(31, Math.max(1, parseInt(editBillingCycleDay, 10))) || null
+          : null;
+      const parsedDueDay =
+        editType === 'credit_card' && editPaymentDueDay
+          ? Math.min(31, Math.max(1, parseInt(editPaymentDueDay, 10))) || null
+          : null;
+      const parsedBilledDue =
+        editType === 'credit_card' && editCurrentStatementBilledDue.trim()
+          ? Math.max(0, parseFloat(editCurrentStatementBilledDue) || 0)
+          : null;
 
       // Update metadata and recalibrated balance
       await updateAccountOptimistic(account.id, {
@@ -186,6 +214,9 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
         current_balance: parsedBalance,
         credit_limit: parsedLimit,
         bank_preset: editType === 'bank' ? editBankPreset : null,
+        billing_cycle_day: parsedBillingDay,
+        payment_due_day: parsedDueDay,
+        current_statement_billed_due: parsedBilledDue,
       });
 
       setEditModalVisible(false);
@@ -339,6 +370,67 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
                   </Text>
                 </View>
               </View>
+
+              {cycleDues && (
+                cycleDues.isSplitActive ? (
+                  <View style={styles.cycleSplitContainer}>
+                    <View style={styles.cycleSplitItem}>
+                      <Text style={styles.cycleSplitLabel}>BILLED DUE</Text>
+                      <Text style={[styles.cycleSplitVal, TYPOGRAPHY.tabularText, { color: colors.alert }]}>
+                        ₹{cycleDues.billedDues.toLocaleString('en-IN')}
+                      </Text>
+                      <Text style={styles.cycleSplitSub}>
+                        {account.payment_due_day
+                          ? cycleDues.daysUntilDue !== null
+                            ? cycleDues.daysUntilDue === 0
+                              ? 'Due Today'
+                              : `Due in ${cycleDues.daysUntilDue}d`
+                            : `Due Day ${account.payment_due_day}`
+                          : 'Due date not set'}
+                      </Text>
+                    </View>
+
+                    <View style={styles.cycleSplitDivider} />
+
+                    <View style={styles.cycleSplitItem}>
+                      <Text style={styles.cycleSplitLabel}>UNBILLED SPEND</Text>
+                      <Text style={[styles.cycleSplitVal, TYPOGRAPHY.tabularText, { color: colors.warning }]}>
+                        ₹{cycleDues.unbilledDues.toLocaleString('en-IN')}
+                      </Text>
+                      <Text style={styles.cycleSplitSub}>
+                        {account.billing_cycle_day
+                          ? `Bills on Day ${account.billing_cycle_day}`
+                          : 'Cycle day not set'}
+                      </Text>
+                    </View>
+                  </View>
+                ) : (
+                  <View style={styles.cycleSplitContainer}>
+                    <View style={[styles.cycleSplitItem, { alignItems: 'center' }]}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Text style={styles.cycleSplitLabel}>
+                          {cycleDues.isOverdue ? 'OVERDUE STATEMENT DUE' : 'TOTAL OUTSTANDING'}
+                        </Text>
+                        {cycleDues.isOverdue && (
+                          <View style={{ backgroundColor: colors.alert + '20', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 3 }}>
+                            <Text style={{ fontSize: 9, fontWeight: '800', color: colors.alert }}>OVERDUE</Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text style={[styles.cycleSplitVal, TYPOGRAPHY.tabularText, { color: cycleDues.isOverdue ? colors.alert : colors.warning }]}>
+                        ₹{cycleDues.totalDues.toLocaleString('en-IN')}
+                      </Text>
+                      <Text style={styles.cycleSplitSub}>
+                        {cycleDues.isOverdue
+                          ? `Payment overdue by ${Math.abs(cycleDues.daysUntilDue || 0)} days • Merged`
+                          : account.billing_cycle_day
+                          ? `Next bill date: Day ${account.billing_cycle_day}`
+                          : 'Merged outside cycle window'}
+                      </Text>
+                    </View>
+                  </View>
+                )
+              )}
             </View>
           ) : (
             <View style={styles.standardBalanceBox}>
@@ -661,6 +753,62 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
                     theme={{ colors: { background: colors.surfaceLight } }}
                     style={styles.modalInput}
                   />
+
+                  <View style={{ flexDirection: 'row', gap: 10 }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.inputLabel}>BILLING DAY (1-31)</Text>
+                      <TextInput
+                        value={editBillingCycleDay}
+                        onChangeText={setEditBillingCycleDay}
+                        placeholder="e.g. 15"
+                        placeholderTextColor={colors.textMuted}
+                        keyboardType="numeric"
+                        mode="outlined"
+                        textColor={colors.textPrimary}
+                        outlineColor={colors.border}
+                        activeOutlineColor={accent.hex}
+                        theme={{ colors: { background: colors.surfaceLight } }}
+                        style={styles.modalInput}
+                      />
+                    </View>
+
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.inputLabel}>DUE DAY (1-31)</Text>
+                      <TextInput
+                        value={editPaymentDueDay}
+                        onChangeText={setEditPaymentDueDay}
+                        placeholder="e.g. 5"
+                        placeholderTextColor={colors.textMuted}
+                        keyboardType="numeric"
+                        mode="outlined"
+                        textColor={colors.textPrimary}
+                        outlineColor={colors.border}
+                        activeOutlineColor={accent.hex}
+                        theme={{ colors: { background: colors.surfaceLight } }}
+                        style={styles.modalInput}
+                      />
+                    </View>
+                  </View>
+
+                  <View style={{ marginTop: 8 }}>
+                    <Text style={styles.inputLabel}>CURRENT STATEMENT BILLED DUE (₹) (OPTIONAL)</Text>
+                    <TextInput
+                      value={editCurrentStatementBilledDue}
+                      onChangeText={setEditCurrentStatementBilledDue}
+                      placeholder="e.g. 5000 (calculated from history if empty)"
+                      placeholderTextColor={colors.textMuted}
+                      keyboardType="decimal-pad"
+                      mode="outlined"
+                      textColor={colors.textPrimary}
+                      outlineColor={colors.border}
+                      activeOutlineColor={accent.hex}
+                      theme={{ colors: { background: colors.surfaceLight } }}
+                      style={styles.modalInput}
+                    />
+                    <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }}>
+                      Leave blank to let the app calculate billed dues automatically from your past transactions before the billing date.
+                    </Text>
+                  </View>
                 </>
               )}
 
@@ -741,6 +889,11 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
                 <Text style={[styles.billDueAmount, TYPOGRAPHY.tabularText]}>
                   ₹{spent.toLocaleString('en-IN')}
                 </Text>
+                {cycleDues && (
+                  <Text style={styles.billDueHelp}>
+                    ₹{cycleDues.billedDues.toLocaleString('en-IN')} Billed Due • ₹{cycleDues.unbilledDues.toLocaleString('en-IN')} Unbilled Spend
+                  </Text>
+                )}
               </View>
 
               <Text style={styles.inputLabel}>AMOUNT TO PAY (₹)</Text>
@@ -767,6 +920,16 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
                     Full Due (₹{spent.toLocaleString('en-IN')})
                   </Text>
                 </TouchableOpacity>
+                {cycleDues && cycleDues.billedDues > 0 && cycleDues.billedDues !== spent && (
+                  <TouchableOpacity
+                    style={[styles.quickPayChip, { borderColor: colors.alert }]}
+                    onPress={() => setPayAmount(String(cycleDues.billedDues))}
+                  >
+                    <Text style={[styles.quickPayChipText, { color: colors.alert }]}>
+                      Billed Due (₹{cycleDues.billedDues.toLocaleString('en-IN')})
+                    </Text>
+                  </TouchableOpacity>
+                )}
               </View>
 
               <Text style={[styles.inputLabel, { marginTop: SPACING.md }]}>PAY FROM (BANK / CASH)</Text>
@@ -1024,6 +1187,39 @@ function getStyles(colors: ThemeColors) {
       color: colors.textMuted,
       fontSize: 11,
       fontWeight: '600',
+    },
+    cycleSplitContainer: {
+      flexDirection: 'row',
+      backgroundColor: colors.surfaceLight,
+      borderRadius: 10,
+      padding: SPACING.md,
+      marginTop: SPACING.sm,
+      alignItems: 'center',
+    },
+    cycleSplitItem: {
+      flex: 1,
+    },
+    cycleSplitLabel: {
+      fontSize: 10,
+      fontWeight: '700',
+      letterSpacing: 0.6,
+      color: colors.textMuted,
+      marginBottom: 2,
+    },
+    cycleSplitVal: {
+      fontSize: 16,
+      fontWeight: '800',
+    },
+    cycleSplitSub: {
+      fontSize: 11,
+      color: colors.textSecondary,
+      marginTop: 2,
+    },
+    cycleSplitDivider: {
+      width: 1,
+      height: '80%',
+      backgroundColor: colors.border,
+      marginHorizontal: SPACING.md,
     },
     statsRow: {
       flexDirection: 'row',

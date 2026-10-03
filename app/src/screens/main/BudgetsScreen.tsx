@@ -20,7 +20,7 @@ import * as Haptics from 'expo-haptics';
 import { useAuthStore } from '../../store/authStore';
 import { useFinanceStore } from '../../store/financeStore';
 import { useSettingsStore } from '../../store/settingsStore';
-import { COLORS, SPACING, TYPOGRAPHY } from '../../theme/tokens';
+import { SPACING, TYPOGRAPHY, ThemeColors } from '../../theme/tokens';
 import { InlineError } from '../../components/InlineError';
 import { TactileButton } from '../../components/TactileButton';
 import { KeyboardAwareScrollView } from '../../components/KeyboardAwareScrollView';
@@ -53,6 +53,7 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
   const navigation = useNavigation<any>();
   const { user } = useAuthStore();
   const { accent, colors } = useSettingsStore();
+  const styles = useMemo(() => getStyles(colors), [colors]);
   const {
     budgets,
     budgetSummaries,
@@ -110,6 +111,27 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
     () => budgetSummaries.filter((b) => b.category !== null && b.category !== 'Credit Card Payment'),
     [budgetSummaries]
   );
+
+  const availableBudgetCategories = useMemo(() => {
+    const set = new Set<string>();
+    const list: string[] = [];
+    const add = (c?: string | null) => {
+      if (!c) return;
+      const clean = c.trim();
+      if (!clean || clean === 'Credit Card Payment' || clean === 'Overall Budget') return;
+      const lower = clean.toLowerCase();
+      if (!set.has(lower)) {
+        set.add(lower);
+        list.push(clean);
+      }
+    };
+    categories.forEach(add);
+    transactions.forEach((tx) => {
+      if (tx.type === 'expense') add(tx.category);
+    });
+    budgetSummaries.forEach((bs) => add(bs.category));
+    return list;
+  }, [categories, transactions, budgetSummaries]);
 
   // Calculate live spending totals for this period (excluding credit card payment settlements)
   const totalExpensesThisMonth = useMemo(() => {
@@ -566,7 +588,8 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
             },
           ]}
         >
-          <View style={styles.cockpitTopRow}>
+          {/* Tier 1: Subtitle & Action Controls */}
+          <View style={styles.cockpitTopBar}>
             <View style={styles.cockpitLeftHeader}>
               <View
                 style={[
@@ -580,138 +603,36 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
                   color={accent.hex}
                 />
               </View>
-              <View>
-                <Text style={[styles.cockpitSubtitle, { color: colors.textMuted }]}>
-                  {overallSummary ? 'OVERALL BUDGET' : 'MONTHLY BUDGET HEALTH'}
-                </Text>
-                <Text style={[styles.cockpitTitle, { color: colors.textPrimary }]}>
-                  {totalBudgetLimit > 0
-                    ? `₹${totalSpent.toLocaleString('en-IN')} of ₹${totalBudgetLimit.toLocaleString('en-IN')}`
-                    : 'No overall budget set'}
-                </Text>
-              </View>
+              <Text style={[styles.cockpitSubtitle, { color: colors.textMuted }]}>
+                {overallSummary ? 'OVERALL BUDGET' : 'MONTHLY BUDGET HEALTH'}
+              </Text>
             </View>
 
             {overallSummary && Number(overallSummary.monthly_limit) > 0 ? (
-              <View style={styles.cardHeaderRight}>
-                <View
+              <View style={styles.cockpitActionGroup}>
+                <EditButton
+                  size={28}
+                  iconSize={14}
+                  onPress={() => handleOpenForm('Overall Budget')}
+                />
+                <TouchableOpacity
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    promptDeleteBudget('Overall Budget');
+                  }}
                   style={[
-                    styles.statusBadge,
+                    styles.cardDeletePill,
                     {
-                      backgroundColor:
-                        overallPct >= 100
-                          ? colors.alertMuted
-                          : overallPct >= 80
-                          ? colors.warningMuted
-                          : accent.muted,
+                      borderColor: colors.alert + '40',
+                      backgroundColor: colors.alertMuted,
                     },
                   ]}
+                  hitSlop={{ top: 8, bottom: 8, left: 6, right: 8 }}
                 >
-                  <Text
-                    style={[
-                      styles.statusBadgeText,
-                      {
-                        color:
-                          overallPct >= 100
-                            ? colors.alert
-                            : overallPct >= 80
-                            ? colors.warning
-                            : accent.hex,
-                      },
-                    ]}
-                  >
-                    {overallPct >= 100
-                      ? 'Over Budget'
-                      : overallPct >= 80
-                      ? 'Approaching'
-                      : 'On Track'}
-                  </Text>
-                </View>
-                <Text
-                  style={[
-                    styles.pctBadgeText,
-                    TYPOGRAPHY.tabularText,
-                    {
-                      color: getStatusColor(overallPct),
-                      marginLeft: 2,
-                    },
-                  ]}
-                >
-                  {overallPct}%
-                </Text>
-                <View style={[styles.cardActionsCluster, { marginLeft: 4 }]}>
-                  <EditButton
-                    size={26}
-                    iconSize={13}
-                    onPress={() => handleOpenForm('Overall Budget')}
-                  />
-                  <TouchableOpacity
-                    onPress={(e) => {
-                      e.stopPropagation();
-                      promptDeleteBudget('Overall Budget');
-                    }}
-                    style={[
-                      styles.cardDeletePill,
-                      {
-                        borderColor: colors.alert + '40',
-                        backgroundColor: colors.alertMuted,
-                      },
-                    ]}
-                    hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
-                  >
-                    <Ionicons name="trash-outline" size={12} color={colors.alert} />
-                  </TouchableOpacity>
-                </View>
+                  <Ionicons name="trash-outline" size={13} color={colors.alert} />
+                </TouchableOpacity>
               </View>
-            ) : totalBudgetLimit > 0 ? (
-              <View style={styles.cardHeaderRight}>
-                <View
-                  style={[
-                    styles.statusBadge,
-                    {
-                      backgroundColor:
-                        overallPct >= 100
-                          ? colors.alertMuted
-                          : overallPct >= 80
-                          ? colors.warningMuted
-                          : accent.muted,
-                    },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.statusBadgeText,
-                      {
-                        color:
-                          overallPct >= 100
-                            ? colors.alert
-                            : overallPct >= 80
-                            ? colors.warning
-                            : accent.hex,
-                      },
-                    ]}
-                  >
-                    {overallPct >= 100
-                      ? 'Over Budget'
-                      : overallPct >= 80
-                      ? 'Approaching'
-                      : 'On Track'}
-                  </Text>
-                </View>
-                <Text
-                  style={[
-                    styles.pctBadgeText,
-                    TYPOGRAPHY.tabularText,
-                    {
-                      color: getStatusColor(overallPct),
-                      marginLeft: 2,
-                    },
-                  ]}
-                >
-                  {overallPct}%
-                </Text>
-              </View>
-            ) : (
+            ) : totalBudgetLimit > 0 ? null : (
               <TouchableOpacity
                 onPress={() => handleOpenForm('Overall Budget')}
                 style={[
@@ -719,15 +640,74 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
                   {
                     backgroundColor: accent.muted,
                     borderColor: accent.hex,
-                    paddingVertical: 4,
-                    paddingHorizontal: 10,
+                    paddingVertical: 5,
+                    paddingHorizontal: 12,
                   },
                 ]}
               >
-                <Text style={[styles.emptyActionText, { color: accent.hex, fontSize: 11 }]}>
+                <Text style={[styles.emptyActionText, { color: accent.hex, fontSize: 12, fontWeight: '700' }]}>
                   + Set Limit
                 </Text>
               </TouchableOpacity>
+            )}
+          </View>
+
+          {/* Tier 2: Primary Spending Value & Status Badges */}
+          <View style={styles.cockpitValueRow}>
+            <Text style={[styles.cockpitTitle, { color: colors.textPrimary }]}>
+              {totalBudgetLimit > 0
+                ? `₹${totalSpent.toLocaleString('en-IN')} of ₹${totalBudgetLimit.toLocaleString('en-IN')}`
+                : 'No overall budget set'}
+            </Text>
+
+            {totalBudgetLimit > 0 && (
+              <View style={styles.cockpitBadgeCluster}>
+                <View
+                  style={[
+                    styles.statusBadge,
+                    {
+                      backgroundColor:
+                        overallPct >= 100
+                          ? colors.alertMuted
+                          : overallPct >= 80
+                          ? colors.warningMuted
+                          : accent.muted,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.statusBadgeText,
+                      {
+                        color:
+                          overallPct >= 100
+                            ? colors.alert
+                            : overallPct >= 80
+                            ? colors.warning
+                            : accent.hex,
+                      },
+                    ]}
+                  >
+                    {overallPct >= 100
+                      ? 'Over Budget'
+                      : overallPct >= 80
+                      ? 'Approaching'
+                      : 'On Track'}
+                  </Text>
+                </View>
+                <Text
+                  style={[
+                    styles.pctBadgeText,
+                    TYPOGRAPHY.tabularText,
+                    {
+                      color: getStatusColor(overallPct),
+                      marginLeft: 2,
+                    },
+                  ]}
+                >
+                  {overallPct}%
+                </Text>
+              </View>
             )}
           </View>
 
@@ -900,7 +880,7 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
 
             {/* Wrapping Grid of Categories */}
             <View style={styles.categoriesGrid}>
-              {categories.filter((c) => c !== 'Credit Card Payment').map((cat) => {
+              {availableBudgetCategories.map((cat) => {
                 const active = selectedCategory === cat;
                 const iconName = getCategoryIcon(cat);
                 const colorToken = getCategoryColor(cat, undefined, accent.hex);
@@ -1449,10 +1429,11 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
   );
 };
 
-const styles = StyleSheet.create({
+function getStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: colors.background,
   },
   topHeader: {
     flexDirection: 'row',
@@ -1505,12 +1486,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 8,
-    backgroundColor: COLORS.surfaceLight,
+    backgroundColor: colors.surfaceLight,
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: colors.border,
   },
   lockedHeaderText: {
-    color: COLORS.textMuted,
+    color: colors.textMuted,
     fontSize: 11,
     fontWeight: '800',
     letterSpacing: 0.5,
@@ -1521,36 +1502,55 @@ const styles = StyleSheet.create({
   },
   cockpitCard: {
     borderWidth: 1,
-    borderRadius: 12,
+    borderRadius: 14,
     padding: SPACING.lg,
     marginBottom: SPACING.lg,
   },
-  cockpitTopRow: {
+  cockpitTopBar: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: SPACING.sm,
+    marginBottom: SPACING.md,
   },
   cockpitLeftHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: SPACING.sm,
   },
+  cockpitActionGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  cockpitValueRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: SPACING.sm,
+  },
+  cockpitBadgeCluster: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
   cockpitIconBubble: {
-    width: 34,
-    height: 34,
-    borderRadius: 9,
+    width: 32,
+    height: 32,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },
   cockpitSubtitle: {
-    fontSize: 10,
-    fontWeight: '700',
+    fontSize: 11,
+    fontWeight: '800',
     letterSpacing: 0.8,
   },
   cockpitTitle: {
-    fontSize: 15,
-    fontWeight: '700',
+    fontSize: 18,
+    fontWeight: '800',
+    letterSpacing: -0.3,
   },
   statusBadge: {
     paddingHorizontal: 8,
@@ -1714,7 +1714,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
     paddingTop: 4,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: COLORS.border,
+    borderTopColor: colors.border,
   },
   insightSubText: {
     fontSize: 11,
@@ -2112,4 +2112,5 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
   },
-});
+  });
+}
