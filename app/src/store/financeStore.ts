@@ -6,8 +6,10 @@ import {
   Account,
   Transaction,
   TransactionType,
+  TransactionSource,
   Borrow,
   BorrowStatus,
+  BorrowType,
   Budget,
   BudgetSummary,
 } from '../types/database';
@@ -43,6 +45,7 @@ export interface AccountMetadata {
 // even across realtime database events, account clones, or optimistic mutations.
 let inMemoryAccountMetadata: Record<string, AccountMetadata> = {};
 const GLOBAL_ACCOUNT_META_KEY = '@account_metadata_global_v1';
+const inProgressSettleBorrowIds = new Set<string>();
 
 export const getInMemoryAccountMetadata = () => inMemoryAccountMetadata;
 
@@ -190,6 +193,10 @@ const persistFinanceCache = (
 
 const isGuestUser = (_userId?: string | null): boolean => false;
 
+export const getDeletedCategoriesKey = (userId?: string | null) => {
+  return `@finance_deleted_categories_${userId || 'default'}_v1`;
+};
+
 export const DEFAULT_STUDENT_CATEGORIES = [
   'Food',
   'Travel',
@@ -206,10 +213,15 @@ export const mergeCategoriesWithDefaults = (
   savedCategories?: string[] | null,
   transactions?: Transaction[] | null,
   budgets?: Budget[] | null,
-  extraCategories?: (string | null | undefined)[] | null
+  extraCategories?: (string | null | undefined)[] | null,
+  deletedCategories?: string[] | null
 ): string[] => {
   const categorySet = new Set<string>();
   const merged: string[] = [];
+
+  const deletedSet = new Set<string>(
+    (deletedCategories || []).map((c) => (c || '').toLowerCase().trim())
+  );
 
   const addCat = (c?: string | null) => {
     if (!c) return;
@@ -223,38 +235,30 @@ export const mergeCategoriesWithDefaults = (
       return;
     }
     const lower = clean.toLowerCase();
+    if (deletedSet.has(lower)) {
+      return;
+    }
     if (!categorySet.has(lower)) {
       categorySet.add(lower);
       merged.push(clean);
     }
   };
 
-  // 1. Saved custom categories in user's preferred order
-  if (savedCategories && Array.isArray(savedCategories)) {
+  // 1. Saved custom categories in user's preferred order (Primary source of truth)
+  const hasUserCustomCategories = savedCategories && Array.isArray(savedCategories);
+  if (hasUserCustomCategories) {
     savedCategories.forEach(addCat);
   }
 
-  // 2. Extra categories (e.g. current in-memory categories)
-  if (extraCategories && Array.isArray(extraCategories)) {
+  // 2. Extra categories only if user has never saved any custom categories
+  if (!hasUserCustomCategories && extraCategories && Array.isArray(extraCategories)) {
     extraCategories.forEach(addCat);
   }
 
-  // 3. Categories actively present in transactions
-  if (transactions && Array.isArray(transactions)) {
-    transactions.forEach((tx) => {
-      if (tx.type === 'expense') {
-        addCat(tx.category);
-      }
-    });
+  // 3. Default categories ONLY if user has never saved any custom categories
+  if (!hasUserCustomCategories) {
+    DEFAULT_STUDENT_CATEGORIES.forEach(addCat);
   }
-
-  // 4. Categories actively present in budgets
-  if (budgets && Array.isArray(budgets)) {
-    budgets.forEach((b) => addCat(b.category));
-  }
-
-  // 5. Default categories
-  DEFAULT_STUDENT_CATEGORIES.forEach(addCat);
 
   return merged;
 };
@@ -782,6 +786,25 @@ interface FinanceState {
     note?: string | null;
   }) => Promise<{ success: boolean; borrow?: Borrow; error?: string }>;
 
+  updateBorrowWithTransactionOptimistic: (params: {
+    borrowId: string;
+    person_name: string;
+    amount: number;
+    type: BorrowType;
+    date: string;
+    account_id?: string | null;
+    note?: string | null;
+  }) => Promise<{ success: boolean; error?: string }>;
+
+  mergeBorrowsOptimistic: (
+    personName: string,
+    type: BorrowType
+  ) => Promise<{ success: boolean; error?: string }>;
+
+  netSettleBorrowsOptimistic: (
+    personName: string
+  ) => Promise<{ success: boolean; error?: string }>;
+
   addPaidByFriendExpenseOptimistic: (params: {
     user_id: string;
     amount: number;
@@ -971,18 +994,29 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
       }
       set({ currentUserId: effectiveUserId });
 
-      const [cached, cachedCats, cachedOrder] = await Promise.all([
+      const [cached, cachedCats, cachedOrder, cachedDeleted] = await Promise.all([
         AsyncStorage.getItem(getStorageKey(effectiveUserId)),
         AsyncStorage.getItem(getCategoriesKey(effectiveUserId)),
         AsyncStorage.getItem(getAccountOrderKey(effectiveUserId)),
+        AsyncStorage.getItem(getDeletedCategoriesKey(effectiveUserId)),
       ]);
 
-      let parsedCustomCats: string[] = [];
+      let parsedCustomCats: string[] | null = null;
       if (cachedCats) {
         try {
           const parsedCats = JSON.parse(cachedCats);
-          if (Array.isArray(parsedCats) && parsedCats.length > 0) {
+          if (Array.isArray(parsedCats)) {
             parsedCustomCats = parsedCats;
+          }
+        } catch {}
+      }
+
+      let parsedDeletedCats: string[] = [];
+      if (cachedDeleted) {
+        try {
+          const parsed = JSON.parse(cachedDeleted);
+          if (Array.isArray(parsed)) {
+            parsedDeletedCats = parsed;
           }
         } catch {}
       }
@@ -1034,7 +1068,8 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
           parsedCustomCats,
           rawTransactions,
           budgets,
-          get().categories
+          parsedCustomCats ? null : get().categories,
+          parsedDeletedCats
         );
 
         set({
@@ -1057,7 +1092,8 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
           parsedCustomCats,
           [],
           [],
-          get().categories
+          parsedCustomCats ? null : get().categories,
+          parsedDeletedCats
         );
 
         set({
@@ -1085,10 +1121,21 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
     const trimmed = category.trim();
     if (!trimmed) return;
     const current = get().categories;
-    if (current.includes(trimmed)) return;
+    if (current.some((c) => c.toLowerCase() === trimmed.toLowerCase())) return;
     const updated = [...current, trimmed];
     set({ categories: updated });
-    AsyncStorage.setItem(getCategoriesKey(get().currentUserId), JSON.stringify(updated)).catch(() => {});
+    const userId = get().currentUserId;
+    AsyncStorage.setItem(getCategoriesKey(userId), JSON.stringify(updated)).catch(() => {});
+    // Unmark from deleted categories blacklist if previously deleted
+    AsyncStorage.getItem(getDeletedCategoriesKey(userId)).then((stored) => {
+      if (stored) {
+        try {
+          const list: string[] = JSON.parse(stored);
+          const filtered = list.filter((c) => c.toLowerCase() !== trimmed.toLowerCase());
+          AsyncStorage.setItem(getDeletedCategoriesKey(userId), JSON.stringify(filtered)).catch(() => {});
+        } catch {}
+      }
+    }).catch(() => {});
   },
 
   updateCategory: (oldCategory: string, newCategory: string) => {
@@ -1106,9 +1153,19 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
   },
 
   removeCategory: (category: string) => {
-    const updated = get().categories.filter((c) => c !== category);
+    const cleanTarget = category.trim();
+    const updated = get().categories.filter((c) => c.toLowerCase() !== cleanTarget.toLowerCase());
     set({ categories: updated });
-    AsyncStorage.setItem(getCategoriesKey(get().currentUserId), JSON.stringify(updated)).catch(() => {});
+    const userId = get().currentUserId;
+    AsyncStorage.setItem(getCategoriesKey(userId), JSON.stringify(updated)).catch(() => {});
+    // Persist to deleted categories blacklist to permanently prevent resurrection on next open
+    AsyncStorage.getItem(getDeletedCategoriesKey(userId)).then((stored) => {
+      const list: string[] = stored ? JSON.parse(stored) : [];
+      if (!list.some((c) => c.toLowerCase() === cleanTarget.toLowerCase())) {
+        list.push(cleanTarget.toLowerCase());
+        AsyncStorage.setItem(getDeletedCategoriesKey(userId), JSON.stringify(list)).catch(() => {});
+      }
+    }).catch(() => {});
   },
 
   fetchInitialData: async (userId: string) => {
@@ -1122,7 +1179,7 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
 
     try {
 
-      const [accountsRes, txRes, borrowsRes, budgetsRes, summaryRes, cachedOrder, cachedCats] = await Promise.all([
+      const [accountsRes, txRes, borrowsRes, budgetsRes, summaryRes, cachedOrder, cachedCats, cachedDeleted] = await Promise.all([
         supabase
           .from('accounts')
           .select('*')
@@ -1152,6 +1209,7 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
           .eq('month', month),
         AsyncStorage.getItem(getAccountOrderKey(userId)),
         AsyncStorage.getItem(getCategoriesKey(userId)),
+        AsyncStorage.getItem(getDeletedCategoriesKey(userId)),
       ]);
 
       let orderIds: string[] | null = null;
@@ -1161,12 +1219,22 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
         } catch {}
       }
 
-      let parsedCustomCats: string[] = [];
+      let parsedCustomCats: string[] | null = null;
       if (cachedCats) {
         try {
           const parsed = JSON.parse(cachedCats);
-          if (Array.isArray(parsed) && parsed.length > 0) {
+          if (Array.isArray(parsed)) {
             parsedCustomCats = parsed;
+          }
+        } catch {}
+      }
+
+      let parsedDeletedCats: string[] = [];
+      if (cachedDeleted) {
+        try {
+          const parsed = JSON.parse(cachedDeleted);
+          if (Array.isArray(parsed)) {
+            parsedDeletedCats = parsed;
           }
         } catch {}
       }
@@ -1237,7 +1305,8 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
         parsedCustomCats,
         rawTransactions,
         budgets,
-        get().categories
+        parsedCustomCats ? null : get().categories,
+        parsedDeletedCats
       );
 
       set({
@@ -1618,7 +1687,8 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
     }
 
     try {
-      const { data, error } = await supabase
+      let insertSource = txData.source;
+      let { data, error } = await supabase
         .from('transactions')
         .insert({
           user_id: txData.user_id,
@@ -1628,10 +1698,32 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
           category: txData.category,
           note: txData.note,
           date: txData.date,
-          source: txData.source,
+          source: insertSource,
         })
         .select()
         .single();
+
+      // Graceful fallback: If Supabase schema has check constraint restricting source to ('manual', 'screenshot'),
+      // automatically retry with 'manual' so transaction creation is NEVER blocked for the user
+      if (error && (error.message?.includes('transactions_source_check') || error.code === '23514')) {
+        const fallbackSource: TransactionSource = insertSource === 'screenshot' ? 'screenshot' : 'manual';
+        const retryResult = await supabase
+          .from('transactions')
+          .insert({
+            user_id: txData.user_id,
+            account_id: txData.account_id,
+            type: txData.type,
+            amount: txData.amount,
+            category: txData.category,
+            note: txData.note,
+            date: txData.date,
+            source: fallbackSource,
+          })
+          .select()
+          .single();
+        data = retryResult.data;
+        error = retryResult.error;
+      }
 
       if (error) throw error;
 
@@ -1725,10 +1817,28 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
       };
     });
 
+    const prevBorrows = [...get().borrows];
+    const linkedBorrow = prevBorrows.find((b) => b.linked_transaction_id === transactionId);
+    let updatedBorrows = prevBorrows;
+    if (linkedBorrow) {
+      updatedBorrows = prevBorrows.map((b) => {
+        if (b.linked_transaction_id === transactionId) {
+          return {
+            ...b,
+            amount: updates.amount !== undefined ? Number(updates.amount) : b.amount,
+            date: updates.date || b.date,
+            updated_at: new Date().toISOString(),
+          };
+        }
+        return b;
+      });
+    }
+
     set({
       transactions: prevTransactions.map((t) => (t.id === transactionId ? newTx : t)),
       accounts: updatedAccounts,
       budgetSummaries: updatedSummaries,
+      borrows: updatedBorrows,
       inlineError: null,
     });
     persistFinanceCache(get());
@@ -1746,14 +1856,39 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
         }
       }
 
-      const { data, error } = await supabase
+      let { data, error } = await supabase
         .from('transactions')
         .update(dbUpdates)
         .eq('id', transactionId)
         .select()
         .single();
 
+      if (error && (error.message?.includes('transactions_source_check') || error.code === '23514') && dbUpdates.source) {
+        dbUpdates.source = dbUpdates.source === 'screenshot' ? 'screenshot' : 'manual';
+        const retryResult = await supabase
+          .from('transactions')
+          .update(dbUpdates)
+          .eq('id', transactionId)
+          .select()
+          .single();
+        data = retryResult.data;
+        error = retryResult.error;
+      }
+
       if (error) throw error;
+
+      if (linkedBorrow && (updates.amount !== undefined || updates.date)) {
+        const borrowDbUpdates: Record<string, any> = {
+          updated_at: new Date().toISOString(),
+        };
+        if (updates.amount !== undefined) borrowDbUpdates.amount = Number(updates.amount);
+        if (updates.date) borrowDbUpdates.date = updates.date;
+        await supabase
+          .from('borrows')
+          .update(borrowDbUpdates)
+          .eq('linked_transaction_id', transactionId);
+      }
+
       if (data) {
         const returnedTx: Transaction = {
           ...(data as Transaction),
@@ -1771,6 +1906,7 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
         transactions: prevTransactions,
         accounts: prevAccounts,
         budgetSummaries: prevSummaries,
+        borrows: prevBorrows,
         inlineError: `Could not update transaction: ${err.message || 'Network error'}. Changes rolled back.`,
       });
       return { success: false, error: err.message };
@@ -1794,6 +1930,10 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
           b.linked_transaction_id === transactionId &&
           (b.type === 'borrowed' || b.person_name?.startsWith('[BORROWED]'))
       );
+    const isBorrowTx =
+      targetTx.type === 'borrow_given' ||
+      targetTx.type === 'borrow_taken' ||
+      prevBorrows.some((b) => b.linked_transaction_id === transactionId);
 
     // Revert account balance effect (only for transactions that actually altered account balances)
     const updatedAccounts = isFriendPaidTx
@@ -1834,7 +1974,7 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
       return bs;
     });
 
-    const updatedBorrows = isFriendPaidTx
+    const updatedBorrows = (isFriendPaidTx || isBorrowTx)
       ? prevBorrows.filter((b) => b.linked_transaction_id !== transactionId)
       : prevBorrows.map((b) =>
           b.linked_transaction_id === transactionId ? { ...b, linked_transaction_id: null } : b
@@ -1854,7 +1994,7 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
     }
 
     try {
-      if (isFriendPaidTx) {
+      if (isFriendPaidTx || isBorrowTx) {
         await supabase.from('borrows').delete().eq('linked_transaction_id', transactionId);
       }
       const { error } = await supabase
@@ -1974,12 +2114,25 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
   },
 
   settleBorrowWithTransactionOptimistic: async (params) => {
+    if (inProgressSettleBorrowIds.has(params.borrowId)) {
+      return { success: true };
+    }
+    inProgressSettleBorrowIds.add(params.borrowId);
+
     const prevBorrows = [...get().borrows];
     const prevTransactions = [...get().transactions];
     const prevAccounts = [...get().accounts];
 
     const targetBorrow = prevBorrows.find((b) => b.id === params.borrowId);
-    if (!targetBorrow) return { success: false, error: 'Borrow entry not found' };
+    if (!targetBorrow) {
+      inProgressSettleBorrowIds.delete(params.borrowId);
+      return { success: false, error: 'Borrow entry not found' };
+    }
+
+    if (targetBorrow.status === 'settled') {
+      inProgressSettleBorrowIds.delete(params.borrowId);
+      return { success: true };
+    }
 
     const { type, displayName } = parseBorrowDetails(targetBorrow, prevTransactions);
     const settleDate = params.date || new Date().toISOString().substring(0, 10);
@@ -2040,6 +2193,7 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
     persistFinanceCache(get());
 
     if (isGuestUser(targetBorrow.user_id)) {
+      inProgressSettleBorrowIds.delete(params.borrowId);
       return { success: true };
     }
 
@@ -2076,9 +2230,19 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
       if (borrowError) throw borrowError;
 
       if (realTx && tempTxId) {
-        set((state) => ({
-          transactions: state.transactions.map((t) => (t.id === tempTxId ? realTx! : t)),
-        }));
+        set((state) => {
+          const alreadyHasReal = state.transactions.some((t) => t.id === realTx!.id);
+          if (alreadyHasReal) {
+            return {
+              transactions: state.transactions.filter((t) => t.id !== tempTxId),
+            };
+          }
+          return {
+            transactions: deduplicateTransactions(
+              state.transactions.map((t) => (t.id === tempTxId ? realTx! : t))
+            ),
+          };
+        });
       }
 
       return { success: true };
@@ -2089,6 +2253,326 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
         accounts: prevAccounts,
         inlineError: `Failed to settle borrow: ${err.message || 'Network error'}. Reverted.`,
       });
+      return { success: false, error: err.message };
+    } finally {
+      inProgressSettleBorrowIds.delete(params.borrowId);
+    }
+  },
+
+  updateBorrowWithTransactionOptimistic: async (params) => {
+    const prevBorrows = [...get().borrows];
+    const prevTransactions = [...get().transactions];
+    const prevAccounts = [...get().accounts];
+
+    const targetBorrow = prevBorrows.find((b) => b.id === params.borrowId);
+    if (!targetBorrow) return { success: false, error: 'Borrow entry not found' };
+
+    const cleanName = params.person_name.replace(/^\[(BORROWED|LENT)\]\s*/i, '').trim();
+    const encodedPersonName =
+      params.type === 'borrowed' ? `[BORROWED] ${cleanName}` : `[LENT] ${cleanName}`;
+
+    const numAmount = Number(params.amount);
+    const nowIso = new Date().toISOString();
+
+    const updatedBorrow: Borrow = {
+      ...targetBorrow,
+      person_name: encodedPersonName,
+      amount: numAmount,
+      type: params.type,
+      date: params.date,
+      updated_at: nowIso,
+    };
+
+    let updatedTransactions = prevTransactions;
+    let updatedAccounts = prevAccounts;
+    const linkedTx = targetBorrow.linked_transaction_id
+      ? prevTransactions.find((t) => t.id === targetBorrow.linked_transaction_id)
+      : null;
+
+    if (linkedTx) {
+      const newTxType: TransactionType = params.type === 'borrowed' ? 'borrow_taken' : 'borrow_given';
+      const targetAccountId = params.account_id !== undefined ? params.account_id : linkedTx.account_id;
+      const txNote =
+        params.note !== undefined
+          ? params.note?.trim() || null
+          : params.type === 'borrowed'
+          ? `Borrowed from ${cleanName}`
+          : `Lent to ${cleanName}`;
+
+      const updatedTx: Transaction = {
+        ...linkedTx,
+        amount: numAmount,
+        date: params.date,
+        type: newTxType,
+        account_id: targetAccountId || null,
+        note: txNote,
+      };
+
+      updatedTransactions = prevTransactions.map((t) => (t.id === linkedTx.id ? updatedTx : t));
+
+      // Recompute account balances
+      updatedAccounts = prevAccounts.map((acc) => {
+        let bal = Number(acc.current_balance);
+        if (acc.id === linkedTx.account_id) {
+          const oldDelta = linkedTx.type === 'borrow_taken' ? Number(linkedTx.amount) : -Number(linkedTx.amount);
+          bal -= oldDelta;
+        }
+        if (acc.id === targetAccountId) {
+          const newDelta = newTxType === 'borrow_taken' ? numAmount : -numAmount;
+          bal += newDelta;
+        }
+        return { ...acc, current_balance: bal };
+      });
+    }
+
+    set({
+      borrows: prevBorrows.map((b) => (b.id === params.borrowId ? updatedBorrow : b)),
+      transactions: updatedTransactions,
+      accounts: updatedAccounts,
+      inlineError: null,
+    });
+    persistFinanceCache(get());
+
+    if (isGuestUser(targetBorrow.user_id)) {
+      return { success: true };
+    }
+
+    try {
+      const { error: bErr } = await supabase
+        .from('borrows')
+        .update({
+          person_name: encodedPersonName,
+          amount: numAmount,
+          date: params.date,
+          updated_at: nowIso,
+        })
+        .eq('id', params.borrowId);
+      if (bErr) throw bErr;
+
+      if (linkedTx) {
+        const newTxType: TransactionType = params.type === 'borrowed' ? 'borrow_taken' : 'borrow_given';
+        const targetAccountId = params.account_id !== undefined ? params.account_id : linkedTx.account_id;
+        const txNote =
+          params.note !== undefined
+            ? params.note?.trim() || null
+            : params.type === 'borrowed'
+            ? `Borrowed from ${cleanName}`
+            : `Lent to ${cleanName}`;
+
+        const { error: tErr } = await supabase
+          .from('transactions')
+          .update({
+            amount: numAmount,
+            date: params.date,
+            type: newTxType,
+            account_id: targetAccountId || null,
+            note: txNote,
+          })
+          .eq('id', linkedTx.id);
+        if (tErr) throw tErr;
+      }
+
+      return { success: true };
+    } catch (err: any) {
+      set({
+        borrows: prevBorrows,
+        transactions: prevTransactions,
+        accounts: prevAccounts,
+        inlineError: `Could not update borrow: ${err.message || 'Network error'}. Rolled back.`,
+      });
+      return { success: false, error: err.message };
+    }
+  },
+
+  mergeBorrowsOptimistic: async (personName, type) => {
+    const prevBorrows = [...get().borrows];
+    const prevTransactions = [...get().transactions];
+    const matching = prevBorrows.filter((b) => {
+      if (b.status !== 'pending') return false;
+      const details = parseBorrowDetails(b, prevTransactions);
+      return (
+        details.displayName.toLowerCase().trim() === personName.toLowerCase().trim() &&
+        details.type === type
+      );
+    });
+
+    if (matching.length < 2) {
+      return { success: false, error: 'Need at least 2 entries of same type to merge' };
+    }
+
+    const totalAmount = matching.reduce((sum, b) => sum + Number(b.amount || 0), 0);
+    const primary = matching[0];
+    const rest = matching.slice(1);
+    const restIds = rest.map((b) => b.id);
+    const nowIso = new Date().toISOString();
+
+    const updatedBorrows = prevBorrows.map((b) => {
+      if (b.id === primary.id) {
+        return {
+          ...b,
+          amount: totalAmount,
+          updated_at: nowIso,
+        };
+      }
+      if (restIds.includes(b.id)) {
+        return {
+          ...b,
+          status: 'settled' as BorrowStatus,
+          updated_at: nowIso,
+        };
+      }
+      return b;
+    });
+
+    set({ borrows: updatedBorrows });
+    persistFinanceCache(get());
+
+    if (isGuestUser(primary.user_id)) {
+      return { success: true };
+    }
+
+    try {
+      await supabase
+        .from('borrows')
+        .update({ amount: totalAmount, updated_at: nowIso })
+        .eq('id', primary.id);
+
+      await supabase
+        .from('borrows')
+        .update({ status: 'settled', updated_at: nowIso })
+        .in('id', restIds);
+
+      if (primary.linked_transaction_id) {
+        await supabase
+          .from('transactions')
+          .update({ amount: totalAmount })
+          .eq('id', primary.linked_transaction_id);
+
+        set((state) => ({
+          transactions: state.transactions.map((t) =>
+            t.id === primary.linked_transaction_id ? { ...t, amount: totalAmount } : t
+          ),
+        }));
+      }
+
+      return { success: true };
+    } catch (err: any) {
+      set({ borrows: prevBorrows, inlineError: `Failed to merge: ${err.message}` });
+      return { success: false, error: err.message };
+    }
+  },
+
+  netSettleBorrowsOptimistic: async (personName) => {
+    const prevBorrows = [...get().borrows];
+    const prevTransactions = [...get().transactions];
+    const lentEntries = prevBorrows.filter((b) => {
+      if (b.status !== 'pending') return false;
+      const details = parseBorrowDetails(b, prevTransactions);
+      return (
+        details.displayName.toLowerCase().trim() === personName.toLowerCase().trim() &&
+        details.type === 'lent'
+      );
+    });
+    const borrowedEntries = prevBorrows.filter((b) => {
+      if (b.status !== 'pending') return false;
+      const details = parseBorrowDetails(b, prevTransactions);
+      return (
+        details.displayName.toLowerCase().trim() === personName.toLowerCase().trim() &&
+        details.type === 'borrowed'
+      );
+    });
+
+    if (lentEntries.length === 0 || borrowedEntries.length === 0) {
+      return { success: false, error: 'Need both Lent and Borrowed entries to net settle' };
+    }
+
+    const totalLent = lentEntries.reduce((sum, b) => sum + Number(b.amount || 0), 0);
+    const totalBorrowed = borrowedEntries.reduce((sum, b) => sum + Number(b.amount || 0), 0);
+    const nowIso = new Date().toISOString();
+
+    let updatedBorrows = [...prevBorrows];
+    let toSettleIds: string[] = [];
+    let toUpdateId: string | null = null;
+    let newAmount: number = 0;
+
+    if (totalLent === totalBorrowed) {
+      toSettleIds = [...lentEntries.map((b) => b.id), ...borrowedEntries.map((b) => b.id)];
+      updatedBorrows = updatedBorrows.map((b) =>
+        toSettleIds.includes(b.id) ? { ...b, status: 'settled' as BorrowStatus, updated_at: nowIso } : b
+      );
+    } else if (totalLent > totalBorrowed) {
+      const netAmount = totalLent - totalBorrowed;
+      const primaryLent = lentEntries[0];
+      const otherLentIds = lentEntries.slice(1).map((b) => b.id);
+      toSettleIds = [...borrowedEntries.map((b) => b.id), ...otherLentIds];
+      toUpdateId = primaryLent.id;
+      newAmount = netAmount;
+
+      updatedBorrows = updatedBorrows.map((b) => {
+        if (b.id === primaryLent.id) {
+          return { ...b, amount: netAmount, updated_at: nowIso };
+        }
+        if (toSettleIds.includes(b.id)) {
+          return { ...b, status: 'settled' as BorrowStatus, updated_at: nowIso };
+        }
+        return b;
+      });
+    } else {
+      const netAmount = totalBorrowed - totalLent;
+      const primaryBorrowed = borrowedEntries[0];
+      const otherBorrowedIds = borrowedEntries.slice(1).map((b) => b.id);
+      toSettleIds = [...lentEntries.map((b) => b.id), ...otherBorrowedIds];
+      toUpdateId = primaryBorrowed.id;
+      newAmount = netAmount;
+
+      updatedBorrows = updatedBorrows.map((b) => {
+        if (b.id === primaryBorrowed.id) {
+          return { ...b, amount: netAmount, updated_at: nowIso };
+        }
+        if (toSettleIds.includes(b.id)) {
+          return { ...b, status: 'settled' as BorrowStatus, updated_at: nowIso };
+        }
+        return b;
+      });
+    }
+
+    set({ borrows: updatedBorrows });
+    persistFinanceCache(get());
+
+    if (isGuestUser(prevBorrows[0]?.user_id || '')) {
+      return { success: true };
+    }
+
+    try {
+      if (toSettleIds.length > 0) {
+        await supabase
+          .from('borrows')
+          .update({ status: 'settled', updated_at: nowIso })
+          .in('id', toSettleIds);
+      }
+      if (toUpdateId && newAmount > 0) {
+        await supabase
+          .from('borrows')
+          .update({ amount: newAmount, updated_at: nowIso })
+          .eq('id', toUpdateId);
+
+        const primaryBorrow = prevBorrows.find((b) => b.id === toUpdateId);
+        if (primaryBorrow?.linked_transaction_id) {
+          await supabase
+            .from('transactions')
+            .update({ amount: newAmount })
+            .eq('id', primaryBorrow.linked_transaction_id);
+
+          set((state) => ({
+            transactions: state.transactions.map((t) =>
+              t.id === primaryBorrow.linked_transaction_id ? { ...t, amount: newAmount } : t
+            ),
+          }));
+        }
+      }
+      return { success: true };
+    } catch (err: any) {
+      set({ borrows: prevBorrows, inlineError: `Failed to net settle: ${err.message}` });
       return { success: false, error: err.message };
     }
   },

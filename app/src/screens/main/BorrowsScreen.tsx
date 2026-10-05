@@ -33,6 +33,11 @@ export const BorrowsScreen = () => {
   const scrollRef = useRef<ScrollView>(null);
   const addModalScrollRef = useRef<ScrollView>(null);
   const settleModalScrollRef = useRef<ScrollView>(null);
+  const editModalScrollRef = useRef<ScrollView>(null);
+
+  const isSubmittingAddRef = useRef(false);
+  const isSubmittingSettleRef = useRef(false);
+  const isSubmittingEditRef = useRef(false);
 
   const { user } = useAuthStore();
   const { accent, colors, effectiveTheme } = useSettingsStore();
@@ -41,9 +46,12 @@ export const BorrowsScreen = () => {
     transactions,
     accounts,
     addBorrowWithTransactionOptimistic,
+    updateBorrowWithTransactionOptimistic,
     settleBorrowWithTransactionOptimistic,
     reopenBorrowOptimistic,
     deleteBorrowOptimistic,
+    mergeBorrowsOptimistic,
+    netSettleBorrowsOptimistic,
     inlineError,
     setInlineError,
   } = useFinanceStore();
@@ -68,6 +76,19 @@ export const BorrowsScreen = () => {
   const [addError, setAddError] = useState<string | null>(null);
   const [isSubmittingAdd, setIsSubmittingAdd] = useState(false);
 
+  // Edit Modal State
+  const [editBorrowItem, setEditBorrowItem] = useState<Borrow | null>(null);
+  const [editType, setEditType] = useState<BorrowType>('lent');
+  const [editPersonName, setEditPersonName] = useState('');
+  const [editAmount, setEditAmount] = useState('');
+  const [editAccountId, setEditAccountId] = useState<string>('');
+  const [editConnectToAccount, setEditConnectToAccount] = useState(true);
+  const [editDate, setEditDate] = useState(() => new Date().toISOString().substring(0, 10));
+  const [showEditDatePicker, setShowEditDatePicker] = useState(false);
+  const [editNote, setEditNote] = useState('');
+  const [editError, setEditError] = useState<string | null>(null);
+  const [isSubmittingEdit, setIsSubmittingEdit] = useState(false);
+
   // Settle Modal State
   const [settleBorrowItem, setSettleBorrowItem] = useState<Borrow | null>(null);
   const [settleMode, setSettleMode] = useState<'with_account' | 'without_account'>('with_account');
@@ -86,6 +107,22 @@ export const BorrowsScreen = () => {
   const eligibleAccounts = useMemo(() => {
     return accounts.filter((a) => a.type !== 'credit_card');
   }, [accounts]);
+
+  // Accounts available for Add (Credit Card allowed when lending money!)
+  const accountsForAdd = useMemo(() => {
+    if (addType === 'lent') {
+      return accounts;
+    }
+    return eligibleAccounts;
+  }, [accounts, eligibleAccounts, addType]);
+
+  // Accounts available for Edit (Credit Card allowed when lending money!)
+  const accountsForEdit = useMemo(() => {
+    if (editType === 'lent') {
+      return accounts;
+    }
+    return eligibleAccounts;
+  }, [accounts, eligibleAccounts, editType]);
 
   // Selected account objects
   const activeSelectedAccount = useMemo(() => {
@@ -218,6 +255,92 @@ export const BorrowsScreen = () => {
     });
   }, [borrows, filter, searchQuery, transactions]);
 
+  // Existing people with their pending amounts and counts
+  const existingPeople = useMemo(() => {
+    const map = new Map<
+      string,
+      { displayName: string; pendingLent: number; pendingBorrowed: number; openCount: number }
+    >();
+    borrows.forEach((b) => {
+      const { displayName, type } = parseBorrowDetails(b, transactions);
+      const key = displayName.trim();
+      if (!key) return;
+      const lower = key.toLowerCase();
+      const existing = map.get(lower) || {
+        displayName: key,
+        pendingLent: 0,
+        pendingBorrowed: 0,
+        openCount: 0,
+      };
+      if (b.status === 'pending') {
+        existing.openCount += 1;
+        if (type === 'lent') existing.pendingLent += Number(b.amount || 0);
+        else existing.pendingBorrowed += Number(b.amount || 0);
+      }
+      map.set(lower, existing);
+    });
+    return Array.from(map.values());
+  }, [borrows, transactions]);
+
+  // Person suggestions for autocomplete in Add Modal
+  const personSuggestions = useMemo(() => {
+    const q = personName.trim().toLowerCase();
+    if (!q) return existingPeople.slice(0, 6);
+    return existingPeople.filter((p) => p.displayName.toLowerCase().includes(q)).slice(0, 6);
+  }, [existingPeople, personName]);
+
+  const matchedExistingPerson = useMemo(() => {
+    const q = personName.trim().toLowerCase();
+    if (!q) return null;
+    return existingPeople.find((p) => p.displayName.toLowerCase() === q) || null;
+  }, [existingPeople, personName]);
+
+  // Smart Groups for Dashboard (Net Settle & Merge)
+  const smartGroups = useMemo(() => {
+    const map: Record<
+      string,
+      {
+        displayName: string;
+        lentEntries: Borrow[];
+        borrowedEntries: Borrow[];
+        totalLent: number;
+        totalBorrowed: number;
+      }
+    > = {};
+
+    borrows.forEach((b) => {
+      if (b.status !== 'pending') return;
+      const { displayName, type } = parseBorrowDetails(b, transactions);
+      const norm = displayName.toLowerCase().trim();
+      if (!norm) return;
+
+      if (!map[norm]) {
+        map[norm] = {
+          displayName,
+          lentEntries: [],
+          borrowedEntries: [],
+          totalLent: 0,
+          totalBorrowed: 0,
+        };
+      }
+
+      if (type === 'lent') {
+        map[norm].lentEntries.push(b);
+        map[norm].totalLent += Number(b.amount || 0);
+      } else {
+        map[norm].borrowedEntries.push(b);
+        map[norm].totalBorrowed += Number(b.amount || 0);
+      }
+    });
+
+    return Object.values(map).filter(
+      (g) =>
+        (g.lentEntries.length > 0 && g.borrowedEntries.length > 0) ||
+        g.lentEntries.length > 1 ||
+        g.borrowedEntries.length > 1
+    );
+  }, [borrows, transactions]);
+
   // Handle Opening Add Modal
   const handleOpenAddModal = (direction: BorrowType = 'lent') => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
@@ -230,7 +353,8 @@ export const BorrowsScreen = () => {
     setShowAddDatePicker(false);
     setConnectToAccount(true);
 
-    const defaultAcc = eligibleAccounts.find((a) => a.type === 'bank') || eligibleAccounts[0];
+    const availableAccs = direction === 'lent' ? accounts : eligibleAccounts;
+    const defaultAcc = availableAccs.find((a) => a.type === 'bank') || availableAccs[0];
     if (defaultAcc) setSelectedAccountId(defaultAcc.id);
 
     setShowAddModal(true);
@@ -239,6 +363,7 @@ export const BorrowsScreen = () => {
   // Handle Submitting Add Borrow
   const handleSaveAddBorrow = async () => {
     if (!user) return;
+    if (isSubmittingAddRef.current) return;
     const numAmount = parseFloat(amount);
 
     if (!personName.trim()) {
@@ -255,6 +380,7 @@ export const BorrowsScreen = () => {
     }
 
     setAddError(null);
+    isSubmittingAddRef.current = true;
     setIsSubmittingAdd(true);
 
     try {
@@ -275,7 +401,82 @@ export const BorrowsScreen = () => {
         setAddError(res.error || 'Failed to save borrow entry');
       }
     } finally {
+      isSubmittingAddRef.current = false;
       setIsSubmittingAdd(false);
+    }
+  };
+
+  // Handle Opening Edit Modal
+  const handleOpenEditModal = (borrow: Borrow) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    const { displayName, type } = parseBorrowDetails(borrow, transactions);
+    const linkedTx = borrow.linked_transaction_id
+      ? transactions.find((t) => t.id === borrow.linked_transaction_id)
+      : null;
+
+    setEditBorrowItem(borrow);
+    setEditType(type);
+    setEditPersonName(displayName);
+    setEditAmount(String(linkedTx?.amount ?? borrow.amount));
+    setEditDate(linkedTx?.date ?? borrow.date ?? new Date().toISOString().substring(0, 10));
+    setEditNote(linkedTx?.note ?? '');
+    setEditError(null);
+    setShowEditDatePicker(false);
+
+    if (linkedTx?.account_id) {
+      setEditAccountId(linkedTx.account_id);
+      setEditConnectToAccount(true);
+    } else {
+      setEditConnectToAccount(false);
+      const availableAccs = type === 'lent' ? accounts : eligibleAccounts;
+      const defaultAcc = availableAccs.find((a) => a.type === 'bank') || availableAccs[0];
+      if (defaultAcc) setEditAccountId(defaultAcc.id);
+    }
+  };
+
+  // Handle Submitting Edit Borrow
+  const handleSaveEditBorrow = async () => {
+    if (!editBorrowItem) return;
+    if (isSubmittingEditRef.current) return;
+    const numAmount = parseFloat(editAmount);
+
+    if (!editPersonName.trim()) {
+      setEditError('Please enter person name');
+      return;
+    }
+    if (isNaN(numAmount) || numAmount <= 0) {
+      setEditError('Please enter a valid amount greater than 0');
+      return;
+    }
+    if (editConnectToAccount && !editAccountId) {
+      setEditError('Please select a money source account');
+      return;
+    }
+
+    setEditError(null);
+    isSubmittingEditRef.current = true;
+    setIsSubmittingEdit(true);
+
+    try {
+      const res = await updateBorrowWithTransactionOptimistic({
+        borrowId: editBorrowItem.id,
+        person_name: editPersonName.trim(),
+        amount: numAmount,
+        type: editType,
+        date: editDate,
+        account_id: editConnectToAccount ? editAccountId : null,
+        note: editNote.trim() || null,
+      });
+
+      if (res.success) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+        setEditBorrowItem(null);
+      } else {
+        setEditError(res.error || 'Failed to update borrow entry');
+      }
+    } finally {
+      isSubmittingEditRef.current = false;
+      setIsSubmittingEdit(false);
     }
   };
 
@@ -305,12 +506,14 @@ export const BorrowsScreen = () => {
   // Handle Submitting Settle
   const handleConfirmSettle = async () => {
     if (!settleBorrowItem) return;
+    if (isSubmittingSettleRef.current) return;
 
     if (settleMode === 'with_account' && !settleAccountId) {
       setInlineError('Please select an account for the settlement transaction');
       return;
     }
 
+    isSubmittingSettleRef.current = true;
     setIsSubmittingSettle(true);
     try {
       const res = await settleBorrowWithTransactionOptimistic({
@@ -325,6 +528,7 @@ export const BorrowsScreen = () => {
         setSettleBorrowItem(null);
       }
     } finally {
+      isSubmittingSettleRef.current = false;
       setIsSubmittingSettle(false);
     }
   };
@@ -585,6 +789,119 @@ export const BorrowsScreen = () => {
           </ScrollView>
         </View>
 
+        {/* Smart Deduplication & Net Settlement Banner / Cards */}
+        {smartGroups.length > 0 && (
+          <View style={dynamicStyles.smartSection}>
+            <View style={dynamicStyles.smartSectionHeader}>
+              <View style={dynamicStyles.smartHeaderLeft}>
+                <Ionicons name="sparkles" size={15} color={accent.hex} style={{ marginRight: 6 }} />
+                <Text style={dynamicStyles.smartSectionTitle}>SMART SETTLE & MERGE</Text>
+              </View>
+              <Text style={dynamicStyles.smartBadgeCount}>{smartGroups.length} suggestions</Text>
+            </View>
+
+            {smartGroups.map((g) => {
+              const hasBothSides = g.lentEntries.length > 0 && g.borrowedEntries.length > 0;
+              const hasMultipleLent = g.lentEntries.length > 1;
+              const hasMultipleBorrowed = g.borrowedEntries.length > 1;
+
+              return (
+                <View key={g.displayName} style={dynamicStyles.smartGroupCard}>
+                  <View style={dynamicStyles.smartGroupTop}>
+                    <Text style={dynamicStyles.smartGroupName}>{g.displayName}</Text>
+                    {hasBothSides ? (
+                      <View style={dynamicStyles.smartBothBadge}>
+                        <Text style={dynamicStyles.smartBothBadgeText}>LENT & BORROWED</Text>
+                      </View>
+                    ) : (
+                      <View style={dynamicStyles.smartSameBadge}>
+                        <Text style={dynamicStyles.smartSameBadgeText}>MULTIPLE ENTRIES</Text>
+                      </View>
+                    )}
+                  </View>
+
+                  {hasBothSides && (
+                    <View style={dynamicStyles.smartActionRow}>
+                      <View style={dynamicStyles.smartAmountsCol}>
+                        <Text style={dynamicStyles.smartDetailText}>
+                          Lent: <Text style={{ color: colors.lent, fontWeight: '700' }}>₹{g.totalLent.toLocaleString('en-IN')}</Text>
+                          {'  •  '}
+                          Borrowed: <Text style={{ color: colors.borrowed, fontWeight: '700' }}>₹{g.totalBorrowed.toLocaleString('en-IN')}</Text>
+                        </Text>
+                        <Text style={dynamicStyles.smartNetText}>
+                          Net: {g.totalLent >= g.totalBorrowed ? `Receive ₹${(g.totalLent - g.totalBorrowed).toLocaleString('en-IN')}` : `Pay ₹${(g.totalBorrowed - g.totalLent).toLocaleString('en-IN')}`}
+                        </Text>
+                      </View>
+
+                      <TouchableOpacity
+                        style={[dynamicStyles.smartActionBtn, { backgroundColor: accent.hex }]}
+                        onPress={async () => {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+                          await netSettleBorrowsOptimistic(g.displayName);
+                        }}
+                        activeOpacity={0.8}
+                      >
+                        <Ionicons name="git-merge-outline" size={13} color={colors.textInverse} style={{ marginRight: 4 }} />
+                        <Text style={dynamicStyles.smartActionBtnText}>Net Settle</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+
+                  {!hasBothSides && hasMultipleLent && (
+                    <View style={dynamicStyles.smartActionRow}>
+                      <View style={dynamicStyles.smartAmountsCol}>
+                        <Text style={dynamicStyles.smartDetailText}>
+                          {g.lentEntries.length} open Lent entries
+                        </Text>
+                        <Text style={dynamicStyles.smartNetText}>
+                          Total: ₹{g.totalLent.toLocaleString('en-IN')}
+                        </Text>
+                      </View>
+
+                      <TouchableOpacity
+                        style={[dynamicStyles.smartActionBtn, { backgroundColor: colors.lent }]}
+                        onPress={async () => {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+                          await mergeBorrowsOptimistic(g.displayName, 'lent');
+                        }}
+                        activeOpacity={0.8}
+                      >
+                        <Ionicons name="layers-outline" size={13} color={colors.textInverse} style={{ marginRight: 4 }} />
+                        <Text style={dynamicStyles.smartActionBtnText}>Merge Entries</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+
+                  {!hasBothSides && hasMultipleBorrowed && (
+                    <View style={dynamicStyles.smartActionRow}>
+                      <View style={dynamicStyles.smartAmountsCol}>
+                        <Text style={dynamicStyles.smartDetailText}>
+                          {g.borrowedEntries.length} open Borrowed entries
+                        </Text>
+                        <Text style={dynamicStyles.smartNetText}>
+                          Total: ₹{g.totalBorrowed.toLocaleString('en-IN')}
+                        </Text>
+                      </View>
+
+                      <TouchableOpacity
+                        style={[dynamicStyles.smartActionBtn, { backgroundColor: colors.borrowed }]}
+                        onPress={async () => {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+                          await mergeBorrowsOptimistic(g.displayName, 'borrowed');
+                        }}
+                        activeOpacity={0.8}
+                      >
+                        <Ionicons name="layers-outline" size={13} color={colors.textInverse} style={{ marginRight: 4 }} />
+                        <Text style={dynamicStyles.smartActionBtnText}>Merge Entries</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </View>
+              );
+            })}
+          </View>
+        )}
+
         {/* 4. Borrows List Section */}
         {filteredBorrows.length > 0 ? (
           filteredBorrows.map((borrow) => {
@@ -599,6 +916,8 @@ export const BorrowsScreen = () => {
               ? transactions.find((t) => t.id === borrow.linked_transaction_id)
               : null;
             const linkedAcc = linkedTx ? accounts.find((a) => a.id === linkedTx.account_id) : null;
+            const effectiveAmount = linkedTx ? Number(linkedTx.amount) : Number(borrow.amount);
+            const effectiveDate = linkedTx?.date || borrow.date;
 
             return (
               <View
@@ -705,12 +1024,12 @@ export const BorrowsScreen = () => {
                       ]}
                     >
                       {isLent ? '+' : '−'}₹
-                      {Number(borrow.amount).toLocaleString('en-IN', {
+                      {effectiveAmount.toLocaleString('en-IN', {
                         minimumFractionDigits: 2,
                         maximumFractionDigits: 2,
                       })}
                     </Text>
-                    <Text style={dynamicStyles.cardDateText}>{borrow.date}</Text>
+                    <Text style={dynamicStyles.cardDateText}>{effectiveDate}</Text>
                   </View>
                 </View>
 
@@ -761,6 +1080,16 @@ export const BorrowsScreen = () => {
                   )}
 
                   <View style={dynamicStyles.cardRightActionGroup}>
+                    {/* Edit Action Button */}
+                    <TouchableOpacity
+                      onPress={() => handleOpenEditModal(borrow)}
+                      style={dynamicStyles.editBtn}
+                      activeOpacity={0.7}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      <Ionicons name="pencil-outline" size={15} color={colors.textSecondary} />
+                    </TouchableOpacity>
+
                     {/* Delete Action Button */}
                     <TouchableOpacity
                       onPress={() => setBorrowToDelete(borrow)}
@@ -909,6 +1238,10 @@ export const BorrowsScreen = () => {
                   onPress={() => {
                     Haptics.selectionAsync().catch(() => {});
                     setAddType('borrowed');
+                    const sel = accounts.find((a) => a.id === selectedAccountId);
+                    if (sel?.type === 'credit_card') {
+                      setSelectedAccountId(eligibleAccounts[0]?.id || '');
+                    }
                   }}
                   style={[
                     dynamicStyles.directionBtn,
@@ -938,7 +1271,7 @@ export const BorrowsScreen = () => {
                 </TouchableOpacity>
               </View>
 
-              {/* Person Name Input */}
+              {/* Person Name Input with Smart Auto-Suggestions */}
               <View style={dynamicStyles.modalFieldGroup}>
                 <Text style={dynamicStyles.modalFieldLabel}>PERSON NAME *</Text>
                 <TextInput
@@ -957,6 +1290,66 @@ export const BorrowsScreen = () => {
                   textColor={colors.textPrimary}
                   style={dynamicStyles.modalTextInput}
                 />
+
+                {personSuggestions.length > 0 && (
+                  <View style={dynamicStyles.suggestionsContainer}>
+                    <Text style={dynamicStyles.suggestionsTitle}>EXISTING CONTACTS / QUICK SELECT:</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={dynamicStyles.suggestionsRow}>
+                      {personSuggestions.map((p) => {
+                        const isMatch = personName.trim().toLowerCase() === p.displayName.toLowerCase();
+                        return (
+                          <TouchableOpacity
+                            key={p.displayName}
+                            onPress={() => {
+                              Haptics.selectionAsync().catch(() => {});
+                              setPersonName(p.displayName);
+                            }}
+                            style={[
+                              dynamicStyles.personChip,
+                              isMatch && {
+                                borderColor: addType === 'lent' ? colors.lent : colors.borrowed,
+                                backgroundColor:
+                                  addType === 'lent' ? colors.lentMuted : colors.borrowedMuted,
+                              },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                dynamicStyles.personChipText,
+                                isMatch && {
+                                  color: addType === 'lent' ? colors.lent : colors.borrowed,
+                                  fontWeight: '700',
+                                },
+                              ]}
+                            >
+                              {p.displayName}
+                            </Text>
+                            {p.openCount > 0 && (
+                              <View style={dynamicStyles.chipOpenBadge}>
+                                <Text style={dynamicStyles.chipOpenBadgeText}>
+                                  {p.pendingLent > 0 ? `+₹${p.pendingLent}` : `-₹${p.pendingBorrowed}`}
+                                </Text>
+                              </View>
+                            )}
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </ScrollView>
+                  </View>
+                )}
+
+                {matchedExistingPerson && matchedExistingPerson.openCount > 0 && (
+                  <View style={dynamicStyles.modalNoticeBox}>
+                    <Ionicons name="sparkles" size={15} color={accent.hex} style={{ marginRight: 6 }} />
+                    <Text style={dynamicStyles.modalNoticeText}>
+                      {matchedExistingPerson.pendingLent > 0 && matchedExistingPerson.pendingBorrowed > 0
+                        ? `${matchedExistingPerson.displayName} has both Lent (+₹${matchedExistingPerson.pendingLent}) and Borrowed (-₹${matchedExistingPerson.pendingBorrowed}) open. Use Smart Settle on the main screen to balance.`
+                        : matchedExistingPerson.pendingLent > 0
+                        ? `${matchedExistingPerson.displayName} already has +₹${matchedExistingPerson.pendingLent} open in Lent. Entries can be merged.`
+                        : `${matchedExistingPerson.displayName} already has -₹${matchedExistingPerson.pendingBorrowed} open in Borrowed. Entries can be merged.`}
+                    </Text>
+                  </View>
+                )}
               </View>
 
               {/* Amount Input */}
@@ -1010,8 +1403,16 @@ export const BorrowsScreen = () => {
                   <View style={dynamicStyles.accountsList}>
                     <Text style={dynamicStyles.selectAccountLabel}>SELECT PAYMENT ACCOUNT:</Text>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={dynamicStyles.accountsPillsRow}>
-                      {eligibleAccounts.map((acc) => {
+                      {accountsForAdd.map((acc) => {
                         const isSelected = selectedAccountId === acc.id;
+                        const isCard = acc.type === 'credit_card';
+                        const bal = Number(acc.current_balance || 0);
+                        const balText = isCard
+                          ? bal < 0
+                            ? `₹${Math.abs(bal).toLocaleString('en-IN')} Due`
+                            : `₹0 Due`
+                          : `₹${bal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
+
                         return (
                           <TouchableOpacity
                             key={acc.id}
@@ -1050,7 +1451,7 @@ export const BorrowsScreen = () => {
                               <Text
                                 style={[dynamicStyles.accountCardPillBal, TYPOGRAPHY.tabularText]}
                               >
-                                ₹{Number(acc.current_balance).toLocaleString('en-IN')}
+                                {balText}
                               </Text>
                             </View>
                             {isSelected && (
@@ -1655,6 +2056,361 @@ export const BorrowsScreen = () => {
                 )}
               </TactileButton>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ========================================================================= */}
+      {/* 8. EDIT BORROW MODAL (IN-SYNC WITH TRANSACTIONS & MONEY SOURCE)           */}
+      {/* ========================================================================= */}
+      <Modal
+        visible={Boolean(editBorrowItem)}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setEditBorrowItem(null)}
+      >
+        <View style={dynamicStyles.modalBackdrop}>
+          <View style={[dynamicStyles.modalContainer, { maxHeight: '92%' }]}>
+            {editBorrowItem && (
+              <>
+                <View style={dynamicStyles.modalHeader}>
+                  <View>
+                    <Text style={dynamicStyles.modalTitle}>EDIT BORROW / LENT</Text>
+                    <Text style={dynamicStyles.modalSubtitle}>
+                      Update person, amount, date or money source
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    onPress={() => setEditBorrowItem(null)}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    style={dynamicStyles.modalCloseBtn}
+                  >
+                    <Ionicons name="close" size={20} color={colors.textSecondary} />
+                  </TouchableOpacity>
+                </View>
+
+                <InlineError message={editError} onDismiss={() => setEditError(null)} />
+
+                <KeyboardAwareScrollView
+                  ref={editModalScrollRef}
+                  contentContainerStyle={dynamicStyles.modalScrollContent}
+                  extraScrollHeight={100}
+                  keyboardShouldPersistTaps="handled"
+                  showsVerticalScrollIndicator={false}
+                >
+                  {/* Direction Switch */}
+                  <View style={dynamicStyles.directionToggleRow}>
+                    <TouchableOpacity
+                      onPress={() => {
+                        Haptics.selectionAsync().catch(() => {});
+                        setEditType('lent');
+                      }}
+                      style={[
+                        dynamicStyles.directionBtn,
+                        editType === 'lent' && {
+                          borderColor: colors.lent,
+                          backgroundColor: colors.lentMuted,
+                        },
+                      ]}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons
+                        name="arrow-up-circle-outline"
+                        size={18}
+                        color={editType === 'lent' ? colors.lent : colors.textMuted}
+                      />
+                      <View style={dynamicStyles.directionBtnTextCol}>
+                        <Text
+                          style={[
+                            dynamicStyles.directionBtnTitle,
+                            editType === 'lent' && { color: colors.lent, fontWeight: '700' },
+                          ]}
+                        >
+                          I Lent Money
+                        </Text>
+                        <Text style={dynamicStyles.directionBtnSub}>They owe me</Text>
+                      </View>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      onPress={() => {
+                        Haptics.selectionAsync().catch(() => {});
+                        setEditType('borrowed');
+                        const sel = accounts.find((a) => a.id === editAccountId);
+                        if (sel?.type === 'credit_card') {
+                          setEditAccountId(eligibleAccounts[0]?.id || '');
+                        }
+                      }}
+                      style={[
+                        dynamicStyles.directionBtn,
+                        editType === 'borrowed' && {
+                          borderColor: colors.borrowed,
+                          backgroundColor: colors.borrowedMuted,
+                        },
+                      ]}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons
+                        name="arrow-down-circle-outline"
+                        size={18}
+                        color={editType === 'borrowed' ? colors.borrowed : colors.textMuted}
+                      />
+                      <View style={dynamicStyles.directionBtnTextCol}>
+                        <Text
+                          style={[
+                            dynamicStyles.directionBtnTitle,
+                            editType === 'borrowed' && { color: colors.borrowed, fontWeight: '700' },
+                          ]}
+                        >
+                          I Borrowed Money
+                        </Text>
+                        <Text style={dynamicStyles.directionBtnSub}>I owe them</Text>
+                      </View>
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* Person Name Input */}
+                  <View style={dynamicStyles.modalFieldGroup}>
+                    <Text style={dynamicStyles.modalFieldLabel}>PERSON NAME *</Text>
+                    <TextInput
+                      value={editPersonName}
+                      onChangeText={setEditPersonName}
+                      placeholder="e.g. Rahul, Sneha, Mom, Landlord"
+                      placeholderTextColor={colors.textMuted}
+                      mode="outlined"
+                      outlineColor={colors.border}
+                      activeOutlineColor={editType === 'lent' ? colors.lent : colors.borrowed}
+                      textColor={colors.textPrimary}
+                      style={dynamicStyles.modalTextInput}
+                    />
+                  </View>
+
+                  {/* Amount Input */}
+                  <View style={dynamicStyles.modalFieldGroup}>
+                    <Text style={dynamicStyles.modalFieldLabel}>AMOUNT (₹) *</Text>
+                    <TextInput
+                      value={editAmount}
+                      onChangeText={setEditAmount}
+                      placeholder="0.00"
+                      placeholderTextColor={colors.textMuted}
+                      keyboardType="decimal-pad"
+                      mode="outlined"
+                      outlineColor={colors.border}
+                      activeOutlineColor={editType === 'lent' ? colors.lent : colors.borrowed}
+                      textColor={colors.textPrimary}
+                      style={dynamicStyles.modalTextInput}
+                    />
+                  </View>
+
+                  {/* CONNECT TO MONEY SOURCE SECTION */}
+                  <View style={dynamicStyles.moneySourceSection}>
+                    <View style={dynamicStyles.moneySourceHeader}>
+                      <View>
+                        <Text style={dynamicStyles.moneySourceTitle}>MONEY SOURCE CONNECTION</Text>
+                        <Text style={dynamicStyles.moneySourceSubtitle}>
+                          {editConnectToAccount
+                            ? editType === 'lent'
+                              ? 'Deducts money from your account balance'
+                              : 'Adds money to your account balance'
+                            : 'Untracked IOU (leaves account balances untouched)'}
+                        </Text>
+                      </View>
+
+                      <Switch
+                        value={editConnectToAccount}
+                        onValueChange={(val) => {
+                          Haptics.selectionAsync().catch(() => {});
+                          setEditConnectToAccount(val);
+                        }}
+                        trackColor={{ false: colors.border, true: accent.hex }}
+                        thumbColor={colors.surface}
+                      />
+                    </View>
+
+                    {editConnectToAccount && (
+                      <View style={dynamicStyles.accountsList}>
+                        <Text style={dynamicStyles.selectAccountLabel}>SELECT PAYMENT ACCOUNT:</Text>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={dynamicStyles.accountsPillsRow}>
+                          {accountsForEdit.map((acc) => {
+                            const isSelected = editAccountId === acc.id;
+                            const isCard = acc.type === 'credit_card';
+                            const bal = Number(acc.current_balance || 0);
+                            const balText = isCard
+                              ? bal < 0
+                                ? `₹${Math.abs(bal).toLocaleString('en-IN')} Due`
+                                : `₹0 Due`
+                              : `₹${bal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
+
+                            return (
+                              <TouchableOpacity
+                                key={acc.id}
+                                onPress={() => {
+                                  Haptics.selectionAsync().catch(() => {});
+                                  setEditAccountId(acc.id);
+                                }}
+                                style={[
+                                  dynamicStyles.accountCardPill,
+                                  isSelected && {
+                                    borderColor: editType === 'lent' ? colors.lent : colors.borrowed,
+                                    backgroundColor:
+                                      editType === 'lent' ? colors.lentMuted : colors.borrowedMuted,
+                                  },
+                                ]}
+                                activeOpacity={0.8}
+                              >
+                                <BankLogo
+                                  account={acc}
+                                  size={20}
+                                  style={{ marginRight: 6 }}
+                                />
+                                <View style={dynamicStyles.accountCardPillInfo}>
+                                  <Text
+                                    style={[
+                                      dynamicStyles.accountCardPillName,
+                                      isSelected && {
+                                        color: editType === 'lent' ? colors.lent : colors.borrowed,
+                                        fontWeight: '700',
+                                      },
+                                    ]}
+                                    numberOfLines={1}
+                                  >
+                                    {acc.name}
+                                  </Text>
+                                  <Text
+                                    style={[dynamicStyles.accountCardPillBal, TYPOGRAPHY.tabularText]}
+                                  >
+                                    {balText}
+                                  </Text>
+                                </View>
+                                {isSelected && (
+                                  <Ionicons
+                                    name="checkmark-circle"
+                                    size={14}
+                                    color={editType === 'lent' ? colors.lent : colors.borrowed}
+                                  />
+                                )}
+                              </TouchableOpacity>
+                            );
+                          })}
+                        </ScrollView>
+                      </View>
+                    )}
+                  </View>
+
+                  {/* Date Input */}
+                  <View style={dynamicStyles.modalFieldGroup}>
+                    <Text style={dynamicStyles.modalFieldLabel}>TRANSACTION DATE</Text>
+                    <TouchableOpacity
+                      onPress={() => setShowEditDatePicker(true)}
+                      activeOpacity={0.7}
+                      style={[
+                        dynamicStyles.dateSelectorCard,
+                        showEditDatePicker && {
+                          borderColor: editType === 'lent' ? colors.lent : colors.borrowed,
+                          backgroundColor:
+                            editType === 'lent' ? colors.lentMuted : colors.borrowedMuted,
+                        },
+                      ]}
+                    >
+                      <View
+                        style={[
+                          dynamicStyles.dateIconBadge,
+                          {
+                            backgroundColor:
+                              editType === 'lent' ? colors.lentMuted : colors.borrowedMuted,
+                          },
+                        ]}
+                      >
+                        <Ionicons
+                          name="calendar-outline"
+                          size={18}
+                          color={editType === 'lent' ? colors.lent : colors.borrowed}
+                        />
+                      </View>
+                      <View style={dynamicStyles.dateTextCol}>
+                        <Text style={dynamicStyles.dateSelectedText}>{formatDateLabel(editDate)}</Text>
+                      </View>
+                    </TouchableOpacity>
+
+                    {showEditDatePicker &&
+                      (Platform.OS === 'ios' ? (
+                        <Modal visible={showEditDatePicker} transparent animationType="fade">
+                          <View style={dynamicStyles.datePickerModalBackdrop}>
+                            <View style={dynamicStyles.datePickerModalCard}>
+                              <View style={dynamicStyles.datePickerModalHeader}>
+                                <Text style={dynamicStyles.datePickerModalTitle}>Select Date</Text>
+                                <TouchableOpacity onPress={() => setShowEditDatePicker(false)}>
+                                  <Text style={[dynamicStyles.datePickerModalDoneText, { color: accent.hex }]}>Done</Text>
+                                </TouchableOpacity>
+                              </View>
+                              <DateTimePicker
+                                value={parseDateObj(editDate)}
+                                mode="date"
+                                display="inline"
+                                themeVariant={effectiveTheme === 'light' ? 'light' : 'dark'}
+                                onChange={(e, d) => {
+                                  if (d) setEditDate(formatLocalDate(d));
+                                }}
+                              />
+                            </View>
+                          </View>
+                        </Modal>
+                      ) : (
+                        <DateTimePicker
+                          value={parseDateObj(editDate)}
+                          mode="date"
+                          display="default"
+                          onChange={(e, d) => {
+                            setShowEditDatePicker(false);
+                            if (e.type === 'set' && d) setEditDate(formatLocalDate(d));
+                          }}
+                        />
+                      ))}
+                  </View>
+
+                  {/* Note Input */}
+                  <View style={dynamicStyles.modalFieldGroup}>
+                    <Text style={dynamicStyles.modalFieldLabel}>NOTES (OPTIONAL)</Text>
+                    <TextInput
+                      value={editNote}
+                      onChangeText={setEditNote}
+                      placeholder="Add any extra detail..."
+                      placeholderTextColor={colors.textMuted}
+                      mode="outlined"
+                      outlineColor={colors.border}
+                      activeOutlineColor={editType === 'lent' ? colors.lent : colors.borrowed}
+                      textColor={colors.textPrimary}
+                      style={dynamicStyles.modalTextInput}
+                    />
+                  </View>
+
+                  {/* Action Buttons */}
+                  <View style={dynamicStyles.modalActionButtonsRow}>
+                    <TouchableOpacity
+                      onPress={() => setEditBorrowItem(null)}
+                      style={dynamicStyles.modalCancelBtn}
+                    >
+                      <Text style={dynamicStyles.modalCancelBtnText}>Cancel</Text>
+                    </TouchableOpacity>
+
+                    <TactileButton
+                      onPress={handleSaveEditBorrow}
+                      disabled={isSubmittingEdit}
+                      style={[
+                        dynamicStyles.modalSubmitBtn,
+                        { backgroundColor: editType === 'lent' ? colors.lent : colors.borrowed },
+                      ]}
+                    >
+                      {isSubmittingEdit ? (
+                        <ActivityIndicator size="small" color={colors.textInverse} />
+                      ) : (
+                        <Text style={dynamicStyles.modalSubmitBtnText}>Save Changes</Text>
+                      )}
+                    </TactileButton>
+                  </View>
+                </KeyboardAwareScrollView>
+              </>
+            )}
           </View>
         </View>
       </Modal>
@@ -2496,5 +3252,178 @@ const getStyles = (colors: ThemeColors, accentHex: string) =>
       fontSize: 13,
       fontWeight: '700',
       color: '#FFFFFF',
+    },
+    editBtn: {
+      padding: 6,
+      borderRadius: 6,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surfaceLight,
+      marginRight: 6,
+    },
+    smartSection: {
+      marginBottom: SPACING.md,
+      gap: SPACING.sm,
+    },
+    smartSectionHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 2,
+    },
+    smartHeaderLeft: {
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    smartSectionTitle: {
+      fontSize: 11,
+      fontWeight: '800',
+      color: accentHex,
+      letterSpacing: 0.8,
+    },
+    smartBadgeCount: {
+      fontSize: 10,
+      fontWeight: '700',
+      color: colors.textMuted,
+      backgroundColor: colors.surfaceLight,
+      paddingHorizontal: 8,
+      paddingVertical: 2,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    smartGroupCard: {
+      backgroundColor: colors.surface,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: `${accentHex}33`,
+      padding: SPACING.md,
+      gap: 10,
+    },
+    smartGroupTop: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    smartGroupName: {
+      fontSize: 14,
+      fontWeight: '800',
+      color: colors.textPrimary,
+    },
+    smartBothBadge: {
+      backgroundColor: `${colors.income}1A`,
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+      borderRadius: 4,
+      borderWidth: 1,
+      borderColor: `${colors.income}44`,
+    },
+    smartBothBadgeText: {
+      fontSize: 9,
+      fontWeight: '800',
+      color: colors.income,
+    },
+    smartSameBadge: {
+      backgroundColor: `${accentHex}1A`,
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+      borderRadius: 4,
+      borderWidth: 1,
+      borderColor: `${accentHex}44`,
+    },
+    smartSameBadgeText: {
+      fontSize: 9,
+      fontWeight: '800',
+      color: accentHex,
+    },
+    smartActionRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      gap: SPACING.md,
+    },
+    smartAmountsCol: {
+      flex: 1,
+    },
+    smartDetailText: {
+      fontSize: 11,
+      color: colors.textSecondary,
+    },
+    smartNetText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: colors.textPrimary,
+      marginTop: 2,
+    },
+    smartActionBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 12,
+      paddingVertical: 7,
+      borderRadius: 8,
+    },
+    smartActionBtnText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: '#FFFFFF',
+    },
+    suggestionsContainer: {
+      marginTop: 6,
+    },
+    suggestionsTitle: {
+      fontSize: 9,
+      fontWeight: '700',
+      color: colors.textMuted,
+      marginBottom: 4,
+      letterSpacing: 0.5,
+    },
+    suggestionsRow: {
+      gap: 6,
+      paddingVertical: 2,
+    },
+    personChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 8,
+      paddingVertical: 5,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surfaceLight,
+      gap: 5,
+    },
+    personChipText: {
+      fontSize: 11,
+      fontWeight: '600',
+      color: colors.textSecondary,
+    },
+    chipOpenBadge: {
+      backgroundColor: colors.surface,
+      paddingHorizontal: 4,
+      paddingVertical: 1,
+      borderRadius: 4,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    chipOpenBadgeText: {
+      fontSize: 9,
+      fontWeight: '700',
+      color: colors.textMuted,
+    },
+    modalNoticeBox: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: `${accentHex}14`,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: `${accentHex}33`,
+      padding: 8,
+      marginTop: 6,
+    },
+    modalNoticeText: {
+      fontSize: 11,
+      color: colors.textPrimary,
+      flex: 1,
+      lineHeight: 15,
     },
   });

@@ -4,7 +4,7 @@ import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { Transaction, TransactionType } from '../types/database';
-import { SPACING, TYPOGRAPHY } from '../theme/tokens';
+import { TYPOGRAPHY } from '../theme/tokens';
 import { useAppTheme } from '../theme/useAppTheme';
 import { getCategoryIcon, getCategoryColor } from '../utils/categoryIcons';
 import { BankLogo } from './BankLogo';
@@ -14,29 +14,32 @@ import { useFinanceStore } from '../store/financeStore';
 export interface TransactionRowProps {
   transaction: Transaction;
   accountName?: string;
+  showDate?: boolean;
+  showActions?: boolean;
   onPress?: () => void;
   onPressEdit?: () => void;
   onPressDelete?: () => void;
-  showActions?: boolean;
 }
 
 const typeLabels: Record<TransactionType, string> = {
-  income: 'Income',
-  expense: 'Expense',
-  borrow_given: 'Lent',
-  borrow_taken: 'Borrowed',
+  income: 'INCOME',
+  expense: 'EXPENSE',
+  borrow_given: 'LENT',
+  borrow_taken: 'BORROWED',
 };
 
 const TransactionRowComponent: React.FC<TransactionRowProps> = ({
   transaction,
   accountName,
+  showDate = true,
+  showActions = false,
   onPress,
   onPressEdit,
   onPressDelete,
-  showActions = true,
 }) => {
   const navigation = useNavigation<any>();
   const { colors, accent } = useAppTheme();
+
   const account = useFinanceStore(
     React.useCallback((s) => s.accounts.find((a) => a.id === transaction.account_id), [transaction.account_id])
   );
@@ -51,8 +54,7 @@ const TransactionRowComponent: React.FC<TransactionRowProps> = ({
   const isBorrowGiven = transaction.type === 'borrow_given';
   const isCreditCardPayment = transaction.category === 'Credit Card Payment';
 
-  let amountPrefix = '';
-  // Refined palette: normal expenses are crisp neutral text (never shouting red)
+  let amountPrefix = '−';
   let amountColor = colors.textPrimary;
 
   if (isCreditCardPayment) {
@@ -68,7 +70,6 @@ const TransactionRowComponent: React.FC<TransactionRowProps> = ({
     amountPrefix = '−';
     amountColor = colors.warning;
   } else {
-    // Normal expense
     amountPrefix = '−';
     amountColor = colors.textPrimary;
   }
@@ -81,8 +82,8 @@ const TransactionRowComponent: React.FC<TransactionRowProps> = ({
     maximumFractionDigits: 2,
   });
 
-  const displayTitle = transaction.note?.trim() || transaction.category;
   const hasCustomNote = Boolean(transaction.note?.trim());
+  const displayTitle = hasCustomNote ? transaction.note!.trim() : transaction.category;
 
   const handleCardPress = () => {
     if (onPress) {
@@ -118,7 +119,7 @@ const TransactionRowComponent: React.FC<TransactionRowProps> = ({
 
   return (
     <TouchableOpacity
-      activeOpacity={0.78}
+      activeOpacity={0.72}
       onPress={handleCardPress}
       style={[
         styles.cardContainer,
@@ -128,208 +129,124 @@ const TransactionRowComponent: React.FC<TransactionRowProps> = ({
         },
       ]}
     >
-      {/* Top Main Section */}
-      <View style={styles.topRow}>
-        {/* Category Icon Badge */}
-        <View style={[styles.iconContainer, { backgroundColor: categoryStyle.bg }]}>
-          <Ionicons name={categoryIcon} size={20} color={categoryStyle.text} />
+      <View style={styles.mainRow}>
+        {/* Category Icon Avatar */}
+        <View style={[styles.iconAvatar, { backgroundColor: categoryStyle.bg }]}>
+          <Ionicons name={categoryIcon} size={22} color={categoryStyle.text} />
         </View>
 
         {/* Center Details */}
-        <View style={styles.centerContent}>
-          <View style={styles.titleRow}>
-            <Text
-              style={[styles.titleText, { color: colors.textPrimary }]}
-              numberOfLines={2}
-            >
-              {displayTitle}
-            </Text>
-          </View>
+        <View style={styles.centerCol}>
+          <Text
+            style={[styles.primaryTitle, { color: colors.textPrimary }]}
+            numberOfLines={1}
+          >
+            {displayTitle}
+          </Text>
 
-          {hasCustomNote ? (
-            <>
-              {/* Category & Account on first sub-row */}
-              <View style={styles.metaRow}>
+          <View style={styles.subMetaRow}>
+            {/* If a note is shown as title, show the Category Tag */}
+            {hasCustomNote && (
+              <View style={[styles.categoryTag, { backgroundColor: categoryStyle.bg }]}>
                 <Text
-                  style={[styles.metaCategoryTag, { color: categoryStyle.text }]}
+                  style={[styles.categoryTagText, { color: categoryStyle.text }]}
                   numberOfLines={1}
                 >
-                  {transaction.category.toUpperCase()}
-                </Text>
-
-                {transaction.paid_by_friend ? (
-                  <>
-                    <Text style={[styles.metaDot, { color: colors.textMuted }]}>·</Text>
-                    <View
-                      style={[
-                        styles.accountBadge,
-                        {
-                          backgroundColor: isBorrowSettled ? `${colors.income}18` : `${colors.warning}18`,
-                          borderColor: isBorrowSettled ? `${colors.income}44` : `${colors.warning}44`,
-                          borderWidth: StyleSheet.hairlineWidth,
-                        },
-                      ]}
-                    >
-                      <Ionicons
-                        name={isBorrowSettled ? 'checkmark-circle-outline' : 'people-outline'}
-                        size={13}
-                        color={isBorrowSettled ? colors.income : colors.warning}
-                        style={{ marginRight: 4 }}
-                      />
-                      <Text
-                        style={[
-                          styles.accountBadgeText,
-                          { color: isBorrowSettled ? colors.income : colors.warning, fontWeight: '600' },
-                        ]}
-                        numberOfLines={1}
-                      >
-                        Paid by {transaction.friend_name || 'Friend'}{isBorrowSettled ? ' · Settled' : ' · Debt Pending'}
-                      </Text>
-                    </View>
-                  </>
-                ) : accountName ? (
-                  <>
-                    <Text style={[styles.metaDot, { color: colors.textMuted }]}>·</Text>
-                    <View
-                      style={[
-                        styles.accountBadge,
-                        { backgroundColor: colors.surfaceLight },
-                      ]}
-                    >
-                      <BankLogo
-                        account={account}
-                        name={accountName}
-                        size={14}
-                        style={{ marginRight: 4 }}
-                      />
-                      <Text
-                        style={[styles.accountBadgeText, { color: colors.textSecondary }]}
-                        numberOfLines={1}
-                      >
-                        {accountName}
-                      </Text>
-                    </View>
-                  </>
-                ) : null}
-              </View>
-
-              {/* Date cleanly sent to the next line */}
-              <View style={styles.dateRow}>
-                <Text style={[styles.dateText, { color: colors.textMuted }]}>
-                  {transaction.date}
+                  {transaction.category}
                 </Text>
               </View>
-            </>
-          ) : (
-            <View style={styles.metaRow}>
-              {transaction.paid_by_friend ? (
-                <>
-                  <View
-                    style={[
-                      styles.accountBadge,
-                      {
-                        backgroundColor: isBorrowSettled ? `${colors.income}18` : `${colors.warning}18`,
-                        borderColor: isBorrowSettled ? `${colors.income}44` : `${colors.warning}44`,
-                        borderWidth: StyleSheet.hairlineWidth,
-                      },
-                    ]}
-                  >
-                    <Ionicons
-                      name={isBorrowSettled ? 'checkmark-circle-outline' : 'people-outline'}
-                      size={13}
-                      color={isBorrowSettled ? colors.income : colors.warning}
-                      style={{ marginRight: 4 }}
-                    />
-                    <Text
-                      style={[
-                        styles.accountBadgeText,
-                        { color: isBorrowSettled ? colors.income : colors.warning, fontWeight: '600' },
-                      ]}
-                      numberOfLines={1}
-                    >
-                      Paid by {transaction.friend_name || 'Friend'}{isBorrowSettled ? ' · Settled' : ' · Debt Pending'}
-                    </Text>
-                  </View>
-                  <Text style={[styles.metaDot, { color: colors.textMuted }]}>·</Text>
-                </>
-              ) : accountName ? (
-                <>
-                  <View
-                    style={[
-                      styles.accountBadge,
-                      { backgroundColor: colors.surfaceLight },
-                    ]}
-                  >
-                    <BankLogo
-                      account={account}
-                      name={accountName}
-                      size={14}
-                      style={{ marginRight: 4 }}
-                    />
-                    <Text
-                      style={[styles.accountBadgeText, { color: colors.textSecondary }]}
-                      numberOfLines={1}
-                    >
-                      {accountName}
-                    </Text>
-                  </View>
-                  <Text style={[styles.metaDot, { color: colors.textMuted }]}>·</Text>
-                </>
-              ) : null}
+            )}
 
+            {/* Friend / Account Badge */}
+            {transaction.paid_by_friend ? (
+              <View
+                style={[
+                  styles.accountBadge,
+                  {
+                    backgroundColor: isBorrowSettled ? `${colors.success}15` : `${colors.warning}15`,
+                    borderColor: isBorrowSettled ? `${colors.success}35` : `${colors.warning}35`,
+                  },
+                ]}
+              >
+                <Ionicons
+                  name={isBorrowSettled ? 'checkmark-circle' : 'people'}
+                  size={11}
+                  color={isBorrowSettled ? colors.success : colors.warning}
+                  style={{ marginRight: 3 }}
+                />
+                <Text
+                  style={[
+                    styles.accountBadgeText,
+                    { color: isBorrowSettled ? colors.success : colors.warning, fontWeight: '600' },
+                  ]}
+                  numberOfLines={1}
+                >
+                  {transaction.friend_name || 'Friend'}{isBorrowSettled ? ' · Settled' : ' · Due'}
+                </Text>
+              </View>
+            ) : accountName ? (
+              <View
+                style={[
+                  styles.accountBadge,
+                  { backgroundColor: colors.surfaceLight, borderColor: colors.border },
+                ]}
+              >
+                <BankLogo
+                  account={account}
+                  name={accountName}
+                  size={12}
+                  style={{ marginRight: 4 }}
+                />
+                <Text
+                  style={[styles.accountBadgeText, { color: colors.textSecondary }]}
+                  numberOfLines={1}
+                >
+                  {accountName}
+                </Text>
+              </View>
+            ) : null}
+
+            {/* Date (if showDate is true) */}
+            {showDate && (
               <Text style={[styles.dateText, { color: colors.textMuted }]}>
                 {transaction.date}
               </Text>
-            </View>
-          )}
+            )}
+          </View>
         </View>
 
-        {/* Right Details: Clean Amount & Non-Expense Badges */}
-        <View style={styles.rightContent}>
+        {/* Right Details: Clean Tabular Amount & Type Tag */}
+        <View style={styles.rightCol}>
           <Text
             style={[
               styles.amountText,
               TYPOGRAPHY.tabularText,
               { color: amountColor },
             ]}
+            numberOfLines={1}
           >
             {amountPrefix}₹{formattedAmount}
           </Text>
 
-          {/* Non-expense types and Credit Card Payments get clean informative badges */}
           {isCreditCardPayment ? (
-            <View
-              style={[
-                styles.typeBadge,
-                { backgroundColor: `${accent.hex}18` },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.typeBadgeText,
-                  { color: accent.hex },
-                ]}
-              >
-                SETTLEMENT
+            <View style={[styles.typeBadge, { backgroundColor: `${accent.hex}15` }]}>
+              <Text style={[styles.typeBadgeText, { color: accent.hex }]}>
+                CARD BILL
               </Text>
             </View>
           ) : !isExpense ? (
             <View
               style={[
                 styles.typeBadge,
-                isIncome && { backgroundColor: `${colors.success}18` },
-                (isBorrowGiven || isBorrowTaken) && {
-                  backgroundColor: colors.warningMuted,
-                },
+                isIncome && { backgroundColor: `${colors.success}15` },
+                (isBorrowGiven || isBorrowTaken) && { backgroundColor: `${colors.warning}15` },
               ]}
             >
               <Text
                 style={[
                   styles.typeBadgeText,
                   isIncome && { color: colors.success },
-                  (isBorrowGiven || isBorrowTaken) && {
-                    color: colors.warning,
-                  },
+                  (isBorrowGiven || isBorrowTaken) && { color: colors.warning },
                 ]}
               >
                 {typeLabels[transaction.type]}
@@ -337,24 +254,31 @@ const TransactionRowComponent: React.FC<TransactionRowProps> = ({
             </View>
           ) : null}
         </View>
+
+        {/* Subtle Chevron indicator */}
+        <Ionicons
+          name="chevron-forward"
+          size={14}
+          color={colors.textMuted}
+          style={styles.chevronIcon}
+        />
       </View>
 
-      {/* Bottom Action Footer with Subtle, Refined Edit and Delete Buttons */}
+      {/* Optional Slim Action Footer if explicitly requested */}
       {showActions && (
-        <View style={[styles.footerRow, { borderTopColor: colors.border }]}>
-          <View style={styles.footerActionsGroup}>
+        <View style={[styles.slimFooter, { borderTopColor: colors.border }]}>
+          <View style={styles.footerActions}>
             <EditButton
-              size={26}
-              iconSize={13}
+              size={24}
+              iconSize={12}
               onPress={handleEditPress}
               accessibilityLabel="Edit transaction"
             />
-
             <TouchableOpacity
               activeOpacity={0.7}
               onPress={handleDeletePress}
               style={[
-                styles.actionIconBtn,
+                styles.deleteIconBtn,
                 {
                   backgroundColor: `${colors.alert}15`,
                   borderColor: `${colors.alert}30`,
@@ -363,16 +287,12 @@ const TransactionRowComponent: React.FC<TransactionRowProps> = ({
               hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
               accessibilityLabel="Delete transaction"
             >
-              <Ionicons name="trash-outline" size={13} color={colors.alert} />
+              <Ionicons name="trash-outline" size={12} color={colors.alert} />
             </TouchableOpacity>
           </View>
-
-          <View style={styles.footerDetailLink}>
-            <Text style={[styles.detailLinkText, { color: colors.textMuted }]}>
-              Details
-            </Text>
-            <Ionicons name="chevron-forward" size={13} color={colors.textMuted} />
-          </View>
+          <Text style={[styles.footerDetailText, { color: colors.textMuted }]}>
+            Tap for full receipt & breakdown
+          </Text>
         </View>
       )}
     </TouchableOpacity>
@@ -385,69 +305,61 @@ const styles = StyleSheet.create({
   cardContainer: {
     borderWidth: 1,
     borderRadius: 14,
-    paddingHorizontal: SPACING.md,
-    paddingTop: SPACING.md,
-    paddingBottom: SPACING.sm,
-    marginBottom: SPACING.sm,
+    paddingVertical: 12,
+    paddingHorizontal: 13,
+    marginBottom: 8,
   },
-  topRow: {
+  mainRow: {
     flexDirection: 'row',
     alignItems: 'center',
   },
-  iconContainer: {
+  iconAvatar: {
     width: 42,
     height: 42,
     borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: SPACING.md,
+    flexShrink: 0,
   },
-  centerContent: {
+  centerCol: {
     flex: 1,
-    marginRight: SPACING.sm,
-    minWidth: 0,
+    marginLeft: 12,
+    marginRight: 8,
     justifyContent: 'center',
+    minWidth: 0,
   },
-  titleRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: 4,
-  },
-  titleText: {
-    flex: 1,
+  primaryTitle: {
     fontSize: 15,
-    fontWeight: '700',
+    fontWeight: '600',
     letterSpacing: 0.1,
     lineHeight: 20,
   },
-  metaRow: {
+  subMetaRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    marginTop: 4,
     flexWrap: 'wrap',
-    gap: 4,
+    gap: 6,
   },
-  dateRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 3,
+  categoryTag: {
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
+    borderRadius: 5,
+    maxWidth: 100,
   },
-  metaCategoryTag: {
-    fontSize: 10,
+  categoryTagText: {
+    fontSize: 10.5,
     fontWeight: '700',
-    letterSpacing: 0.4,
-    maxWidth: 90,
-  },
-  metaDot: {
-    marginHorizontal: 4,
-    fontSize: 10,
+    letterSpacing: 0.3,
   },
   accountBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 6,
-    paddingVertical: 1,
-    borderRadius: 4,
-    maxWidth: 100,
+    paddingVertical: 1.5,
+    borderRadius: 5,
+    borderWidth: StyleSheet.hairlineWidth,
+    maxWidth: 110,
   },
   accountBadgeText: {
     fontSize: 11,
@@ -455,73 +367,56 @@ const styles = StyleSheet.create({
   },
   dateText: {
     fontSize: 11,
+    fontWeight: '400',
   },
-  rightContent: {
+  rightCol: {
     alignItems: 'flex-end',
     justifyContent: 'center',
     flexShrink: 0,
   },
   amountText: {
-    fontSize: 16,
+    fontSize: 15.5,
     fontWeight: '700',
-    marginBottom: 2,
+    letterSpacing: 0.2,
   },
   typeBadge: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+    paddingHorizontal: 5,
+    paddingVertical: 1.5,
     borderRadius: 4,
+    marginTop: 3,
   },
   typeBadgeText: {
-    fontSize: 10,
+    fontSize: 9.5,
     fontWeight: '700',
-    letterSpacing: 0.3,
+    letterSpacing: 0.4,
   },
-  footerRow: {
+  chevronIcon: {
+    marginLeft: 6,
+    opacity: 0.5,
+  },
+  slimFooter: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     borderTopWidth: 1,
-    marginTop: SPACING.sm,
+    marginTop: 8,
     paddingTop: 8,
   },
-  footerActionsGroup: {
+  footerActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: SPACING.xs,
+    gap: 6,
   },
-  actionIconBtn: {
-    width: 26,
-    height: 26,
-    borderRadius: 7,
+  deleteIconBtn: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
     borderWidth: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  actionBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: 5,
-    borderRadius: 6,
-    gap: 4,
-  },
-  actionBtnText: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  actionDivider: {
-    width: 1,
-    height: 14,
-    marginHorizontal: 2,
-  },
-  footerDetailLink: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 4,
-    gap: 2,
-  },
-  detailLinkText: {
-    fontSize: 11,
-    fontWeight: '600',
+  footerDetailText: {
+    fontSize: 10.5,
+    fontStyle: 'italic',
   },
 });

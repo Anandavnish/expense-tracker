@@ -542,7 +542,7 @@ export const TransactionDetailScreen = () => {
                   <Text style={styles.infoLabel}>Input Source</Text>
                 </View>
                 <Text style={styles.infoValuePrimary}>
-                  {transaction.source === 'screenshot' ? 'Screenshot OCR' : 'Manual Entry'}
+                  {transaction.source === 'screenshot' ? 'Screenshot OCR' : transaction.source === 'sms' ? 'SMS Detection' : 'Manual Entry'}
                 </Text>
               </View>
 

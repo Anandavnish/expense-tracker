@@ -5,7 +5,7 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  FlatList,
+  SectionList,
   Modal,
   Platform,
   ActivityIndicator,
@@ -350,6 +350,62 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({ navigati
     }
   };
 
+  // Group filtered transactions by date into clean sections
+  const groupedSections = useMemo(() => {
+    const todayStr = formatLocalDate(new Date());
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = formatLocalDate(yesterday);
+
+    const groups: Record<
+      string,
+      { date: string; title: string; totalExpense: number; totalIncome: number; data: Transaction[] }
+    > = {};
+    const order: string[] = [];
+
+    filteredTransactions.forEach((tx) => {
+      const d = tx.date;
+      if (!groups[d]) {
+        order.push(d);
+        let title = d;
+        if (d === todayStr) {
+          title = 'Today';
+        } else if (d === yesterdayStr) {
+          title = 'Yesterday';
+        } else {
+          try {
+            const [y, m, day] = d.split('-').map(Number);
+            const dateObj = new Date(y, m - 1, day);
+            title = dateObj.toLocaleDateString('en-US', {
+              weekday: 'short',
+              day: 'numeric',
+              month: 'short',
+            });
+          } catch {
+            title = d;
+          }
+        }
+        groups[d] = {
+          date: d,
+          title,
+          totalExpense: 0,
+          totalIncome: 0,
+          data: [],
+        };
+      }
+
+      groups[d].data.push(tx);
+      const amt = Number(tx.amount || 0);
+      if (tx.type === 'expense') {
+        groups[d].totalExpense += amt;
+      } else if (tx.type === 'income') {
+        groups[d].totalIncome += amt;
+      }
+    });
+
+    return order.map((d) => groups[d]);
+  }, [filteredTransactions]);
+
   // Render Transaction Item using redesigned TransactionRow (memoized)
   const renderItem = useCallback(
     ({ item }: { item: Transaction }) => {
@@ -358,10 +414,32 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({ navigati
         <TransactionRow
           transaction={item}
           accountName={sourceAccountName}
+          showDate={false}
+          showActions={false}
         />
       );
     },
     [accountMap]
+  );
+
+  const renderSectionHeader = useCallback(
+    ({
+      section,
+    }: {
+      section: { title: string; totalExpense: number; totalIncome: number };
+    }) => (
+      <View style={styles.sectionHeader}>
+        <Text style={[styles.sectionDateTitle, { color: colors.textSecondary }]}>
+          {section.title}
+        </Text>
+        {section.totalExpense > 0 && (
+          <Text style={[styles.sectionDaySpent, TYPOGRAPHY.tabularText, { color: colors.textMuted }]}>
+            ₹{section.totalExpense.toLocaleString('en-IN', { maximumFractionDigits: 0 })} spent
+          </Text>
+        )}
+      </View>
+    ),
+    [colors, styles]
   );
 
 
@@ -818,16 +896,18 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({ navigati
           style={styles.topFadeGradient}
           pointerEvents="none"
         />
-        <FlatList
-          data={filteredTransactions}
+        <SectionList
+          sections={groupedSections}
           keyExtractor={(item) => item.id}
           renderItem={renderItem}
+          renderSectionHeader={renderSectionHeader}
+          stickySectionHeadersEnabled={false}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
           scrollEventThrottle={16}
           decelerationRate="normal"
           overScrollMode="never"
-          initialNumToRender={12}
+          initialNumToRender={14}
           maxToRenderPerBatch={10}
           windowSize={5}
           removeClippedSubviews={Platform.OS === 'android'}
@@ -1626,6 +1706,24 @@ function getStyles(colors: ThemeColors) {
       paddingTop: 8,
       paddingBottom: 96,
       gap: SPACING.xs,
+    },
+    sectionHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingTop: 16,
+      paddingBottom: 6,
+      paddingHorizontal: 2,
+    },
+    sectionDateTitle: {
+      fontSize: 12,
+      fontWeight: '700',
+      letterSpacing: 0.5,
+      textTransform: 'uppercase',
+    },
+    sectionDaySpent: {
+      fontSize: 11.5,
+      fontWeight: '600',
     },
     emptyContainer: {
       backgroundColor: colors.surface,

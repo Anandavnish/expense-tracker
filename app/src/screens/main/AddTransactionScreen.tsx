@@ -8,6 +8,7 @@ import {
   Platform,
   Modal,
   ActivityIndicator,
+  BackHandler,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -358,6 +359,28 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params, categories]);
   /* eslint-enable react-hooks/set-state-in-effect */
+
+  // Hardware Back Handler & Cleanup: ensure pending drafts are wiped when closing/backing out
+  useEffect(() => {
+    const onHardwareBack = () => {
+      AsyncStorage.multiRemove([
+        '@add_transaction_screen_draft_v1',
+        '@pending_shared_transaction_draft_v1',
+      ]).catch(() => {});
+      if (navigation.canGoBack()) {
+        navigation.goBack();
+      } else {
+        navigation.navigate('MainTabs', { screen: 'Dashboard' });
+      }
+      return true;
+    };
+
+    const sub = BackHandler.addEventListener('hardwareBackPress', onHardwareBack);
+    return () => {
+      sub.remove();
+      AsyncStorage.removeItem('@pending_shared_transaction_draft_v1').catch(() => {});
+    };
+  }, [navigation]);
 
   // Restore pending shared transaction or saved uncommitted draft on mount if params are absent
   useEffect(() => {

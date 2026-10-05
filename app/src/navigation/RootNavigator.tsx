@@ -83,6 +83,7 @@ export const RootNavigator = () => {
 
   // Queue navigation if NavigationContainer is not yet mounted/ready
   const pendingNavRef = React.useRef<{ screen: string; params: any } | null>(null);
+  const lastHandledIntentSignatureRef = React.useRef<string | null>(null);
 
   const navigateOrQueue = useCallback((screen: string, params: any) => {
     if (navigationRef.isReady()) {
@@ -143,31 +144,14 @@ export const RootNavigator = () => {
     [navigateOrQueue]
   );
 
-  // Listen for app coming to foreground to immediately fulfill any pending shared transaction
+  // Listen for app coming to foreground to immediately fulfill queued navigation
   useEffect(() => {
-    const handleAppStateChange = async (nextAppState: string) => {
+    const handleAppStateChange = (nextAppState: string) => {
       if (nextAppState === 'active') {
         if (pendingNavRef.current) {
           const { screen, params } = pendingNavRef.current;
           pendingNavRef.current = null;
           navigateOrQueue(screen, params);
-          return;
-        }
-
-        // If there's an unconsumed recent shared draft in storage, navigate to AddTransaction
-        try {
-          const stored = await AsyncStorage.getItem('@pending_shared_transaction_draft_v1');
-          if (stored) {
-            const parsed = JSON.parse(stored);
-            if (parsed?.navParams && Date.now() - (parsed.timestamp || 0) < 15 * 60 * 1000) {
-              const currentRoute = navigationRef.isReady() ? navigationRef.getCurrentRoute()?.name : null;
-              if (currentRoute !== 'AddTransaction') {
-                navigateOrQueue('AddTransaction', parsed.navParams);
-              }
-            }
-          }
-        } catch (e) {
-          console.warn('[RootNavigator] Failed checking shared draft on active:', e);
         }
       }
     };
@@ -467,11 +451,22 @@ export const RootNavigator = () => {
         resetShareIntent();
 
         if (imagePath) {
+          const sig = `file:${imagePath}`;
+          if (lastHandledIntentSignatureRef.current === sig) {
+            return;
+          }
+          lastHandledIntentSignatureRef.current = sig;
           processSharedImage(imagePath);
         }
       } else if (shareIntent?.text && shareIntent.text.trim()) {
         const textToProcess = shareIntent.text.trim();
         resetShareIntent();
+
+        const sig = `text:${textToProcess}`;
+        if (lastHandledIntentSignatureRef.current === sig) {
+          return;
+        }
+        lastHandledIntentSignatureRef.current = sig;
         processSharedText(textToProcess);
       }
     }
