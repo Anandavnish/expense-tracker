@@ -60,6 +60,29 @@ if (!isRunningInExpoGo()) {
 
 export const navigationRef = createNavigationContainerRef<any>();
 
+const CONSUMED_SHARE_INTENT_KEY = '@consumed_share_intent_sig_v2';
+
+const isShareIntentConsumed = async (sig: string): Promise<boolean> => {
+  try {
+    const raw = await AsyncStorage.getItem(CONSUMED_SHARE_INTENT_KEY);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw);
+    if (parsed.sig === sig && Date.now() - (parsed.timestamp || 0) < 24 * 60 * 60 * 1000) {
+      return true;
+    }
+  } catch {}
+  return false;
+};
+
+const markShareIntentConsumed = async (sig: string) => {
+  try {
+    await AsyncStorage.setItem(
+      CONSUMED_SHARE_INTENT_KEY,
+      JSON.stringify({ sig, timestamp: Date.now() })
+    );
+  } catch {}
+};
+
 const AppStack = createNativeStackNavigator();
 
 export const RootNavigator = () => {
@@ -87,6 +110,7 @@ export const RootNavigator = () => {
 
   const navigateOrQueue = useCallback((screen: string, params: any) => {
     if (navigationRef.isReady()) {
+      pendingNavRef.current = null;
       navigationRef.dispatch(CommonActions.navigate({ name: screen, params }));
       setTimeout(() => {
         if (navigationRef.isReady() && navigationRef.getCurrentRoute()?.name !== screen) {
@@ -117,8 +141,7 @@ export const RootNavigator = () => {
         console.warn('[RootNavigator] Failed to cache shared draft:', e);
       }
 
-      // 2. ALWAYS dispatch navigation (or queue it for when container is ready)
-      pendingNavRef.current = { screen: 'AddTransaction', params: navParams };
+      // 2. Dispatch navigation (only queues into pendingNavRef if container isn't ready)
       navigateOrQueue('AddTransaction', navParams);
 
       // 3. If currently backgrounded, also trigger OS notification so user can tap it from notifications tray
@@ -444,18 +467,31 @@ export const RootNavigator = () => {
 
   // Handle incoming shared screenshot / receipt or SMS text from external apps
   useEffect(() => {
-    if (hasShareIntent && session) {
+    if (!hasShareIntent || !session) return;
+
+    let isMounted = true;
+
+    const handleIncomingIntent = async () => {
       if (shareIntent?.files && shareIntent.files.length > 0) {
         const file = shareIntent.files[0];
         const imagePath = file.path;
         resetShareIntent();
 
         if (imagePath) {
-          const sig = `file:${imagePath}`;
+          const sig = `file:${imagePath}_${file.size || ''}`;
           if (lastHandledIntentSignatureRef.current === sig) {
             return;
           }
+
+          const alreadyConsumed = await isShareIntentConsumed(sig);
+          if (alreadyConsumed) {
+            lastHandledIntentSignatureRef.current = sig;
+            return;
+          }
+
+          if (!isMounted) return;
           lastHandledIntentSignatureRef.current = sig;
+          await markShareIntentConsumed(sig);
           processSharedImage(imagePath);
         }
       } else if (shareIntent?.text && shareIntent.text.trim()) {
@@ -466,10 +502,25 @@ export const RootNavigator = () => {
         if (lastHandledIntentSignatureRef.current === sig) {
           return;
         }
+
+        const alreadyConsumed = await isShareIntentConsumed(sig);
+        if (alreadyConsumed) {
+          lastHandledIntentSignatureRef.current = sig;
+          return;
+        }
+
+        if (!isMounted) return;
         lastHandledIntentSignatureRef.current = sig;
+        await markShareIntentConsumed(sig);
         processSharedText(textToProcess);
       }
-    }
+    };
+
+    handleIncomingIntent();
+
+    return () => {
+      isMounted = false;
+    };
   }, [hasShareIntent, shareIntent, session, resetShareIntent, processSharedImage, processSharedText]);
 
   const appNavTheme = useMemo(() => {

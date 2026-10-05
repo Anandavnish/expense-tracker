@@ -55,11 +55,11 @@ jobs:
         working-directory: ./app
         run: npx expo prebuild --platform android --clean
 
-      - name: 🛠️ Build Android Standalone APK
+      - name: 🛠️ Build Android Standalone APK (arm64-v8a Optimized)
         working-directory: ./app/android
         run: |
           chmod +x ./gradlew
-          ./gradlew assembleRelease --no-daemon
+          ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon
 
       - name: 📦 Package & Prepare Release Artifact
         id: prep
