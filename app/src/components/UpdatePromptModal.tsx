@@ -12,6 +12,7 @@ import {
   ScrollView,
   Linking,
   Platform,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
@@ -83,6 +84,28 @@ export const UpdatePromptModal: React.FC<UpdatePromptModalProps> = ({
     return `${mb.toFixed(1)} MB`;
   };
 
+  const openInstallPermissionSettings = async () => {
+    try {
+      await IntentLauncher.startActivityAsync(
+        'android.settings.MANAGE_UNKNOWN_APP_SOURCES',
+        {
+          data: 'package:com.expensetracker.app',
+        }
+      );
+    } catch {
+      try {
+        await IntentLauncher.startActivityAsync(
+          'android.settings.APPLICATION_DETAILS_SETTINGS',
+          {
+            data: 'package:com.expensetracker.app',
+          }
+        );
+      } catch {
+        Linking.openSettings().catch(() => {});
+      }
+    }
+  };
+
   const triggerPackageInstaller = async (fileUri: string) => {
     if (Platform.OS !== 'android') return;
     try {
@@ -97,8 +120,22 @@ export const UpdatePromptModal: React.FC<UpdatePromptModalProps> = ({
       setStatus('ready');
     } catch (err: any) {
       console.warn('[UpdatePromptModal] Package installer invocation failed:', err);
-      // Keep in ready state so user can tap "Install Now" or open via browser
       setStatus('ready');
+      Alert.alert(
+        'Permission Required',
+        'Android requires permission to install updates directly. Please enable "Allow from this source" in settings, then tap "Install Update Now".',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Open Settings',
+            onPress: () => openInstallPermissionSettings(),
+          },
+          {
+            text: 'Open in Browser',
+            onPress: () => handleBrowserFallback(),
+          },
+        ]
+      );
     }
   };
 
@@ -319,11 +356,24 @@ export const UpdatePromptModal: React.FC<UpdatePromptModalProps> = ({
           {(status === 'ready' || status === 'installing') && (
             <View style={[styles.readyBox, { backgroundColor: colors.surfaceVariant }]}>
               <Ionicons name="shield-checkmark-outline" size={20} color={colors.success} />
-              <Text style={[styles.readyBoxText, { color: colors.textPrimary }]}>
-                {status === 'installing'
-                  ? 'Please confirm installation in the system package installer dialog.'
-                  : 'APK downloaded. Tap below if the installer dialog did not open automatically.'}
-              </Text>
+              <View style={{ flex: 1, marginLeft: 8 }}>
+                <Text style={[styles.readyBoxText, { color: colors.textPrimary }]}>
+                  {status === 'installing'
+                    ? 'Please confirm installation in the system package installer dialog.'
+                    : 'APK downloaded. Tap below if the installer dialog did not open automatically.'}
+                </Text>
+                {Platform.OS === 'android' && (
+                  <TouchableOpacity
+                    onPress={openInstallPermissionSettings}
+                    style={{ marginTop: 6 }}
+                    hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+                  >
+                    <Text style={{ fontSize: 11, color: accent.hex, fontWeight: '600', textDecorationLine: 'underline' }}>
+                      Need to enable &quot;Install unknown apps&quot;? Tap here
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
             </View>
           )}
 

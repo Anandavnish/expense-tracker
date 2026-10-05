@@ -1499,11 +1499,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
             >
               <View style={styles.breakdownLabelRow}>
                 <Text style={styles.breakdownLabel}>Card Dues</Text>
-                {creditCycleDues.isOverdue && (
-                  <View style={{ backgroundColor: colors.alert + '20', paddingHorizontal: 4, paddingVertical: 1, borderRadius: 3 }}>
-                    <Text style={{ fontSize: 8, fontWeight: '800', color: colors.alert }}>OVERDUE</Text>
-                  </View>
-                )}
                 {creditAccounts.length > 0 && (
                   <Ionicons name="chevron-forward" size={10} color={colors.textMuted} />
                 )}
@@ -1513,11 +1508,10 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                   styles.breakdownValue,
                   TYPOGRAPHY.tabularText,
                   {
-                    color: creditCycleDues.isOverdue
-                      ? colors.alert
-                      : (creditCycleDues.billedDues > 0 || creditCycleDues.unbilledDues > 0 || creditCycleDues.totalDues > 0)
-                      ? colors.warning
-                      : colors.textSecondary,
+                    color:
+                      (creditCycleDues.billedDues > 0 || creditCycleDues.unbilledDues > 0 || creditCycleDues.totalDues > 0)
+                        ? colors.warning
+                        : colors.textSecondary,
                   },
                 ]}
                 numberOfLines={1}
@@ -1906,9 +1900,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                                       styles.sourceAmount,
                                       TYPOGRAPHY.tabularText,
                                       {
-                                        color: cardDues.isOverdue
-                                          ? colors.alert
-                                          : (cardDues.billedDues > 0 ? colors.warning : colors.success),
+                                        color: cardDues.billedDues > 0 ? colors.warning : colors.success,
                                         fontSize: 13,
                                       },
                                     ]}
@@ -1939,9 +1931,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                                   styles.sourceAmount,
                                   TYPOGRAPHY.tabularText,
                                   {
-                                    color: cardDues.isOverdue
-                                      ? colors.alert
-                                      : (cardDues.totalDues > 0 || spent > 0)
+                                    color: (cardDues.totalDues > 0 || spent > 0)
                                       ? colors.warning
                                       : colors.success,
                                     fontSize: 14,
@@ -1953,11 +1943,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                                   ? `₹${(cardDues.totalDues > 0 ? cardDues.totalDues : spent).toLocaleString('en-IN', { maximumFractionDigits: 0 })} Due`
                                   : '₹0 Due'}
                               </Text>
-                            )}
-                            {cardDues.isOverdue && (
-                              <View style={{ backgroundColor: colors.alert + '20', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 3, marginTop: 2 }}>
-                                <Text style={{ fontSize: 9, fontWeight: '800', color: colors.alert, letterSpacing: 0.5 }}>OVERDUE</Text>
-                              </View>
                             )}
                           </View>
                           <Ionicons name="chevron-forward" size={14} color={colors.textMuted} />

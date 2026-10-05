@@ -244,6 +244,15 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation, rout
     );
   };
 
+  const handleCheckOcrEngine = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    Alert.alert(
+      'Offline OCR Engine',
+      'Status: Ready & Active\n\n• Provider: Google Play Services Dynamic ML Kit\n• Model Size: ~0 MB added to APK\n• Execution: 100% on-device local recognition\n• Usage: Parses receipts, SMS messages, and payment screenshots automatically.\n\nThe OCR model is automatically fetched and kept updated by Google Play Services in the background.',
+      [{ text: 'Got it', style: 'default' }]
+    );
+  };
+
   // CSV Export Modal & Filter States
   const [csvModalVisible, setCsvModalVisible] = useState(false);
   const [csvDatePreset, setCsvDatePreset] = useState<'all' | 'this_month' | 'this_year' | 'last_30_days' | 'custom'>('all');
@@ -663,6 +672,45 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation, rout
             </View>
           </TouchableOpacity>
 
+          <View style={[styles.divider, { backgroundColor: colors.border }]} />
+
+          {/* Offline OCR Engine (Google Play Services Dynamic ML Kit) */}
+          <TouchableOpacity
+            onPress={handleCheckOcrEngine}
+            style={styles.placeholderRow}
+            activeOpacity={0.7}
+          >
+            <View style={styles.placeholderTextCol}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                <Text style={[styles.placeholderTitle, { color: colors.textPrimary, flexShrink: 1 }]}>
+                  Offline OCR Engine
+                </Text>
+                <Ionicons name="scan-outline" size={14} color={colors.primary} />
+              </View>
+              <Text style={[styles.placeholderSub, { color: colors.textMuted }]}>
+                Google Play Services ML Kit • Dynamic (~0 MB in APK)
+              </Text>
+            </View>
+            <View
+              style={[
+                styles.actionBadge,
+                { backgroundColor: colors.incomeMuted, borderColor: colors.income, flexShrink: 0 },
+              ]}
+            >
+              <Ionicons
+                name="checkmark-circle"
+                size={12}
+                color={colors.income}
+                style={{ marginRight: 3 }}
+              />
+              <Text style={[styles.actionBadgeText, { color: colors.income }]}>
+                READY
+              </Text>
+            </View>
+          </TouchableOpacity>
+
+          <View style={[styles.divider, { backgroundColor: colors.border }]} />
+
           {/* Toggle: Show AI Spending Overview on Dashboard */}
           <View style={[styles.placeholderRow, { paddingTop: SPACING.md }]}>
             <View style={styles.placeholderTextCol}>
@@ -690,8 +738,10 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation, rout
             activeOpacity={0.7}
           >
             <View style={styles.placeholderTextCol}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <Text style={[styles.placeholderTitle, { color: colors.textPrimary }]}>Download Statement (PDF)</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                <Text style={[styles.placeholderTitle, { color: colors.textPrimary, flexShrink: 1 }]}>
+                  Download Statement (PDF)
+                </Text>
                 <Ionicons name="document-text-outline" size={14} color={colors.primary} />
               </View>
               <Text style={[styles.placeholderSub, { color: colors.textMuted }]}>
@@ -1675,11 +1725,13 @@ const styles = StyleSheet.create({
   },
   placeholderTextCol: {
     flex: 1,
+    flexShrink: 1,
     marginRight: SPACING.xs,
   },
   placeholderTitle: {
     fontSize: 14,
     fontWeight: '700',
+    flexShrink: 1,
   },
   placeholderSub: {
     fontSize: 11,

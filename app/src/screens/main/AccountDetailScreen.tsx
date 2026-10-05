@@ -409,21 +409,14 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
                     <View style={[styles.cycleSplitItem, { alignItems: 'center' }]}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                         <Text style={styles.cycleSplitLabel}>
-                          {cycleDues.isOverdue ? 'OVERDUE STATEMENT DUE' : 'TOTAL OUTSTANDING'}
+                          TOTAL OUTSTANDING
                         </Text>
-                        {cycleDues.isOverdue && (
-                          <View style={{ backgroundColor: colors.alert + '20', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 3 }}>
-                            <Text style={{ fontSize: 9, fontWeight: '800', color: colors.alert }}>OVERDUE</Text>
-                          </View>
-                        )}
                       </View>
-                      <Text style={[styles.cycleSplitVal, TYPOGRAPHY.tabularText, { color: cycleDues.isOverdue ? colors.alert : colors.warning }]}>
+                      <Text style={[styles.cycleSplitVal, TYPOGRAPHY.tabularText, { color: colors.warning }]}>
                         ₹{cycleDues.totalDues.toLocaleString('en-IN')}
                       </Text>
                       <Text style={styles.cycleSplitSub}>
-                        {cycleDues.isOverdue
-                          ? `Payment overdue by ${Math.abs(cycleDues.daysUntilDue || 0)} days • Merged`
-                          : account.billing_cycle_day
+                        {account.billing_cycle_day
                           ? `Next bill date: Day ${account.billing_cycle_day}`
                           : 'Merged outside cycle window'}
                       </Text>

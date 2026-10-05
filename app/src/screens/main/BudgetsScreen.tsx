@@ -642,10 +642,15 @@ export const BudgetsScreen: React.FC<BudgetsScreenProps> = ({ route }) => {
                     borderColor: accent.hex,
                     paddingVertical: 5,
                     paddingHorizontal: 12,
+                    flexShrink: 0,
                   },
                 ]}
+                activeOpacity={0.7}
               >
-                <Text style={[styles.emptyActionText, { color: accent.hex, fontSize: 12, fontWeight: '700' }]}>
+                <Text
+                  style={[styles.emptyActionText, { color: accent.hex, fontSize: 12, fontWeight: '700' }]}
+                  numberOfLines={1}
+                >
                   + Set Limit
                 </Text>
               </TouchableOpacity>
@@ -1511,16 +1516,21 @@ function getStyles(colors: ThemeColors) {
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: SPACING.md,
+    gap: SPACING.xs,
   },
   cockpitLeftHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: SPACING.sm,
+    flex: 1,
+    flexShrink: 1,
+    marginRight: SPACING.xs,
   },
   cockpitActionGroup: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+    flexShrink: 0,
   },
   cockpitValueRow: {
     flexDirection: 'row',
@@ -1541,11 +1551,13 @@ function getStyles(colors: ThemeColors) {
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
   },
   cockpitSubtitle: {
     fontSize: 11,
     fontWeight: '800',
     letterSpacing: 0.8,
+    flexShrink: 1,
   },
   cockpitTitle: {
     fontSize: 18,
@@ -2000,6 +2012,9 @@ function getStyles(colors: ThemeColors) {
     paddingVertical: 7,
     borderRadius: 6,
     borderWidth: 1,
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   emptyActionText: {
     fontSize: 12,

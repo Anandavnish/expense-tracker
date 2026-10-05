@@ -55,11 +55,24 @@ jobs:
         working-directory: ./app
         run: npx expo prebuild --platform android --clean
 
+      - name: 📦 Cache Android NDK 27
+        uses: actions/cache@v4
+        id: ndk-cache
+        with:
+          path: /usr/local/lib/android/sdk/ndk/27.1.12297006
+          key: ${{ runner.os }}-ndk-27.1.12297006
+
+      - name: 📱 Pre-install Android NDK 27
+        if: steps.ndk-cache.outputs.cache-hit != 'true'
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "ndk;27.1.12297006"
+
       - name: 🛠️ Build Android Standalone APK (arm64-v8a Optimized)
         working-directory: ./app/android
         run: |
           chmod +x ./gradlew
-          ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon
+          ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon --stacktrace
 
       - name: 📦 Package & Prepare Release Artifact
         id: prep
