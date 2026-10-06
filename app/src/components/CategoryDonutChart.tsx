@@ -45,11 +45,9 @@ export const CategoryDonutChart: React.FC<CategoryDonutChartProps> = ({
   const circumference = 2 * Math.PI * radius;
   const center = size / 2;
 
-  // Filter to categories that actually have positive spending
+  // Filter to categories that actually have positive spending, preserving user-defined order
   const activeSlices = useMemo(() => {
-    return data
-      .filter((d) => d.amount > 0)
-      .sort((a, b) => b.amount - a.amount);
+    return data.filter((d) => d.amount > 0);
   }, [data]);
 
   // Compute strokeDasharray, strokeDashoffset, and angular coverage for each slice

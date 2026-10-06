@@ -13,6 +13,7 @@ import {
   Linking,
   KeyboardAvoidingView,
   Switch,
+  Image,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -70,6 +71,12 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation, rout
     showAiOverviewOnDashboard,
     setShowAiOverviewOnDashboard,
   } = useSettingsStore();
+
+  const userAvatarUrl = useMemo(() => {
+    if (isGuest) return null;
+    const metadata = user?.user_metadata;
+    return (metadata?.avatar_url || metadata?.picture || null) as string | null;
+  }, [user, isGuest]);
 
   const { transactions, accounts, categories } = useFinanceStore();
   const { keyboardHeight, isKeyboardVisible } = useKeyboard();
@@ -479,12 +486,14 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation, rout
           </View>
           <View style={styles.accountRow}>
             <View style={[styles.avatar, { borderColor: colors.primary, backgroundColor: colors.surfaceVariant }]}>
-              {isGuest ? (
+              {userAvatarUrl ? (
+                <Image source={{ uri: userAvatarUrl }} style={styles.avatarImage} />
+              ) : isGuest ? (
                 <Ionicons name="person-circle-outline" size={24} color={colors.primary} />
               ) : (
-                <Text style={[styles.avatarText, { color: colors.primary }]}>
-                  {user?.email?.charAt(0).toUpperCase() || 'U'}
-                </Text>
+                <View style={[styles.avatarFallback, { backgroundColor: colors.primary + '22' }]}>
+                  <Ionicons name="person" size={20} color={colors.primary} />
+                </View>
               )}
             </View>
             <View style={styles.accountDetails}>
@@ -1589,6 +1598,18 @@ const styles = StyleSheet.create({
     height: 40,
     borderRadius: 20,
     borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 20,
+  },
+  avatarFallback: {
+    width: '100%',
+    height: '100%',
     alignItems: 'center',
     justifyContent: 'center',
   },

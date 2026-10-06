@@ -27,6 +27,10 @@ import {
   DEFAULT_INCOME_CATEGORIES,
   DEFAULT_BORROW_CATEGORIES,
 } from '../../utils/categoryIcons';
+import {
+  getPersonNameFromTransaction,
+  getPersonLedgerByName,
+} from '../../utils/personLedger';
 
 export const TransactionDetailScreen = () => {
   const insets = useSafeAreaInsets();
@@ -79,6 +83,16 @@ export const TransactionDetailScreen = () => {
     () => borrows.find((b) => b.linked_transaction_id === transactionId),
     [borrows, transactionId]
   );
+
+  const personName = useMemo(() => {
+    if (!transaction) return null;
+    return getPersonNameFromTransaction(transaction, borrows);
+  }, [transaction, borrows]);
+
+  const personLedger = useMemo(() => {
+    if (!personName) return null;
+    return getPersonLedgerByName(personName, borrows, transactions, accounts);
+  }, [personName, borrows, transactions, accounts]);
 
   // Screen State
   const [isEditing, setIsEditing] = useState(initialMode === 'edit');
@@ -559,8 +573,248 @@ export const TransactionDetailScreen = () => {
               </View>
             </View>
 
-            {/* Linked Borrow Card (if applicable) */}
-            {linkedBorrow && (
+            {/* Person Transaction History & Net Ledger Card */}
+            {personLedger ? (
+              <View style={styles.sectionCard}>
+                <View style={styles.ledgerCardHeader}>
+                  <View
+                    style={[
+                      styles.ledgerAvatar,
+                      { backgroundColor: `${personLedger.avatarColor}22` },
+                    ]}
+                  >
+                    <Text
+                      style={[styles.ledgerAvatarText, { color: personLedger.avatarColor }]}
+                    >
+                      {personLedger.personName.charAt(0).toUpperCase()}
+                    </Text>
+                  </View>
+                  <View style={styles.ledgerHeaderInfo}>
+                    <Text style={styles.ledgerPersonName}>{personLedger.personName}</Text>
+                    <Text style={styles.ledgerHeaderSub}>
+                      {personLedger.status === 'settled'
+                        ? 'All debts settled'
+                        : personLedger.netBalance > 0
+                        ? `${personLedger.personName} owes you`
+                        : `You owe ${personLedger.personName}`}
+                    </Text>
+                  </View>
+
+                  <View style={styles.ledgerHeaderBadgeCol}>
+                    <View
+                      style={[
+                        styles.ledgerStatusPill,
+                        {
+                          backgroundColor:
+                            personLedger.status === 'settled'
+                              ? `${colors.income}1A`
+                              : personLedger.netBalance > 0
+                              ? `${colors.lent}1A`
+                              : `${colors.borrowed}1A`,
+                          borderColor:
+                            personLedger.status === 'settled'
+                              ? `${colors.income}44`
+                              : personLedger.netBalance > 0
+                              ? `${colors.lent}44`
+                              : `${colors.borrowed}44`,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.ledgerStatusPillText,
+                          {
+                            color:
+                              personLedger.status === 'settled'
+                                ? colors.income
+                                : personLedger.netBalance > 0
+                                ? colors.lent
+                                : colors.borrowed,
+                          },
+                        ]}
+                      >
+                        {personLedger.status === 'settled'
+                          ? 'SETTLED'
+                          : personLedger.netBalance > 0
+                          ? 'OWED TO YOU'
+                          : 'YOU OWE'}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+
+                <View style={styles.divider} />
+
+                <View style={styles.ledgerSectionSubRow}>
+                  <Text style={styles.sectionHeaderTitle}>CONTACT HISTORY (+ / − BREAKDOWN)</Text>
+                  <Text style={styles.ledgerItemsCountText}>
+                    {personLedger.entries.length} {personLedger.entries.length === 1 ? 'record' : 'records'}
+                  </Text>
+                </View>
+
+                {/* Chronological list of all entries */}
+                <View style={styles.ledgerEntriesList}>
+                  {personLedger.entries.map((entry) => {
+                    const isCurrent = entry.transactionId === transaction.id;
+                    const isLent = entry.type === 'lent';
+                    const isRepayRecv = entry.type === 'repayment_received';
+                    const isRepayPaid = entry.type === 'repayment_paid';
+                    const isFriend = entry.type === 'paid_by_friend';
+
+                    let typeBadgeText = 'BORROWED';
+                    let typeBadgeColor = colors.borrowed;
+                    if (isLent) {
+                      typeBadgeText = 'LENT';
+                      typeBadgeColor = colors.lent;
+                    } else if (isRepayRecv) {
+                      typeBadgeText = 'REPAID TO YOU';
+                      typeBadgeColor = colors.income;
+                    } else if (isRepayPaid) {
+                      typeBadgeText = 'REPAID BY YOU';
+                      typeBadgeColor = colors.income;
+                    } else if (isFriend) {
+                      typeBadgeText = 'FRIEND EXPENSE';
+                      typeBadgeColor = colors.warning;
+                    }
+
+                    return (
+                      <View
+                        key={entry.id}
+                        style={[
+                          styles.ledgerEntryRow,
+                          isCurrent && [
+                            styles.ledgerEntryRowCurrent,
+                            { borderColor: accent.hex },
+                          ],
+                        ]}
+                      >
+                        <View style={styles.ledgerEntryLeft}>
+                          <View style={styles.ledgerEntryTopLine}>
+                            <View
+                              style={[
+                                styles.ledgerEntryTypeTag,
+                                {
+                                  backgroundColor: `${typeBadgeColor}1A`,
+                                  borderColor: `${typeBadgeColor}44`,
+                                },
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.ledgerEntryTypeTagText,
+                                  { color: typeBadgeColor },
+                                ]}
+                              >
+                                {typeBadgeText}
+                              </Text>
+                            </View>
+
+                            <Text style={styles.ledgerEntryDate}>{entry.date}</Text>
+
+                            {isCurrent && (
+                              <View
+                                style={[
+                                  styles.currentTxBadge,
+                                  { backgroundColor: accent.hex },
+                                ]}
+                              >
+                                <Text style={styles.currentTxBadgeText}>THIS ENTRY</Text>
+                              </View>
+                            )}
+                          </View>
+
+                          {entry.note ? (
+                            <Text style={styles.ledgerEntryNote} numberOfLines={1}>
+                              {entry.note}
+                            </Text>
+                          ) : null}
+
+                          {entry.accountName && (
+                            <Text style={styles.ledgerEntryAccount}>
+                              Account: {entry.accountName}
+                            </Text>
+                          )}
+                        </View>
+
+                        <View style={styles.ledgerEntryRight}>
+                          <Text
+                            style={[
+                              styles.ledgerEntryAmount,
+                              TYPOGRAPHY.tabularText,
+                              {
+                                color:
+                                  entry.direction === '+' ? colors.lent : colors.alert,
+                              },
+                            ]}
+                          >
+                            {entry.direction}₹
+                            {entry.amount.toLocaleString('en-IN', {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}
+                          </Text>
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+
+                {/* Net Summary Box */}
+                <View style={styles.ledgerNetSummaryBox}>
+                  <View style={styles.ledgerNetRow}>
+                    <Text style={styles.ledgerNetLabel}>Total Lent / Given (+):</Text>
+                    <Text style={[styles.ledgerNetVal, TYPOGRAPHY.tabularText, { color: colors.lent }]}>
+                      +₹{personLedger.totalHistoricalLent.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                    </Text>
+                  </View>
+
+                  <View style={styles.ledgerNetRow}>
+                    <Text style={styles.ledgerNetLabel}>Total Borrowed / Repaid (−):</Text>
+                    <Text style={[styles.ledgerNetVal, TYPOGRAPHY.tabularText, { color: colors.alert }]}>
+                      −₹{(personLedger.totalHistoricalBorrowed + personLedger.totalRepaidToMe).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                    </Text>
+                  </View>
+
+                  <View style={[styles.divider, { marginVertical: 6 }]} />
+
+                  <View style={styles.ledgerNetRow}>
+                    <Text style={styles.ledgerNetTotalLabel}>CURRENT NET BALANCE:</Text>
+                    <Text
+                      style={[
+                        styles.ledgerNetTotalVal,
+                        TYPOGRAPHY.tabularText,
+                        {
+                          color:
+                            personLedger.netBalance > 0
+                              ? colors.lent
+                              : personLedger.netBalance < 0
+                              ? colors.borrowed
+                              : colors.income,
+                        },
+                      ]}
+                    >
+                      {personLedger.netBalance > 0 ? '+' : personLedger.netBalance < 0 ? '−' : ''}₹
+                      {Math.abs(personLedger.netBalance).toLocaleString('en-IN', {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Quick Link to Borrows Tab */}
+                <TouchableOpacity
+                  style={[styles.openBorrowsTabBtn, { borderColor: accent.hex }]}
+                  onPress={() => navigation.navigate('MainTabs', { screen: 'Borrows' })}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="people-outline" size={15} color={accent.hex} style={{ marginRight: 6 }} />
+                  <Text style={[styles.openBorrowsTabBtnText, { color: accent.hex }]}>
+                    Open {personLedger.personName} in Borrows Tab
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            ) : linkedBorrow ? (
               <View style={styles.sectionCard}>
                 <Text style={styles.sectionHeaderTitle}>LINKED BORROW RECORD</Text>
                 <View style={styles.infoRow}>
@@ -599,7 +853,7 @@ export const TransactionDetailScreen = () => {
                   </View>
                 </View>
               </View>
-            )}
+            ) : null}
 
             {/* Prominent Delete Button at Bottom (Only if not locked) */}
             {!isLocked && (
@@ -1327,5 +1581,170 @@ const getStyles = (colors: ThemeColors) =>
     color: '#FFF',
     fontSize: 13,
     fontWeight: '800',
+  },
+  // Ledger Card Styles
+  ledgerCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  ledgerAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ledgerAvatarText: {
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  ledgerHeaderInfo: {
+    flex: 1,
+  },
+  ledgerPersonName: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: colors.textPrimary,
+  },
+  ledgerHeaderSub: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+  ledgerHeaderBadgeCol: {
+    alignItems: 'flex-end',
+  },
+  ledgerStatusPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1,
+  },
+  ledgerStatusPillText: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.4,
+  },
+  ledgerSectionSubRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  ledgerItemsCountText: {
+    fontSize: 11,
+    color: colors.textMuted,
+  },
+  ledgerEntriesList: {
+    gap: 8,
+    marginBottom: 12,
+  },
+  ledgerEntryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    backgroundColor: colors.surfaceLight,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 10,
+  },
+  ledgerEntryRowCurrent: {
+    borderWidth: 1.5,
+  },
+  ledgerEntryLeft: {
+    flex: 1,
+    paddingRight: 8,
+  },
+  ledgerEntryTopLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 3,
+  },
+  ledgerEntryTypeTag: {
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 4,
+    borderWidth: 1,
+  },
+  ledgerEntryTypeTagText: {
+    fontSize: 9,
+    fontWeight: '800',
+  },
+  ledgerEntryDate: {
+    fontSize: 11,
+    color: colors.textMuted,
+  },
+  currentTxBadge: {
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 4,
+  },
+  currentTxBadgeText: {
+    fontSize: 8,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  ledgerEntryNote: {
+    fontSize: 12,
+    color: colors.textPrimary,
+    marginTop: 2,
+  },
+  ledgerEntryAccount: {
+    fontSize: 10,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+  ledgerEntryRight: {
+    justifyContent: 'center',
+    alignItems: 'flex-end',
+  },
+  ledgerEntryAmount: {
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  ledgerNetSummaryBox: {
+    backgroundColor: colors.surfaceLight,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 12,
+    gap: 4,
+    marginBottom: 12,
+  },
+  ledgerNetRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  ledgerNetLabel: {
+    fontSize: 12,
+    color: colors.textSecondary,
+  },
+  ledgerNetVal: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  ledgerNetTotalLabel: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: colors.textPrimary,
+  },
+  ledgerNetTotalVal: {
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  openBorrowsTabBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingVertical: 10,
+  },
+  openBorrowsTabBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
   },
 });

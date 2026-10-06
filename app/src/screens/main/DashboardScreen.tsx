@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Keyboard,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -33,6 +34,7 @@ import {
   calculateAggregateCreditCycleDues,
 } from '../../store/financeStore';
 import { useSettingsStore } from '../../store/settingsStore';
+import { useKeyboard } from '../../hooks/useKeyboard';
 import { MonthUnlockModal } from '../../components/MonthUnlockModal';
 import { getSpendingOverviewWithGemini } from '../../services/geminiService';
 import {
@@ -153,6 +155,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
 
   const sourceModalScrollRef = useRef<ScrollView>(null);
   const categoryModalScrollRef = useRef<ScrollView>(null);
+  const { keyboardHeight, isKeyboardVisible } = useKeyboard();
 
   const {
     accounts,
@@ -265,6 +268,49 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
   const [showNetWorthDeltaCallout, setShowNetWorthDeltaCallout] = useState(false);
   const [deleteTargetAccount, setDeleteTargetAccount] = useState<Account | null>(null);
   const [isDeletingSource, setIsDeletingSource] = useState(false);
+
+  // Auto-scroll handler to ensure focused inputs remain comfortably visible above keyboard and bottom bar
+  const scrollToSourceInput = useCallback(
+    (target: 'name' | 'limit' | 'billing' | 'due' | 'billedDue' | 'balance') => {
+      const isCustom =
+        (editType === 'bank' && editBankPreset === 'Custom') ||
+        (editType === 'credit_card' && editCardIssuer === 'Custom');
+      const customOffset = isCustom ? 105 : 0;
+      let y = 0;
+
+      if (editType === 'cash') {
+        if (target === 'name') y = 40;
+        else if (target === 'balance') y = 120;
+      } else if (editType === 'bank') {
+        if (target === 'name') y = 350 + customOffset;
+        else if (target === 'balance') y = 440 + customOffset;
+      } else if (editType === 'credit_card') {
+        switch (target) {
+          case 'name':
+            y = 280 + customOffset;
+            break;
+          case 'limit':
+            y = 360 + customOffset;
+            break;
+          case 'billing':
+          case 'due':
+            y = 450 + customOffset;
+            break;
+          case 'billedDue':
+            y = 540 + customOffset;
+            break;
+          case 'balance':
+            y = 640 + customOffset;
+            break;
+        }
+      }
+
+      setTimeout(() => {
+        sourceModalScrollRef.current?.scrollTo({ y, animated: true });
+      }, 120);
+    },
+    [editType, editBankPreset, editCardIssuer]
+  );
 
   // Derived user details for clean dashboard header
   const userFirstName = useMemo(() => {
@@ -587,13 +633,48 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
     return map;
   }, [categories, budgetSummaries, transactions, selectedMonth]);
 
+  // Max spend for category progress relative calculation
+  const maxCategorySpend = useMemo(() => {
+    const vals = Object.values(categorySpendingMap);
+    return Math.max(1, ...vals);
+  }, [categorySpendingMap]);
+
+  // Dynamic display categories: strictly follows user store categories order + appends any historical categories with spend/budgets for this month
+  const displayCategories = useMemo(() => {
+    const set = new Set<string>();
+    const list: string[] = [];
+    const addCat = (c?: string | null) => {
+      if (!c) return;
+      const clean = c.trim();
+      if (!clean || clean === 'Credit Card Payment' || clean === 'Overall Budget') return;
+      const lower = clean.toLowerCase();
+      if (!set.has(lower)) {
+        set.add(lower);
+        list.push(clean);
+      }
+    };
+    // 1. Maintain user's configured category list and order
+    categories.forEach(addCat);
+    // 2. In past locked months (or if historical spending exists), display those categories
+    // in the card so the user sees where money went, without altering the active category list
+    Object.entries(categorySpendingMap).forEach(([cat, amt]) => {
+      if (amt > 0) addCat(cat);
+    });
+    budgetSummaries.forEach((bs) => {
+      if (bs.category) addCat(bs.category);
+    });
+    return list;
+  }, [categories, categorySpendingMap, budgetSummaries]);
+
   // Data formatted specifically for the CategoryDonutChart (only categories with spend > 0)
+  // Iterates displayCategories to strictly preserve the user-configured category ordering
   const { categoryChartData, totalCategoryExpenses } = useMemo(() => {
     let total = 0;
     const items: CategoryChartItem[] = [];
     const usedColors = new Set<string>();
 
-    Object.entries(categorySpendingMap).forEach(([cat, amt]) => {
+    displayCategories.forEach((cat) => {
+      const amt = categorySpendingMap[cat] || 0;
       if (amt > 0 && cat !== 'Credit Card Payment') {
         total += amt;
         let color = getCategoryToken(cat).color;
@@ -618,7 +699,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
       categoryChartData: items,
       totalCategoryExpenses: total,
     };
-  }, [categorySpendingMap]);
+  }, [displayCategories, categorySpendingMap]);
 
   // Map category name to its exact color in CategoryDonutChart
   const categoryColorMap = useMemo(() => {
@@ -628,44 +709,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
     });
     return map;
   }, [categoryChartData]);
-
-  // Max spend for category progress relative calculation
-  const maxCategorySpend = useMemo(() => {
-    const vals = Object.values(categorySpendingMap);
-    return Math.max(1, ...vals);
-  }, [categorySpendingMap]);
-
-  // Dynamic display categories: user store categories + any category with active spending or budgets
-  const displayCategories = useMemo(() => {
-    const set = new Set<string>();
-    const list: string[] = [];
-    const addCat = (c?: string | null) => {
-      if (!c) return;
-      const clean = c.trim();
-      if (!clean || clean === 'Credit Card Payment' || clean === 'Overall Budget') return;
-      const lower = clean.toLowerCase();
-      if (!set.has(lower)) {
-        set.add(lower);
-        list.push(clean);
-      }
-    };
-    categories.forEach(addCat);
-    Object.entries(categorySpendingMap).forEach(([cat, amt]) => {
-      if (amt > 0) addCat(cat);
-    });
-    budgetSummaries.forEach((bs) => addCat(bs.category));
-    return list;
-  }, [categories, categorySpendingMap, budgetSummaries]);
-
-  // Self-heal store categories if any active transaction/spending category was unlisted
-  useEffect(() => {
-    const existing = new Set(categories.map((c) => c.toLowerCase()));
-    displayCategories.forEach((cat) => {
-      if (!existing.has(cat.toLowerCase())) {
-        addCategory(cat);
-      }
-    });
-  }, [displayCategories, categories, addCategory]);
 
   // Month transactions and distinct categories for gating & overview
   const monthTransactions = useMemo(() => {
@@ -969,6 +1012,9 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
       setEditCurrentStatementBilledDue('');
       setIsAddingNewSource(true);
     }
+    setTimeout(() => {
+      sourceModalScrollRef.current?.scrollTo({ y: 0, animated: false });
+    }, 50);
   };
 
   const handleOpenPayBill = (card: Account) => {
@@ -1003,12 +1049,12 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
   };
 
 
-  const handleSaveCategory = () => {
+  const handleSaveCategory = async () => {
     const trimmed = categoryInputValue.trim();
     if (!trimmed) return;
 
     if (editingCategory) {
-      updateCategory(editingCategory, trimmed);
+      await updateCategory(editingCategory, trimmed);
     } else {
       addCategory(trimmed);
     }
@@ -1030,10 +1076,11 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
     setShowAddCategoryInput(false);
   };
 
-  const handleConfirmDeleteCategory = () => {
+  const handleConfirmDeleteCategory = async () => {
     if (categoryDeleteTarget) {
-      removeCategory(categoryDeleteTarget);
+      const target = categoryDeleteTarget;
       setCategoryDeleteTarget(null);
+      await removeCategory(target);
     }
   };
 
@@ -1055,6 +1102,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
 
   const handleSaveSource = async () => {
     if (!user || isSavingSource) return;
+    Keyboard.dismiss();
 
     let finalName = editName.trim();
     if (editType === 'bank') {
@@ -2372,11 +2420,20 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
           }
         }}
       >
-        <View style={[styles.fullScreenModal, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
+        <View
+          style={[
+            styles.fullScreenModal,
+            { paddingTop: insets.top },
+            (editingAccount || isAddingNewSource)
+              ? { paddingBottom: 0 }
+              : { paddingBottom: insets.bottom },
+          ]}
+        >
           {/* Modal Header */}
           <View style={styles.managerHeader}>
             <TouchableOpacity
               onPress={() => {
+                Keyboard.dismiss();
                 if (editingAccount || isAddingNewSource) {
                   setEditingAccount(null);
                   setIsAddingNewSource(false);
@@ -2416,13 +2473,19 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
             /* ADD / EDIT VIEW */
             <KeyboardAvoidingView
               behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-              style={{ flex: 1 }}
+              style={{
+                flex: 1,
+                paddingBottom: Platform.OS === 'android' && isKeyboardVisible ? keyboardHeight : 0,
+              }}
             >
-              <KeyboardAwareScrollView
+              <ScrollView
                 ref={sourceModalScrollRef}
                 style={styles.fullScreenModalScroll}
-                contentContainerStyle={{ paddingBottom: 140 }}
-                extraScrollHeight={80}
+                contentContainerStyle={{
+                  paddingBottom: SPACING.xl,
+                }}
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode="on-drag"
                 showsVerticalScrollIndicator={false}
               >
                 {/* 1. Account Type Selection (3 Fluid Types) */}
@@ -2676,6 +2739,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                 <TextInput
                   value={editName}
                   onChangeText={setEditName}
+                  onFocus={() => scrollToSourceInput('name')}
                   placeholder={
                     editType === 'bank'
                       ? 'e.g. Salary A/c or •••• 4821'
@@ -2697,6 +2761,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                     <TextInput
                       value={editCreditLimit}
                       onChangeText={setEditCreditLimit}
+                      onFocus={() => scrollToSourceInput('limit')}
                       placeholder="e.g. 50000"
                       keyboardType="decimal-pad"
                       mode="outlined"
@@ -2713,6 +2778,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                         <TextInput
                           value={editBillingCycleDay}
                           onChangeText={setEditBillingCycleDay}
+                          onFocus={() => scrollToSourceInput('billing')}
                           placeholder="e.g. 15"
                           keyboardType="number-pad"
                           mode="outlined"
@@ -2728,6 +2794,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                         <TextInput
                           value={editPaymentDueDay}
                           onChangeText={setEditPaymentDueDay}
+                          onFocus={() => scrollToSourceInput('due')}
                           placeholder="e.g. 5"
                           keyboardType="number-pad"
                           mode="outlined"
@@ -2745,6 +2812,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                       <TextInput
                         value={editCurrentStatementBilledDue}
                         onChangeText={setEditCurrentStatementBilledDue}
+                        onFocus={() => scrollToSourceInput('billedDue')}
                         placeholder="e.g. 5000 (calculated from history if empty)"
                         keyboardType="decimal-pad"
                         mode="outlined"
@@ -2769,6 +2837,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                     <TextInput
                       value={editBalance}
                       onChangeText={setEditBalance}
+                      onFocus={() => scrollToSourceInput('balance')}
                       placeholder="0.00"
                       keyboardType="decimal-pad"
                       mode="outlined"
@@ -2796,6 +2865,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                     <TextInput
                       value={editBalance}
                       onChangeText={setEditBalance}
+                      onFocus={() => scrollToSourceInput('balance')}
                       placeholder="0.00"
                       keyboardType="decimal-pad"
                       mode="outlined"
@@ -2807,12 +2877,20 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                     />
                   </>
                 )}
-              </KeyboardAwareScrollView>
+              </ScrollView>
 
               {/* Fixed Bottom Action Bar (Add/Edit) */}
-              <View style={styles.fullScreenModalBottomBar}>
+              <View
+                style={[
+                  styles.fullScreenModalBottomBar,
+                  {
+                    paddingBottom: isKeyboardVisible ? SPACING.md : Math.max(insets.bottom, SPACING.md),
+                  },
+                ]}
+              >
                 <TouchableOpacity
                   onPress={() => {
+                    Keyboard.dismiss();
                     setEditingAccount(null);
                     setIsAddingNewSource(false);
                   }}
@@ -3190,13 +3268,15 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                         onPress={() => handleStartEditCategory(cat)}
                       />
 
-                      <TouchableOpacity
-                        onPress={() => setCategoryDeleteTarget(cat)}
-                        style={[styles.managerCircleBtn, styles.managerDeleteCircleBtn]}
-                        hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
-                      >
-                        <Ionicons name="trash-outline" size={14} color={colors.alert} />
-                      </TouchableOpacity>
+                      {cat.toLowerCase() !== 'other' && cat.toLowerCase() !== 'others' && (
+                        <TouchableOpacity
+                          onPress={() => setCategoryDeleteTarget(cat)}
+                          style={[styles.managerCircleBtn, styles.managerDeleteCircleBtn]}
+                          hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+                        >
+                          <Ionicons name="trash-outline" size={14} color={colors.alert} />
+                        </TouchableOpacity>
+                      )}
                     </View>
                   )}
                 />
@@ -3240,7 +3320,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
             <Text style={styles.modalTitle}>Delete Category?</Text>
 
             <Text style={styles.deleteModalExplanation}>
-              Are you sure you want to remove <Text style={{ fontWeight: '700', color: colors.textPrimary }}>"{categoryDeleteTarget}"</Text>? Existing transactions assigned to this category will not be lost.
+              Are you sure you want to remove <Text style={{ fontWeight: '700', color: colors.textPrimary }}>"{categoryDeleteTarget}"</Text>? All transactions in active months will be moved to "{categories.find((c) => c.toLowerCase() === 'others') || 'Other'}" without deleting any transaction history. Past locked months remain preserved.
             </Text>
 
             <View style={styles.deleteModalActionList}>
@@ -4555,14 +4635,11 @@ function getStyles(colors: ThemeColors) {
     marginRight: 8,
   },
   fullScreenModalBottomBar: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
     flexDirection: 'row',
     gap: 12,
     paddingHorizontal: SPACING.lg,
-    paddingVertical: 14,
+    paddingTop: 12,
+    paddingBottom: 14,
     backgroundColor: colors.surface,
     borderTopWidth: 1,
     borderTopColor: colors.border,

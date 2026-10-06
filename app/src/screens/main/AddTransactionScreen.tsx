@@ -35,6 +35,7 @@ import { parseReceiptWithGemini } from '../../services/geminiService';
 import { useMerchantRulesStore } from '../../store/merchantRulesStore';
 import { MonthUnlockModal } from '../../components/MonthUnlockModal';
 import { getCategoryIcon, POPULAR_CATEGORY_TEMPLATES } from '../../utils/categoryIcons';
+import { buildPersonLedgers } from '../../utils/personLedger';
 
 interface AddTransactionScreenProps {
   navigation: any;
@@ -175,6 +176,34 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
   });
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+
+  const personLedgers = useMemo(() => {
+    return buildPersonLedgers(borrows, transactions, accounts);
+  }, [borrows, transactions, accounts]);
+
+  const borrowPersonSuggestions = useMemo(() => {
+    const q = personName.trim().toLowerCase();
+    if (!q) return personLedgers.slice(0, 6);
+    return personLedgers.filter((p) => p.personName.toLowerCase().includes(q)).slice(0, 6);
+  }, [personLedgers, personName]);
+
+  const matchedBorrowLedger = useMemo(() => {
+    const q = personName.trim().toLowerCase();
+    if (!q) return null;
+    return personLedgers.find((p) => p.personName.toLowerCase() === q) || null;
+  }, [personLedgers, personName]);
+
+  const projectedBorrowNet = useMemo(() => {
+    if (!matchedBorrowLedger) return null;
+    const numAmt = parseFloat(amount);
+    if (isNaN(numAmt) || numAmt <= 0) return matchedBorrowLedger.netBalance;
+
+    if (type === 'borrow_given') {
+      return matchedBorrowLedger.netBalance + numAmt;
+    } else {
+      return matchedBorrowLedger.netBalance - numAmt;
+    }
+  }, [matchedBorrowLedger, amount, type]);
 
   // Month-lock redirect state and unlock modal
   const [lockedMonthRedirect, setLockedMonthRedirect] = useState<{
@@ -1400,7 +1429,7 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
           {(type === 'borrow_given' || type === 'borrow_taken') && (
             <View style={styles.section}>
               <Text style={styles.sectionLabel}>
-                {type === 'borrow_given' ? 'LENT TO (PERSON NAME)' : 'BORROWED FROM (PERSON NAME)'}
+                {type === 'borrow_given' ? 'LENT TO (PERSON NAME) *' : 'BORROWED FROM (PERSON NAME) *'}
               </Text>
               <TextInput
                 value={personName}
@@ -1410,7 +1439,7 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
                     scrollViewRef.current?.scrollTo({ y: 300, animated: true });
                   }, 120);
                 }}
-                placeholder="e.g. Rahul, Priya"
+                placeholder="e.g. Rahul, Priya, Mom"
                 placeholderTextColor={colors.textMuted}
                 mode="outlined"
                 outlineColor={colors.border}
@@ -1418,6 +1447,67 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
                 textColor={colors.textPrimary}
                 style={styles.textInput}
               />
+
+              {borrowPersonSuggestions.length > 0 && (
+                <View style={{ marginTop: 8 }}>
+                  <Text style={{ fontSize: 10, fontWeight: '700', color: colors.textMuted, marginBottom: 5 }}>
+                    EXISTING CONTACTS (TAP TO AUTO-MERGE):
+                  </Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, paddingVertical: 2 }}>
+                    {borrowPersonSuggestions.map((p) => {
+                      const isMatch = personName.trim().toLowerCase() === p.personName.toLowerCase();
+                      return (
+                        <TouchableOpacity
+                          key={p.personName}
+                          onPress={() => {
+                            setPersonName(p.personName);
+                            setFormError(null);
+                          }}
+                          style={[
+                            styles.suggestionPill,
+                            { backgroundColor: colors.surfaceVariant, borderColor: colors.border },
+                            isMatch && {
+                              borderColor: accent.hex,
+                              backgroundColor: accent.muted,
+                            },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.suggestionPillText,
+                              { color: isMatch ? accent.hex : colors.textPrimary },
+                            ]}
+                          >
+                            {p.personName}
+                          </Text>
+                          {p.netBalance !== 0 && (
+                            <View style={{ backgroundColor: colors.surface, paddingHorizontal: 4, paddingVertical: 1, borderRadius: 4, marginLeft: 4 }}>
+                              <Text style={{ fontSize: 9, fontWeight: '700', color: p.netBalance > 0 ? colors.lent : colors.alert }}>
+                                {p.netBalance > 0 ? `+₹${p.netBalance}` : `-₹${Math.abs(p.netBalance)}`}
+                              </Text>
+                            </View>
+                          )}
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+              )}
+
+              {matchedBorrowLedger && (
+                <View style={styles.friendInfoCallout}>
+                  <Ionicons name="git-merge-outline" size={16} color={accent.hex} style={{ marginTop: 1 }} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.friendInfoCalloutText, { fontWeight: '700', color: accent.hex }]}>
+                      Auto-merging into {matchedBorrowLedger.personName}'s ledger
+                    </Text>
+                    <Text style={styles.friendInfoCalloutText}>
+                      Current Net: {matchedBorrowLedger.netBalance >= 0 ? `+₹${matchedBorrowLedger.netBalance.toLocaleString('en-IN')} (Owes you)` : `−₹${Math.abs(matchedBorrowLedger.netBalance).toLocaleString('en-IN')} (You owe)`}
+                      {projectedBorrowNet !== null ? `  →  Projected Net: ${projectedBorrowNet >= 0 ? `+₹${projectedBorrowNet.toLocaleString('en-IN')} (Owes you)` : `−₹${Math.abs(projectedBorrowNet).toLocaleString('en-IN')} (You owe)`}` : ''}
+                    </Text>
+                  </View>
+                </View>
+              )}
             </View>
           )}
 

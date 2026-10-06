@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   Alert,
   ActivityIndicator,
+  Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TextInput } from 'react-native-paper';
@@ -153,13 +154,15 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ navigation }) => {
     }
   };
 
+  const userAvatarUrl = useMemo(() => {
+    if (isGuest) return null;
+    const metadata = user?.user_metadata;
+    return (metadata?.avatar_url || metadata?.picture || null) as string | null;
+  }, [user, isGuest]);
+
   const displayName = isGuest
     ? 'Guest Explorer'
     : user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User';
-
-  const initialLetter = isGuest
-    ? 'G'
-    : (user?.email?.charAt(0) || displayName.charAt(0) || 'U').toUpperCase();
 
   return (
     <View style={[styles.safeArea, { paddingTop: insets.top, backgroundColor: colors.background }]}>
@@ -191,10 +194,14 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ navigation }) => {
         <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <View style={styles.identityRow}>
             <View style={[styles.avatarCircle, { borderColor: accent.hex, backgroundColor: colors.surfaceVariant }]}>
-              {isGuest ? (
+              {userAvatarUrl ? (
+                <Image source={{ uri: userAvatarUrl }} style={styles.avatarImage} />
+              ) : isGuest ? (
                 <Ionicons name="person-circle-outline" size={38} color={accent.hex} />
               ) : (
-                <Text style={[styles.avatarText, { color: accent.hex }]}>{initialLetter}</Text>
+                <View style={[styles.avatarFallback, { backgroundColor: accent.hex + '22' }]}>
+                  <Ionicons name="person" size={28} color={accent.hex} />
+                </View>
               )}
             </View>
             <View style={styles.identityTextCol}>
@@ -623,6 +630,18 @@ const styles = StyleSheet.create({
     height: 58,
     borderRadius: 29,
     borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 29,
+  },
+  avatarFallback: {
+    width: '100%',
+    height: '100%',
     alignItems: 'center',
     justifyContent: 'center',
   },

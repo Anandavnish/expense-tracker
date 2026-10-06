@@ -14,6 +14,7 @@ import {
   BudgetSummary,
 } from '../types/database';
 import { RealtimeChannel } from '@supabase/supabase-js';
+import { useMerchantRulesStore } from './merchantRulesStore';
 
 export const getStorageKey = (userId?: string | null) => {
   return `@finance_store_cache_${userId || 'default'}_v3`;
@@ -255,9 +256,15 @@ export const mergeCategoriesWithDefaults = (
     extraCategories.forEach(addCat);
   }
 
-  // 3. Default categories ONLY if user has never saved any custom categories
-  if (!hasUserCustomCategories) {
+  // 3. Default categories ONLY if user has never saved any custom categories or all saved were removed
+  if (!hasUserCustomCategories || merged.length === 0) {
     DEFAULT_STUDENT_CATEGORIES.forEach(addCat);
+  }
+
+  // 4. Ensure a fallback category ('Other' or 'Others') is always present for transaction reassignment
+  if (!categorySet.has('other') && !categorySet.has('others')) {
+    categorySet.add('other');
+    merged.push('Other');
   }
 
   return merged;
@@ -734,9 +741,14 @@ interface FinanceState {
 
   // Category management
   addCategory: (category: string) => void;
-  updateCategory: (oldCategory: string, newCategory: string) => void;
+  updateCategory: (
+    oldCategory: string,
+    newCategory: string
+  ) => Promise<{ success: boolean; error?: string }>;
   reorderCategories: (categories: string[]) => void;
-  removeCategory: (category: string) => void;
+  removeCategory: (
+    category: string
+  ) => Promise<{ success: boolean; error?: string }>;
 
   // Optimistic mutations
   addTransactionOptimistic: (
@@ -804,6 +816,15 @@ interface FinanceState {
   netSettleBorrowsOptimistic: (
     personName: string
   ) => Promise<{ success: boolean; error?: string }>;
+
+  settlePersonLedgerOptimistic: (params: {
+    personName: string;
+    amount: number;
+    direction: 'received' | 'paid';
+    depositAccountId?: string | null;
+    date?: string;
+    note?: string | null;
+  }) => Promise<{ success: boolean; error?: string }>;
 
   addPaidByFriendExpenseOptimistic: (params: {
     user_id: string;
@@ -950,27 +971,34 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
           .eq('month', prevMonthStr);
 
         if (prevBudgets && prevBudgets.length > 0) {
-          const toInsert = prevBudgets.map((pb) => ({
-            user_id: userId,
-            category: pb.category,
-            monthly_limit: pb.monthly_limit,
-            month: month,
-          }));
+          const activeCategoriesSet = new Set(get().categories.map((c) => c.toLowerCase()));
+          const validPrevBudgets = prevBudgets.filter(
+            (pb) => !pb.category || activeCategoriesSet.has(pb.category.toLowerCase())
+          );
 
-          const { data: inserted, error: insErr } = await supabase
-            .from('budgets')
-            .insert(toInsert)
-            .select();
+          if (validPrevBudgets.length > 0) {
+            const toInsert = validPrevBudgets.map((pb) => ({
+              user_id: userId,
+              category: pb.category,
+              monthly_limit: pb.monthly_limit,
+              month: month,
+            }));
 
-          if (!insErr && inserted) {
-            loadedBudgets = inserted as Budget[];
-            const { data: refSummary } = await supabase
-              .from('v_budget_summary')
-              .select('*')
-              .eq('user_id', userId)
-              .eq('month', month);
-            if (refSummary) {
-              loadedSummaries = refSummary as BudgetSummary[];
+            const { data: inserted, error: insErr } = await supabase
+              .from('budgets')
+              .insert(toInsert)
+              .select();
+
+            if (!insErr && inserted) {
+              loadedBudgets = inserted as Budget[];
+              const { data: refSummary } = await supabase
+                .from('v_budget_summary')
+                .select('*')
+                .eq('user_id', userId)
+                .eq('month', month);
+              if (refSummary) {
+                loadedSummaries = refSummary as BudgetSummary[];
+              }
             }
           }
         }
@@ -1138,27 +1166,205 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
     }).catch(() => {});
   },
 
-  updateCategory: (oldCategory: string, newCategory: string) => {
+  updateCategory: async (oldCategory: string, newCategory: string) => {
     const trimmed = newCategory.trim();
-    if (!trimmed || trimmed === oldCategory) return;
-    const current = get().categories;
-    const updated = current.map((c) => (c === oldCategory ? trimmed : c));
-    set({ categories: updated });
-    AsyncStorage.setItem(getCategoriesKey(get().currentUserId), JSON.stringify(updated)).catch(() => {});
+    if (!trimmed || trimmed.toLowerCase() === oldCategory.toLowerCase()) return { success: true };
+
+    const state = get();
+    const current = state.categories;
+    const updatedCategories = current.map((c) =>
+      c.toLowerCase() === oldCategory.toLowerCase() ? trimmed : c
+    );
+
+    // Update transactions in unlocked months
+    const txsToUpdate: Transaction[] = [];
+    const updatedTransactions = state.transactions.map((tx) => {
+      if (tx.category && tx.category.trim().toLowerCase() === oldCategory.toLowerCase()) {
+        const txMonth = (tx.date || '').substring(0, 7);
+        const isLocked = state.isMonthLocked(txMonth);
+        if (!isLocked) {
+          txsToUpdate.push(tx);
+          return { ...tx, category: trimmed };
+        }
+      }
+      return tx;
+    });
+
+    // Update budgets in unlocked months
+    const budgetsToUpdate: Budget[] = [];
+    const updatedBudgets = state.budgets.map((b) => {
+      if (b.category && b.category.trim().toLowerCase() === oldCategory.toLowerCase()) {
+        const bMonth = b.month || '';
+        const isLocked = state.isMonthLocked(bMonth);
+        if (!isLocked) {
+          budgetsToUpdate.push(b);
+          return { ...b, category: trimmed };
+        }
+      }
+      return b;
+    });
+
+    const updatedSummaries = state.budgetSummaries.map((s) => {
+      if (s.category && s.category.trim().toLowerCase() === oldCategory.toLowerCase()) {
+        const sMonth = s.month || '';
+        const isLocked = state.isMonthLocked(sMonth);
+        if (!isLocked) {
+          return { ...s, category: trimmed };
+        }
+      }
+      return s;
+    });
+
+    set({
+      categories: updatedCategories,
+      transactions: updatedTransactions,
+      budgets: updatedBudgets,
+      budgetSummaries: updatedSummaries,
+    });
+
+    const userId = state.currentUserId;
+    persistFinanceCache(get());
+    AsyncStorage.setItem(getCategoriesKey(userId), JSON.stringify(updatedCategories)).catch(() => {});
+
+    // Remove oldCategory from deleted blacklist if it was there
+    AsyncStorage.getItem(getDeletedCategoriesKey(userId)).then((stored) => {
+      if (stored) {
+        try {
+          const list: string[] = JSON.parse(stored);
+          const filtered = list.filter((c) => c.toLowerCase() !== trimmed.toLowerCase());
+          AsyncStorage.setItem(getDeletedCategoriesKey(userId), JSON.stringify(filtered)).catch(() => {});
+        } catch {}
+      }
+    }).catch(() => {});
+
+    // Update learned merchant rules
+    try {
+      const rulesStore = useMerchantRulesStore.getState();
+      const rulesToUpdate = rulesStore.rules.filter(
+        (r) => r.category.toLowerCase() === oldCategory.toLowerCase()
+      );
+      for (const r of rulesToUpdate) {
+        rulesStore.updateRuleCategory(r.merchant_name, trimmed).catch(() => {});
+      }
+    } catch {}
+
+    if (isGuestUser(userId) || !userId) {
+      return { success: true };
+    }
+
+    try {
+      if (txsToUpdate.length > 0) {
+        const txIds = txsToUpdate.map((t) => t.id);
+        await supabase
+          .from('transactions')
+          .update({ category: trimmed })
+          .in('id', txIds);
+      }
+
+      if (budgetsToUpdate.length > 0) {
+        const budgetIds = budgetsToUpdate.map((b) => b.id);
+        await supabase
+          .from('budgets')
+          .update({ category: trimmed })
+          .in('id', budgetIds);
+      }
+
+      return { success: true };
+    } catch (err: any) {
+      console.warn('[updateCategory] Supabase sync error:', err.message);
+      return { success: true };
+    }
   },
 
   reorderCategories: (categories: string[]) => {
     set({ categories });
-    AsyncStorage.setItem(getCategoriesKey(get().currentUserId), JSON.stringify(categories)).catch(() => {});
+    const userId = get().currentUserId;
+    AsyncStorage.setItem(getCategoriesKey(userId), JSON.stringify(categories)).catch(() => {});
+    persistFinanceCache(get());
   },
 
-  removeCategory: (category: string) => {
+  removeCategory: async (category: string) => {
     const cleanTarget = category.trim();
-    const updated = get().categories.filter((c) => c.toLowerCase() !== cleanTarget.toLowerCase());
-    set({ categories: updated });
-    const userId = get().currentUserId;
-    AsyncStorage.setItem(getCategoriesKey(userId), JSON.stringify(updated)).catch(() => {});
-    // Persist to deleted categories blacklist to permanently prevent resurrection on next open
+    if (!cleanTarget) return { success: false, error: 'Category name is required' };
+
+    // Prevent deleting the catch-all fallback category
+    if (cleanTarget.toLowerCase() === 'other' || cleanTarget.toLowerCase() === 'others') {
+      return { success: false, error: 'The fallback category cannot be deleted' };
+    }
+
+    const state = get();
+    // Fallback category for reassignment (prefer existing 'Others' if user uses that, else 'Other')
+    const existingFallback = state.categories.find(
+      (c) => c.toLowerCase() === 'others' || c.toLowerCase() === 'other'
+    );
+    const fallbackCat = existingFallback || 'Other';
+
+    // 1. Remove deleted category from categories list, ensure fallbackCat is present
+    let updatedCategories = state.categories.filter(
+      (c) => c.toLowerCase() !== cleanTarget.toLowerCase()
+    );
+    if (!updatedCategories.some((c) => c.toLowerCase() === fallbackCat.toLowerCase())) {
+      updatedCategories.push(fallbackCat);
+    }
+
+    // 2. Identify transactions to reassign:
+    // ONLY reassign transactions in unlocked / current / future months!
+    // Transactions in past locked months ("past month means locked") MUST retain their category!
+    const txsToUpdate: Transaction[] = [];
+    const updatedTransactions = state.transactions.map((tx) => {
+      if (tx.category && tx.category.trim().toLowerCase() === cleanTarget.toLowerCase()) {
+        const txMonth = (tx.date || '').substring(0, 7);
+        const isLocked = state.isMonthLocked(txMonth);
+        if (!isLocked) {
+          txsToUpdate.push(tx);
+          return {
+            ...tx,
+            category: fallbackCat,
+          };
+        }
+      }
+      return tx;
+    });
+
+    // 3. Clean up budgets for the deleted category in unlocked months
+    const budgetsToDelete: Budget[] = [];
+    const updatedBudgets = state.budgets.filter((b) => {
+      if (b.category && b.category.trim().toLowerCase() === cleanTarget.toLowerCase()) {
+        const bMonth = b.month || '';
+        const isLocked = state.isMonthLocked(bMonth);
+        if (!isLocked) {
+          budgetsToDelete.push(b);
+          return false;
+        }
+      }
+      return true;
+    });
+
+    const updatedSummaries = state.budgetSummaries.filter((s) => {
+      if (s.category && s.category.trim().toLowerCase() === cleanTarget.toLowerCase()) {
+        const sMonth = s.month || '';
+        const isLocked = state.isMonthLocked(sMonth);
+        if (!isLocked) {
+          return false;
+        }
+      }
+      return true;
+    });
+
+    // 4. Update state optimistically
+    set({
+      categories: updatedCategories,
+      transactions: updatedTransactions,
+      budgets: updatedBudgets,
+      budgetSummaries: updatedSummaries,
+    });
+
+    // 5. Persist to cache & storage
+    const userId = state.currentUserId;
+    persistFinanceCache(get());
+    AsyncStorage.setItem(getCategoriesKey(userId), JSON.stringify(updatedCategories)).catch(() => {});
+
+    // Record in deleted categories blacklist
     AsyncStorage.getItem(getDeletedCategoriesKey(userId)).then((stored) => {
       const list: string[] = stored ? JSON.parse(stored) : [];
       if (!list.some((c) => c.toLowerCase() === cleanTarget.toLowerCase())) {
@@ -1166,6 +1372,45 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
         AsyncStorage.setItem(getDeletedCategoriesKey(userId), JSON.stringify(list)).catch(() => {});
       }
     }).catch(() => {});
+
+    // Update any learned merchant rules pointing to this category
+    try {
+      const rulesStore = useMerchantRulesStore.getState();
+      const rulesToUpdate = rulesStore.rules.filter(
+        (r) => r.category.toLowerCase() === cleanTarget.toLowerCase()
+      );
+      for (const r of rulesToUpdate) {
+        rulesStore.updateRuleCategory(r.merchant_name, fallbackCat).catch(() => {});
+      }
+    } catch {}
+
+    if (isGuestUser(userId) || !userId) {
+      return { success: true };
+    }
+
+    // 6. Sync changes with Supabase
+    try {
+      if (txsToUpdate.length > 0) {
+        const txIds = txsToUpdate.map((t) => t.id);
+        await supabase
+          .from('transactions')
+          .update({ category: fallbackCat })
+          .in('id', txIds);
+      }
+
+      if (budgetsToDelete.length > 0) {
+        const budgetIds = budgetsToDelete.map((b) => b.id);
+        await supabase
+          .from('budgets')
+          .delete()
+          .in('id', budgetIds);
+      }
+
+      return { success: true };
+    } catch (err: any) {
+      console.warn('[removeCategory] Supabase sync error:', err.message);
+      return { success: true };
+    }
   },
 
   fetchInitialData: async (userId: string) => {
@@ -1262,6 +1507,14 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
       let budgets = (budgetsRes.data as Budget[]) || [];
       let budgetSummaries = (summaryRes.data as BudgetSummary[]) || [];
 
+      const categories = mergeCategoriesWithDefaults(
+        parsedCustomCats,
+        rawTransactions,
+        budgets,
+        parsedCustomCats ? null : get().categories,
+        parsedDeletedCats
+      );
+
       // Auto-carry budget limits if current month budgets are empty
       if (budgets.length === 0 && month >= getCurrentMonthString()) {
         const [curY, curM] = month.split('-').map(Number);
@@ -1275,39 +1528,38 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
           .eq('month', prevMonthStr);
 
         if (prevBudgets && prevBudgets.length > 0) {
-          const toInsert = prevBudgets.map((pb) => ({
-            user_id: userId,
-            category: pb.category,
-            monthly_limit: pb.monthly_limit,
-            month: month,
-          }));
+          const activeCategoriesSet = new Set(categories.map((c) => c.toLowerCase()));
+          const validPrevBudgets = prevBudgets.filter(
+            (pb) => !pb.category || activeCategoriesSet.has(pb.category.toLowerCase())
+          );
 
-          const { data: inserted, error: insErr } = await supabase
-            .from('budgets')
-            .insert(toInsert)
-            .select();
+          if (validPrevBudgets.length > 0) {
+            const toInsert = validPrevBudgets.map((pb) => ({
+              user_id: userId,
+              category: pb.category,
+              monthly_limit: pb.monthly_limit,
+              month: month,
+            }));
 
-          if (!insErr && inserted) {
-            budgets = inserted as Budget[];
-            const { data: refSummary } = await supabase
-              .from('v_budget_summary')
-              .select('*')
-              .eq('user_id', userId)
-              .eq('month', month);
-            if (refSummary) {
-              budgetSummaries = refSummary as BudgetSummary[];
+            const { data: inserted, error: insErr } = await supabase
+              .from('budgets')
+              .insert(toInsert)
+              .select();
+
+            if (!insErr && inserted) {
+              budgets = inserted as Budget[];
+              const { data: refSummary } = await supabase
+                .from('v_budget_summary')
+                .select('*')
+                .eq('user_id', userId)
+                .eq('month', month);
+              if (refSummary) {
+                budgetSummaries = refSummary as BudgetSummary[];
+              }
             }
           }
         }
       }
-
-      const categories = mergeCategoriesWithDefaults(
-        parsedCustomCats,
-        rawTransactions,
-        budgets,
-        parsedCustomCats ? null : get().categories,
-        parsedDeletedCats
-      );
 
       set({
         accounts,
@@ -2162,6 +2414,7 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
         category: txCategory,
         note: txNote,
         date: settleDate,
+        friend_name: displayName,
         source: 'manual',
         created_at: new Date().toISOString(),
       };
@@ -2210,6 +2463,7 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
             category: optimisticTx.category,
             note: optimisticTx.note,
             date: optimisticTx.date,
+            friend_name: displayName,
             source: 'manual',
           })
           .select()
@@ -2577,6 +2831,178 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
     }
   },
 
+  settlePersonLedgerOptimistic: async (params) => {
+    const cleanName = params.personName.replace(/^\[(BORROWED|LENT)\]\s*/i, '').trim();
+    const prevBorrows = [...get().borrows];
+    const prevTransactions = [...get().transactions];
+    const prevAccounts = [...get().accounts];
+
+    const settleDate = params.date || new Date().toISOString().substring(0, 10);
+    const settleAmt = Number(params.amount);
+    if (isNaN(settleAmt) || settleAmt <= 0) {
+      return { success: false, error: 'Invalid settlement amount' };
+    }
+
+    const nowIso = new Date().toISOString();
+    let optimisticTx: Transaction | null = null;
+    let tempTxId: string | null = null;
+    let updatedAccounts = prevAccounts;
+
+    const isReceived = params.direction === 'received';
+    const txType: TransactionType = isReceived ? 'income' : 'expense';
+
+    // 1. If an account is selected, create transaction and update balance
+    if (params.depositAccountId) {
+      tempTxId = `temp_settle_tx_${Date.now()}`;
+      const defaultNote = isReceived
+        ? `Repayment received from ${cleanName}`
+        : `Repayment paid to ${cleanName}`;
+
+      optimisticTx = {
+        id: tempTxId,
+        user_id: prevBorrows[0]?.user_id || prevTransactions[0]?.user_id || '',
+        account_id: params.depositAccountId,
+        type: txType,
+        amount: settleAmt,
+        category: 'Repayment',
+        note: params.note?.trim() || defaultNote,
+        date: settleDate,
+        source: 'manual',
+        paid_by_friend: false,
+        friend_name: cleanName,
+        created_at: nowIso,
+      };
+
+      updatedAccounts = prevAccounts.map((acc) => {
+        if (acc.id === params.depositAccountId) {
+          const delta = isReceived ? settleAmt : -settleAmt;
+          return {
+            ...acc,
+            current_balance: Number(acc.current_balance) + delta,
+          };
+        }
+        return acc;
+      });
+    }
+
+    // 2. Adjust pending borrow entries for this person
+    const targetType = isReceived ? 'lent' : 'borrowed';
+    const matchingBorrows = prevBorrows
+      .filter((b) => {
+        if (b.status !== 'pending') return false;
+        const details = parseBorrowDetails(b, prevTransactions);
+        return (
+          details.displayName.toLowerCase().trim() === cleanName.toLowerCase().trim() &&
+          details.type === targetType
+        );
+      })
+      .sort((a, b) => (a.date || a.created_at).localeCompare(b.date || b.created_at));
+
+    let remainingToSettle = settleAmt;
+    const toSettleIds: string[] = [];
+    const toUpdateBorrows: { id: string; newAmount: number }[] = [];
+
+    let updatedBorrows = prevBorrows.map((b) => ({ ...b }));
+
+    for (const b of matchingBorrows) {
+      if (remainingToSettle <= 0) break;
+      const bAmt = Number(b.amount || 0);
+
+      if (remainingToSettle >= bAmt) {
+        toSettleIds.push(b.id);
+        remainingToSettle -= bAmt;
+        const idx = updatedBorrows.findIndex((item) => item.id === b.id);
+        if (idx !== -1) {
+          updatedBorrows[idx] = {
+            ...updatedBorrows[idx],
+            status: 'settled',
+            updated_at: nowIso,
+          };
+        }
+      } else {
+        const newAmt = bAmt - remainingToSettle;
+        toUpdateBorrows.push({ id: b.id, newAmount: newAmt });
+        remainingToSettle = 0;
+        const idx = updatedBorrows.findIndex((item) => item.id === b.id);
+        if (idx !== -1) {
+          updatedBorrows[idx] = {
+            ...updatedBorrows[idx],
+            amount: newAmt,
+            updated_at: nowIso,
+          };
+        }
+      }
+    }
+
+    set({
+      borrows: updatedBorrows,
+      transactions: optimisticTx ? [optimisticTx, ...prevTransactions] : prevTransactions,
+      accounts: updatedAccounts,
+      inlineError: null,
+    });
+    persistFinanceCache(get());
+
+    const userId = prevBorrows[0]?.user_id || prevTransactions[0]?.user_id || '';
+    if (isGuestUser(userId)) {
+      return { success: true };
+    }
+
+    try {
+      let realTx: Transaction | null = null;
+      if (params.depositAccountId && optimisticTx) {
+        const { data: txData, error: txError } = await supabase
+          .from('transactions')
+          .insert({
+            user_id: userId,
+            account_id: params.depositAccountId,
+            type: optimisticTx.type,
+            amount: optimisticTx.amount,
+            category: optimisticTx.category,
+            note: optimisticTx.note,
+            date: optimisticTx.date,
+            friend_name: cleanName,
+            source: 'manual',
+          })
+          .select()
+          .single();
+        if (txError) throw txError;
+        realTx = txData as Transaction;
+      }
+
+      if (toSettleIds.length > 0) {
+        const { error: bErr } = await supabase
+          .from('borrows')
+          .update({ status: 'settled', updated_at: nowIso })
+          .in('id', toSettleIds);
+        if (bErr) throw bErr;
+      }
+
+      for (const updateItem of toUpdateBorrows) {
+        const { error: bErr } = await supabase
+          .from('borrows')
+          .update({ amount: updateItem.newAmount, updated_at: nowIso })
+          .eq('id', updateItem.id);
+        if (bErr) throw bErr;
+      }
+
+      if (realTx && tempTxId) {
+        set((state) => ({
+          transactions: state.transactions.map((t) => (t.id === tempTxId ? realTx! : t)),
+        }));
+      }
+
+      return { success: true };
+    } catch (err: any) {
+      set({
+        borrows: prevBorrows,
+        transactions: prevTransactions,
+        accounts: prevAccounts,
+        inlineError: `Could not settle person ledger: ${err.message || 'Network error'}. Rolled back.`,
+      });
+      return { success: false, error: err.message };
+    }
+  },
+
   reopenBorrowOptimistic: async (borrowId) => {
     const prevBorrows = [...get().borrows];
     const targetBorrow = prevBorrows.find((b) => b.id === borrowId);
@@ -2706,6 +3132,7 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
         category: 'Personal Loan',
         note: txNote,
         date: params.date,
+        friend_name: cleanName,
         source: 'manual',
         created_at: new Date().toISOString(),
       };
@@ -2762,6 +3189,7 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
             category: optimisticTx.category,
             note: optimisticTx.note,
             date: optimisticTx.date,
+            friend_name: cleanName,
             source: 'manual',
           })
           .select()
