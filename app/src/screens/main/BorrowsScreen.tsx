@@ -670,7 +670,7 @@ export const BorrowsScreen = () => {
         {/* 4. Unified Person Ledgers List (Person-First View) */}
         {filteredPersonLedgers.length > 0 ? (
           filteredPersonLedgers.map((person) => {
-            const isSettled = person.status === 'settled' || person.netBalance === 0;
+            const isSettled = person.status === 'settled' && person.pendingCount === 0;
             const owesYou = person.netBalance > 0;
             const youOwe = person.netBalance < 0;
             const netThemeColor = owesYou ? colors.lent : youOwe ? colors.borrowed : colors.income;
@@ -805,13 +805,13 @@ export const BorrowsScreen = () => {
                     activeOpacity={0.7}
                   >
                     <Ionicons
-                      name={isExpanded ? 'eye-off-outline' : 'list-outline'}
+                      name={isExpanded ? 'chevron-up-outline' : person.pendingCount > 0 ? 'layers-outline' : 'time-outline'}
                       size={13}
                       color={colors.textMuted}
                       style={{ marginRight: 3 }}
                     />
                     <Text style={dynamicStyles.historyToggleText}>
-                      {isExpanded ? 'Hide' : 'History'}
+                      {isExpanded ? 'Hide' : person.pendingCount > 0 ? 'Active Entries' : 'History'}
                     </Text>
                   </TouchableOpacity>
                 </View>
@@ -820,13 +820,16 @@ export const BorrowsScreen = () => {
                 {isExpanded && (
                   <View style={dynamicStyles.expandedHistoryBox}>
                     <View style={dynamicStyles.expandedHeaderRow}>
-                      <Text style={dynamicStyles.expandedHeaderTitle}>TRANSACTION TIMELINE</Text>
+                      <Text style={dynamicStyles.expandedHeaderTitle}>
+                        {person.pendingCount > 0 ? 'ACTIVE LEDGER ENTRIES' : 'TRANSACTION HISTORY'}
+                      </Text>
                       <Text style={dynamicStyles.expandedHeaderCount}>
                         {person.entries.length} items
                       </Text>
                     </View>
 
                     {person.entries.map((entry) => {
+                      const isEntrySettled = entry.status === 'settled';
                       const isEntryLent = entry.type === 'lent';
                       const isRepayReceived = entry.type === 'repayment_received';
                       const isRepayPaid = entry.type === 'repayment_paid';
@@ -853,7 +856,13 @@ export const BorrowsScreen = () => {
                         : null;
 
                       return (
-                        <View key={entry.id} style={dynamicStyles.timelineEntryRow}>
+                        <View
+                          key={entry.id}
+                          style={[
+                            dynamicStyles.timelineEntryRow,
+                            isEntrySettled && { opacity: 0.55 },
+                          ]}
+                        >
                           <View style={dynamicStyles.entryLeftCol}>
                             <View style={dynamicStyles.entryTopSubRow}>
                               <View
@@ -866,6 +875,27 @@ export const BorrowsScreen = () => {
                                   {typeLabel}
                                 </Text>
                               </View>
+
+                              <View
+                                style={[
+                                  dynamicStyles.entryTypeTag,
+                                  {
+                                    backgroundColor: isEntrySettled ? `${colors.income}1A` : `${colors.warning}1A`,
+                                    borderColor: isEntrySettled ? `${colors.income}44` : `${colors.warning}44`,
+                                    marginLeft: 4,
+                                  },
+                                ]}
+                              >
+                                <Text
+                                  style={[
+                                    dynamicStyles.entryTypeTagText,
+                                    { color: isEntrySettled ? colors.income : colors.warning },
+                                  ]}
+                                >
+                                  {isEntrySettled ? 'SETTLED' : 'PENDING'}
+                                </Text>
+                              </View>
+
                               <Text style={dynamicStyles.entryDateText}>{entry.date}</Text>
                             </View>
 
@@ -888,7 +918,11 @@ export const BorrowsScreen = () => {
                                 dynamicStyles.entryAmountText,
                                 TYPOGRAPHY.tabularText,
                                 {
-                                  color: entry.direction === '+' ? colors.lent : colors.alert,
+                                  color: isEntrySettled
+                                    ? colors.textMuted
+                                    : entry.direction === '+'
+                                    ? colors.lent
+                                    : colors.alert,
                                 },
                               ]}
                             >

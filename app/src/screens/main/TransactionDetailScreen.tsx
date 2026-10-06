@@ -11,7 +11,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { TextInput } from 'react-native-paper';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { useFinanceStore } from '../../store/financeStore';
+import { useFinanceStore, getMonthLockStatus } from '../../store/financeStore';
 import { useSettingsStore } from '../../store/settingsStore';
 import { SPACING, TYPOGRAPHY, ThemeColors } from '../../theme/tokens';
 import { TactileButton } from '../../components/TactileButton';
@@ -245,6 +245,17 @@ export const TransactionDetailScreen = () => {
     }
     if (!editDate.match(/^\d{4}-\d{2}-\d{2}$/)) {
       setErrorMessage('Please enter date in YYYY-MM-DD format');
+      return;
+    }
+
+    const targetMonth = editDate.trim().substring(0, 7);
+    if (isMonthLocked(targetMonth)) {
+      const lockStatus = getMonthLockStatus(targetMonth);
+      setErrorMessage(
+        lockStatus.isFullyClosed
+          ? `Month ${targetMonth} is permanently closed. Transactions cannot be moved to closed months.`
+          : `Month ${targetMonth} is locked. Unlock the month with password before moving transactions to it.`
+      );
       return;
     }
 
@@ -646,7 +657,9 @@ export const TransactionDetailScreen = () => {
                 <View style={styles.divider} />
 
                 <View style={styles.ledgerSectionSubRow}>
-                  <Text style={styles.sectionHeaderTitle}>CONTACT HISTORY (+ / − BREAKDOWN)</Text>
+                  <Text style={styles.sectionHeaderTitle}>
+                    {personLedger.pendingCount > 0 ? 'ACTIVE LEDGER ENTRIES' : 'SETTLED HISTORY'}
+                  </Text>
                   <Text style={styles.ledgerItemsCountText}>
                     {personLedger.entries.length} {personLedger.entries.length === 1 ? 'record' : 'records'}
                   </Text>
@@ -656,6 +669,7 @@ export const TransactionDetailScreen = () => {
                 <View style={styles.ledgerEntriesList}>
                   {personLedger.entries.map((entry) => {
                     const isCurrent = entry.transactionId === transaction.id;
+                    const isEntrySettled = entry.status === 'settled';
                     const isLent = entry.type === 'lent';
                     const isRepayRecv = entry.type === 'repayment_received';
                     const isRepayPaid = entry.type === 'repayment_paid';
@@ -686,6 +700,7 @@ export const TransactionDetailScreen = () => {
                             styles.ledgerEntryRowCurrent,
                             { borderColor: accent.hex },
                           ],
+                          isEntrySettled && { opacity: 0.55 },
                         ]}
                       >
                         <View style={styles.ledgerEntryLeft}>
@@ -706,6 +721,25 @@ export const TransactionDetailScreen = () => {
                                 ]}
                               >
                                 {typeBadgeText}
+                              </Text>
+                            </View>
+
+                            <View
+                              style={[
+                                styles.ledgerEntryTypeTag,
+                                {
+                                  backgroundColor: isEntrySettled ? `${colors.income}1A` : `${colors.warning}1A`,
+                                  borderColor: isEntrySettled ? `${colors.income}33` : `${colors.warning}33`,
+                                },
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.ledgerEntryTypeTagText,
+                                  { color: isEntrySettled ? colors.income : colors.warning },
+                                ]}
+                              >
+                                {isEntrySettled ? 'SETTLED' : 'PENDING'}
                               </Text>
                             </View>
 

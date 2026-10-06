@@ -8,12 +8,18 @@ import {
   Modal,
   KeyboardAvoidingView,
   Platform,
+  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { ProgressBar, TextInput } from 'react-native-paper';
 import { useAuthStore } from '../../store/authStore';
-import { useFinanceStore, calculateCreditCardCycleDues } from '../../store/financeStore';
+import {
+  useFinanceStore,
+  calculateCreditCardCycleDues,
+  getHistoricalAccountBalances,
+  getCurrentMonthString,
+} from '../../store/financeStore';
 import { useSettingsStore } from '../../store/settingsStore';
 import { SPACING, TYPOGRAPHY, ThemeColors } from '../../theme/tokens';
 import { TactileButton } from '../../components/TactileButton';
@@ -29,6 +35,7 @@ interface AccountDetailScreenProps {
   route?: {
     params?: {
       accountId?: string;
+      selectedMonth?: string;
     };
   };
 }
@@ -59,27 +66,51 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
   const {
     accounts,
     transactions,
+    selectedMonth: storeSelectedMonth,
     updateAccountOptimistic,
     deleteAccountOptimistic,
     payCreditCardBill,
   } = useFinanceStore();
 
-  const account = useMemo(
-    () => accounts.find((a) => a.id === accountId),
-    [accounts, accountId]
-  );
+  const activeMonth = route?.params?.selectedMonth || storeSelectedMonth || getCurrentMonthString();
+  const currentMonthStr = getCurrentMonthString();
+  const isPastMonth = activeMonth < currentMonthStr;
+
+  const formattedMonthLabel = useMemo(() => {
+    try {
+      const [y, m] = activeMonth.split('-');
+      const d = new Date(parseInt(y, 10), parseInt(m, 10) - 1, 1);
+      return d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+    } catch {
+      return activeMonth;
+    }
+  }, [activeMonth]);
+
+  const account = useMemo(() => {
+    if (isPastMonth) {
+      const historicalAccounts = getHistoricalAccountBalances(accounts, transactions, activeMonth);
+      return historicalAccounts.find((a) => a.id === accountId) || accounts.find((a) => a.id === accountId);
+    }
+    return accounts.find((a) => a.id === accountId);
+  }, [accounts, transactions, accountId, isPastMonth, activeMonth]);
 
   const liquidAccounts = useMemo(
     () => accounts.filter((a) => a.type === 'bank' || a.type === 'cash'),
     [accounts]
   );
 
-  // Filter transactions strictly for this account
+  // Filter transactions strictly for this account, and strictly for this month if viewing a past month
   const accountTransactions = useMemo(() => {
     return transactions
-      .filter((t) => t.account_id === accountId)
+      .filter((t) => {
+        if (t.account_id !== accountId) return false;
+        if (isPastMonth) {
+          return (t.date || '').startsWith(activeMonth);
+        }
+        return true;
+      })
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [transactions, accountId]);
+  }, [transactions, accountId, isPastMonth, activeMonth]);
 
   // Transaction filter: 'all' | 'expense' | 'income'
   const [filterType, setFilterType] = useState<'all' | 'expense' | 'income'>('all');
@@ -104,8 +135,14 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
 
   const cycleDues = useMemo(() => {
     if (!account || account.type !== 'credit_card') return null;
-    return calculateCreditCardCycleDues(account, transactions);
-  }, [account, transactions]);
+    let refDate: string | undefined;
+    if (isPastMonth) {
+      const [yStr, mStr] = activeMonth.split('-');
+      const lastDay = new Date(parseInt(yStr, 10), parseInt(mStr, 10), 0).getDate();
+      refDate = `${activeMonth}-${String(lastDay).padStart(2, '0')}`;
+    }
+    return calculateCreditCardCycleDues(account, transactions, refDate);
+  }, [account, transactions, isPastMonth, activeMonth]);
 
   // Comprehensive Edit Modal state
   const [editModalVisible, setEditModalVisible] = useState(false);
@@ -131,6 +168,13 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
 
   const handleOpenPayBill = () => {
     if (!account) return;
+    if (isPastMonth) {
+      Alert.alert(
+        'Historical Snapshot',
+        `Credit card bills cannot be settled from a past month view (${formattedMonthLabel}). Please switch to the running month to log bill payments.`
+      );
+      return;
+    }
     const dues = calculateCreditCardCycleDues(account, transactions);
     const suggested = dues.isSplitActive && dues.billedDues > 0 ? dues.billedDues : dues.totalDues;
     setPayAmount(suggested > 0 ? String(suggested) : '');
@@ -140,6 +184,7 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
 
   const handleConfirmPayBill = async () => {
     if (!user || !account || !paySourceAccountId) return;
+    if (isPastMonth) return;
     const numAmount = parseFloat(payAmount);
     if (isNaN(numAmount) || numAmount <= 0) return;
     setIsPayingBill(true);
@@ -157,6 +202,13 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
 
   const openEditModal = () => {
     if (!account) return;
+    if (isPastMonth) {
+      Alert.alert(
+        'Historical Snapshot',
+        `Account settings and balances cannot be edited for past months (${formattedMonthLabel}).`
+      );
+      return;
+    }
     setEditName(account.name || '');
     setEditType(account.type);
     setEditBankPreset((account.bank_preset as BankPreset) || 'HDFC');
@@ -300,14 +352,39 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
         </TouchableOpacity>
         <Text style={styles.headerTitle}>ACCOUNT DETAILS</Text>
         <View style={styles.headerRightActions}>
-          <EditButton
-            size={32}
-            iconSize={15}
-            onPress={openEditModal}
-            accessibilityLabel="Edit money source"
-          />
+          {!isPastMonth && (
+            <EditButton
+              size={32}
+              iconSize={15}
+              onPress={openEditModal}
+              accessibilityLabel="Edit money source"
+            />
+          )}
         </View>
       </View>
+
+      {isPastMonth && (
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            backgroundColor: `${accent.hex}18`,
+            borderColor: `${accent.hex}44`,
+            borderWidth: 1,
+            borderRadius: 8,
+            marginHorizontal: SPACING.lg,
+            marginBottom: SPACING.sm,
+            paddingHorizontal: 12,
+            paddingVertical: 8,
+            gap: 8,
+          }}
+        >
+          <Ionicons name="time-outline" size={16} color={accent.hex} />
+          <Text style={{ fontSize: 12, color: accent.hex, fontWeight: '700', flex: 1 }}>
+            Viewing {formattedMonthLabel} Historical Snapshot • Only {formattedMonthLabel} transactions shown
+          </Text>
+        </View>
+      )}
 
       <ScrollView
         contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 40 }]}

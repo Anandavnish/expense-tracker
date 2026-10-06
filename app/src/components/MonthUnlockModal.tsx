@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { useFinanceStore } from '../store/financeStore';
+import { useFinanceStore, getMonthLockStatus } from '../store/financeStore';
 import { useSettingsStore } from '../store/settingsStore';
 import { SPACING, ThemeColors } from '../theme/tokens';
 import { TactileButton } from './TactileButton';
@@ -39,6 +39,8 @@ export const MonthUnlockModal: React.FC<MonthUnlockModalProps> = ({
   const styles = useMemo(() => getStyles(colors, accent.hex), [colors, accent.hex]);
   const { unlockMonth } = useFinanceStore();
 
+  const lockStatus = useMemo(() => getMonthLockStatus(month), [month]);
+
   const [challengeCode, setChallengeCode] = useState(() => generateRandom4DigitCode());
   const [enteredCode, setEnteredCode] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -47,7 +49,7 @@ export const MonthUnlockModal: React.FC<MonthUnlockModalProps> = ({
 
   // Regenerate challenge when modal opens or month changes
   useEffect(() => {
-    if (visible) {
+    if (visible && lockStatus.canUnlockWithPassword) {
       const timer = setTimeout(() => {
         setChallengeCode(generateRandom4DigitCode());
         setEnteredCode('');
@@ -56,7 +58,7 @@ export const MonthUnlockModal: React.FC<MonthUnlockModalProps> = ({
       }, 100);
       return () => clearTimeout(timer);
     }
-  }, [visible, month]);
+  }, [visible, month, lockStatus.canUnlockWithPassword]);
 
   const monthLabel = useMemo(() => {
     try {
@@ -129,91 +131,124 @@ export const MonthUnlockModal: React.FC<MonthUnlockModalProps> = ({
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.card}>
-            {/* Header Icon & Title */}
-            <View style={styles.header}>
-              <View style={styles.iconCircle}>
-                <Ionicons name="lock-closed" size={24} color={accent.hex} />
-              </View>
-              <Text style={styles.title}>Unlock {monthLabel}</Text>
-              <Text style={styles.subtitle}>
-                Past months are locked to protect historical records. Type the 4-digit security code below to unlock editing for 30 minutes.
-              </Text>
-            </View>
-
-            {/* Random Challenge Box */}
-            <View style={styles.challengeBox}>
-              <View style={styles.challengeLabelRow}>
-                <Text style={styles.challengeHintText}>SECURITY VERIFICATION CODE</Text>
-                <TouchableOpacity
-                  onPress={handleRefreshCode}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  style={styles.refreshBtn}
-                >
-                  <Ionicons name="refresh" size={14} color={accent.hex} />
-                  <Text style={styles.refreshBtnText}>New Code</Text>
-                </TouchableOpacity>
-              </View>
-
-              <View style={styles.codeRow}>
-                {challengeCode.split('').map((digit, idx) => (
-                  <View key={idx} style={styles.digitBadge}>
-                    <Text style={styles.digitText}>{digit}</Text>
+            {lockStatus.isFullyClosed ? (
+              <>
+                {/* Fully Closed State */}
+                <View style={styles.header}>
+                  <View style={[styles.iconCircle, { backgroundColor: `${colors.alert}18`, borderColor: `${colors.alert}44` }]}>
+                    <Ionicons name="lock-closed" size={24} color={colors.alert} />
                   </View>
-                ))}
-              </View>
-            </View>
-
-            {/* User Input Section */}
-            <View style={styles.inputContainer}>
-              <Text style={styles.inputLabel}>ENTER THE 4 DIGITS ABOVE</Text>
-              <TextInput
-                ref={inputRef}
-                value={enteredCode}
-                onChangeText={handleCodeChange}
-                keyboardType="number-pad"
-                maxLength={4}
-                placeholder="••••"
-                placeholderTextColor={colors.textMuted}
-                style={[
-                  styles.pinInput,
-                  errorMessage ? styles.pinInputError : null,
-                  enteredCode.length === 4 && enteredCode === challengeCode ? styles.pinInputSuccess : null,
-                ]}
-                selectionColor={accent.hex}
-              />
-
-              {errorMessage ? (
-                <View style={styles.errorRow}>
-                  <Ionicons name="alert-circle" size={14} color={colors.alert} />
-                  <Text style={styles.errorText}>{errorMessage}</Text>
+                  <Text style={styles.title}>{monthLabel} is Closed</Text>
+                  <Text style={styles.subtitle}>
+                    Past months are permanently closed after the 4th of the following month. This month closed on {lockStatus.deadlineLabel}. Historical records cannot be modified.
+                  </Text>
                 </View>
-              ) : (
-                <Text style={styles.helperText}>
-                  Unlocks for 30 mins with an auto-relock countdown timer.
-                </Text>
-              )}
-            </View>
 
-            {/* Action Buttons */}
-            <View style={styles.actionsRow}>
-              <TouchableOpacity style={styles.cancelBtn} onPress={onClose} activeOpacity={0.7}>
-                <Text style={styles.cancelBtnText}>Cancel</Text>
-              </TouchableOpacity>
+                <View style={[styles.challengeBox, { backgroundColor: colors.surfaceLight, alignItems: 'center', paddingVertical: 14 }]}>
+                  <Ionicons name="shield-checkmark-outline" size={22} color={colors.textSecondary} style={{ marginBottom: 6 }} />
+                  <Text style={{ color: colors.textSecondary, fontSize: 13, textAlign: 'center', lineHeight: 18 }}>
+                    Net worth, credit card dues, money sources, and transactions for this period are locked to maintain authentic financial history.
+                  </Text>
+                </View>
 
-              <TactileButton
-                onPress={handleVerify}
-                disabled={enteredCode.length !== 4}
-                style={[
-                  styles.unlockBtn,
-                  enteredCode.length === 4
-                    ? { backgroundColor: accent.hex }
-                    : { backgroundColor: colors.border, opacity: 0.6 },
-                ]}
-              >
-                <Ionicons name="lock-open-outline" size={16} color={colors.textInverse} style={{ marginRight: 6 }} />
-                <Text style={styles.unlockBtnText}>Unlock Month</Text>
-              </TactileButton>
-            </View>
+                <View style={styles.actionsRow}>
+                  <TactileButton
+                    onPress={onClose}
+                    style={[styles.unlockBtn, { flex: 1, backgroundColor: accent.hex }]}
+                  >
+                    <Text style={styles.unlockBtnText}>Understood</Text>
+                  </TactileButton>
+                </View>
+              </>
+            ) : (
+              <>
+                {/* Header Icon & Title */}
+                <View style={styles.header}>
+                  <View style={styles.iconCircle}>
+                    <Ionicons name="lock-closed" size={24} color={accent.hex} />
+                  </View>
+                  <Text style={styles.title}>Unlock {monthLabel}</Text>
+                  <Text style={styles.subtitle}>
+                    Past months are locked to protect historical records. Editing is permitted until {lockStatus.deadlineLabel}. Type the 4-digit code below to unlock for 30 minutes.
+                  </Text>
+                </View>
+
+                {/* Random Challenge Box */}
+                <View style={styles.challengeBox}>
+                  <View style={styles.challengeLabelRow}>
+                    <Text style={styles.challengeHintText}>SECURITY VERIFICATION CODE</Text>
+                    <TouchableOpacity
+                      onPress={handleRefreshCode}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      style={styles.refreshBtn}
+                    >
+                      <Ionicons name="refresh" size={14} color={accent.hex} />
+                      <Text style={styles.refreshBtnText}>New Code</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  <View style={styles.codeRow}>
+                    {challengeCode.split('').map((digit, idx) => (
+                      <View key={idx} style={styles.digitBadge}>
+                        <Text style={styles.digitText}>{digit}</Text>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+
+                {/* User Input Section */}
+                <View style={styles.inputContainer}>
+                  <Text style={styles.inputLabel}>ENTER THE 4 DIGITS ABOVE</Text>
+                  <TextInput
+                    ref={inputRef}
+                    value={enteredCode}
+                    onChangeText={handleCodeChange}
+                    keyboardType="number-pad"
+                    maxLength={4}
+                    placeholder="••••"
+                    placeholderTextColor={colors.textMuted}
+                    style={[
+                      styles.pinInput,
+                      errorMessage ? styles.pinInputError : null,
+                      enteredCode.length === 4 && enteredCode === challengeCode ? styles.pinInputSuccess : null,
+                    ]}
+                    selectionColor={accent.hex}
+                  />
+
+                  {errorMessage ? (
+                    <View style={styles.errorRow}>
+                      <Ionicons name="alert-circle" size={14} color={colors.alert} />
+                      <Text style={styles.errorText}>{errorMessage}</Text>
+                    </View>
+                  ) : (
+                    <Text style={styles.helperText}>
+                      Unlocks for 30 mins with an auto-relock countdown timer.
+                    </Text>
+                  )}
+                </View>
+
+                {/* Action Buttons */}
+                <View style={styles.actionsRow}>
+                  <TouchableOpacity style={styles.cancelBtn} onPress={onClose} activeOpacity={0.7}>
+                    <Text style={styles.cancelBtnText}>Cancel</Text>
+                  </TouchableOpacity>
+
+                  <TactileButton
+                    onPress={handleVerify}
+                    disabled={enteredCode.length !== 4}
+                    style={[
+                      styles.unlockBtn,
+                      enteredCode.length === 4
+                        ? { backgroundColor: accent.hex }
+                        : { backgroundColor: colors.border, opacity: 0.6 },
+                    ]}
+                  >
+                    <Ionicons name="lock-open-outline" size={16} color={colors.textInverse} style={{ marginRight: 6 }} />
+                    <Text style={styles.unlockBtnText}>Unlock Month</Text>
+                  </TactileButton>
+                </View>
+              </>
+            )}
           </View>
         </ScrollView>
       </KeyboardAvoidingView>

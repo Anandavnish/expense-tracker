@@ -1112,6 +1112,30 @@ Foundational architecture build for a high-performance cross-platform personal f
     - ESLint (`npm run lint`): 0 errors, 0 warnings.
     - Full unified pipeline test suite (`node test_unified_pipeline.mjs`): 10/10 test suites passed, including Tier 3 Vision bank matching assertion.
 
+- [x] **v1.0.25 (Build 25): Past Month Closing Dues Preservation, Strict 4-Day Grace Period Lock, Account Details Monthly Isolation, & Active Borrows UI**:
+  - **Credit Card Past Month Closing Dues Preservation**:
+    - *Root Cause*: Settling credit card bill in current month decremented `current_statement_billed_due` and cleared live balances, which contaminated past month calculations because `calculateCreditCardCycleDues` did not isolate historical snapshots.
+    - *Resolution*: Implemented `isPastMonthSnapshot` guard in `calculateCreditCardCycleDues`. Past months strictly compute closing dues from frozen historical debt (`Math.abs(Math.min(0, historicalClosingBalance))`), making past months 100% immune to subsequent payments or running-month slider adjustments.
+  - **Account Detail Screen Monthly Isolation**:
+    - *Issue*: Viewing account details previously showed all-time transactions including current month's transactions, and displayed current live balances even when a past month was selected on Dashboard.
+    - *Resolution*: Passed and bound `selectedMonth`. In past months, displays historical closing balance via `getHistoricalAccountBalances`, strictly filters transactions to `date.startsWith(selectedMonth)` ("that month only"), computes isolated monthly inflows/outflows, displays a persistent historical snapshot banner, and disables bill settlement/account editing.
+  - **Strict 4-Day Grace Period Month Lock**:
+    - *Rule*: Past months are locked. They can only be unlocked with password until the 4th day of the next month (e.g. Sep 2026 can be unlocked until Oct 4th at 23:59:59). After the 4th day, the month is permanently closed and immutable.
+    - *Implementation*: Created `getMonthLockStatus` in `financeStore.ts`. In `MonthUnlockModal`, displays permanent closed notice with no input when past the 4th day. Added store-level guards to `addTransactionOptimistic`, `updateTransactionOptimistic`, and `deleteTransactionOptimistic`.
+    - *Restricted New Transaction Dates*: `minDate` in `AddTransactionScreen` enforces that transactions created in the current month cannot go back to old closed months.
+  - **Debt and Borrows Active Entries vs. Settled History**:
+    - *Issue*: Active/pending entries were labeled "History" and not visually distinguished from settled entries.
+    - *Resolution*:
+      - Re-labeled toggle button to `Active Entries` when `pendingCount > 0`, and `History` only when completely settled.
+      - Settled entries are now clearly greyed out (`opacity: 0.55`, muted text, `SETTLED` badge).
+      - Pending entries remain prominent, full opacity (1.0), with vibrant `PENDING` badge.
+      - Contacts are only marked settled when `pendingCount === 0`.
+  - **Verification & Testing**:
+    - Custom verification suite (`test_month_lock_and_dues.mjs`): 100% assertions passed.
+    - Full unified pipeline test suite (`node test_unified_pipeline.mjs`): 10/10 passed.
+    - TypeScript typecheck (`npx tsc --noEmit`): 0 errors.
+    - ESLint (`npm run lint`): 0 errors, 0 warnings.
+
 ---
 
 ## Architecture Summary

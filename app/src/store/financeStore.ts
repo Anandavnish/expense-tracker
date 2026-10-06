@@ -370,6 +370,24 @@ export const calculateCreditCardCycleDues = (
   const bDay = rawBDay != null && !isNaN(Number(rawBDay)) ? Number(rawBDay) : null;
   const pDay = rawPDay != null && !isNaN(Number(rawPDay)) ? Number(rawPDay) : null;
 
+  const currentMonthFirstDay = `${getCurrentMonthString()}-01`;
+  const isPastMonthSnapshot = Boolean(refDateStr && refDateStr < currentMonthFirstDay);
+
+  if (isPastMonthSnapshot) {
+    return {
+      totalDues,
+      billedDues: totalDues,
+      unbilledDues: 0,
+      isSplitActive: false,
+      billingCycleDay: bDay || null,
+      paymentDueDay: pDay || null,
+      statementDateStr: null,
+      paymentDueDateStr: null,
+      daysUntilDue: null,
+      isOverdue: false,
+    };
+  }
+
   if (!bDay || bDay < 1 || bDay > 31 || totalDues <= 0) {
     return {
       totalDues,
@@ -882,6 +900,63 @@ interface FinanceState {
   getUnlockRemainingSeconds: (month: string) => number;
 }
 
+export interface MonthLockStatus {
+  isPast: boolean;
+  isFullyClosed: boolean;
+  canUnlockWithPassword: boolean;
+  deadlineDate: Date | null;
+  deadlineLabel: string | null;
+}
+
+/**
+ * Calculates whether a month is past, permanently closed, or eligible for temporary password unlock.
+ * Rule: Past months are locked. They can be unlocked with password only until the 4th day of the next month.
+ * After day 4 of the next month, they are permanently closed and immutable.
+ */
+export const getMonthLockStatus = (month: string, refDate?: Date): MonthLockStatus => {
+  const now = refDate || new Date();
+  const currentMonth = getCurrentMonthString();
+  if (month >= currentMonth) {
+    return {
+      isPast: false,
+      isFullyClosed: false,
+      canUnlockWithPassword: false,
+      deadlineDate: null,
+      deadlineLabel: null,
+    };
+  }
+
+  const [yStr, mStr] = month.split('-');
+  const y = parseInt(yStr, 10);
+  const m = parseInt(mStr, 10);
+  const nextY = m === 12 ? y + 1 : y;
+  const nextM = m === 12 ? 1 : m + 1;
+  const deadlineDate = new Date(nextY, nextM - 1, 4, 23, 59, 59, 999);
+  const nextMonthName = new Date(nextY, nextM - 1, 1).toLocaleDateString('en-US', {
+    month: 'short',
+    year: 'numeric',
+  });
+  const deadlineLabel = `4th ${nextMonthName}`;
+
+  if (now.getTime() <= deadlineDate.getTime()) {
+    return {
+      isPast: true,
+      isFullyClosed: false,
+      canUnlockWithPassword: true,
+      deadlineDate,
+      deadlineLabel,
+    };
+  }
+
+  return {
+    isPast: true,
+    isFullyClosed: true,
+    canUnlockWithPassword: false,
+    deadlineDate,
+    deadlineLabel,
+  };
+};
+
 export const useFinanceStore = create<FinanceState>((set, get) => ({
   accounts: [],
   transactions: [],
@@ -899,6 +974,10 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
   unlockedMonths: {},
 
   unlockMonth: (month: string, durationMinutes = 30) => {
+    const status = getMonthLockStatus(month);
+    if (status.isFullyClosed) {
+      return; // Fully closed past months cannot be unlocked
+    }
     const expiry = Date.now() + durationMinutes * 60 * 1000;
     set((state) => ({
       unlockedMonths: {
@@ -917,15 +996,19 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
   },
 
   isMonthLocked: (month: string) => {
-    const currentMonth = getCurrentMonthString();
-    if (month >= currentMonth) {
+    const status = getMonthLockStatus(month);
+    if (!status.isPast) {
       return false; // Current and future months are never locked
     }
+    if (status.isFullyClosed) {
+      return true; // Past month is beyond 4-day grace period of next month: permanently closed
+    }
+    // Month is in past but within 4-day grace period of next month: can be unlocked with password
     const expiry = get().unlockedMonths[month];
     if (expiry && Date.now() < expiry) {
       return false; // Still within active unlocked window
     }
-    return true; // Past month is locked
+    return true; // Past month is locked by default until unlocked with password
   },
 
   getUnlockRemainingSeconds: (month: string) => {
@@ -1837,6 +1920,17 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
   },
 
   addTransactionOptimistic: async (txData) => {
+    const txMonth = (txData.date || '').slice(0, 7);
+    if (txMonth && get().isMonthLocked(txMonth)) {
+      const lockStatus = getMonthLockStatus(txMonth);
+      return {
+        success: false,
+        error: lockStatus.isFullyClosed
+          ? `Month ${txMonth} is permanently closed. Transactions cannot be added to past closed months.`
+          : `Month ${txMonth} is locked. Please unlock the month with password before logging transactions.`,
+      };
+    }
+
     const tempId = `temp_${Date.now()}_${Math.random().toString(36).substring(7)}`;
     const optimisticTx: Transaction = {
       ...txData,
@@ -2011,6 +2105,30 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
     const oldTx = prevTransactions.find((t) => t.id === transactionId);
     if (!oldTx) return { success: false, error: 'Transaction not found' };
 
+    const oldMonth = (oldTx.date || '').slice(0, 7);
+    if (oldMonth && get().isMonthLocked(oldMonth)) {
+      const lockStatus = getMonthLockStatus(oldMonth);
+      return {
+        success: false,
+        error: lockStatus.isFullyClosed
+          ? `Month ${oldMonth} is permanently closed. Cannot edit historical records.`
+          : `Month ${oldMonth} is locked. Please unlock the month with password first.`,
+      };
+    }
+
+    if (updates.date) {
+      const newMonth = updates.date.slice(0, 7);
+      if (newMonth && get().isMonthLocked(newMonth)) {
+        const lockStatus = getMonthLockStatus(newMonth);
+        return {
+          success: false,
+          error: lockStatus.isFullyClosed
+            ? `Cannot move transaction to ${newMonth} because it is permanently closed.`
+            : `Cannot move transaction to ${newMonth} because it is locked.`,
+        };
+      }
+    }
+
     const newTx: Transaction = {
       ...oldTx,
       ...updates,
@@ -2169,6 +2287,17 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
     const prevTransactions = [...get().transactions];
     const targetTx = prevTransactions.find((t) => t.id === transactionId);
     if (!targetTx) return { success: false, error: 'Transaction not found' };
+
+    const txMonth = (targetTx.date || '').slice(0, 7);
+    if (txMonth && get().isMonthLocked(txMonth)) {
+      const lockStatus = getMonthLockStatus(txMonth);
+      return {
+        success: false,
+        error: lockStatus.isFullyClosed
+          ? `Month ${txMonth} is permanently closed. Cannot delete historical records.`
+          : `Month ${txMonth} is locked. Please unlock the month with password first.`,
+      };
+    }
 
     const prevAccounts = [...get().accounts];
     const prevSummaries = [...get().budgetSummaries];

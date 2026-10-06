@@ -280,7 +280,7 @@ export const buildPersonLedgers = (
     });
 
     const net = data.pendingLent - data.pendingBorrowed;
-    const isSettled = data.pendingCount === 0 || net === 0;
+    const isSettled = data.pendingCount === 0;
 
     const latestDate = data.dates.length > 0
       ? data.dates.sort().reverse()[0]

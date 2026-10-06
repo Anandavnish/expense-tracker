@@ -18,7 +18,11 @@ import { TextInput } from 'react-native-paper';
 import { LinearGradient } from 'expo-linear-gradient';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useAuthStore } from '../../store/authStore';
-import { useFinanceStore, getCurrentMonthString } from '../../store/financeStore';
+import {
+  useFinanceStore,
+  getCurrentMonthString,
+  getMonthLockStatus,
+} from '../../store/financeStore';
 import { useSettingsStore } from '../../store/settingsStore';
 import { exportTransactionsStatement } from '../../services/statementExport';
 import { SPACING, TYPOGRAPHY, ThemeColors } from '../../theme/tokens';
@@ -96,9 +100,17 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({ navigati
       return;
     }
     if (dateFilter === 'this_month' && isPastMonth && isLocked) {
+      const lockStatus = getMonthLockStatus(selectedMonth);
+      if (lockStatus.isFullyClosed) {
+        Alert.alert(
+          'Month Closed',
+          `${formattedMonthLabel} is permanently closed. Past historical records cannot be modified.`
+        );
+        return;
+      }
       Alert.alert(
         'Month Locked',
-        `${formattedMonthLabel} is locked to protect historical records. Unlock this month to log or edit transactions.`,
+        `${formattedMonthLabel} is locked to protect historical records. Unlock this month with password to log or edit transactions.`,
         [
           { text: 'Cancel', style: 'cancel' },
           { text: 'Unlock Month', onPress: () => setUnlockModalVisible(true) },

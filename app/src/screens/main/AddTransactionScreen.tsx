@@ -17,7 +17,12 @@ import { TextInput } from 'react-native-paper';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
 import { useAuthStore } from '../../store/authStore';
-import { useFinanceStore, getCurrentMonthString, parseBorrowDetails } from '../../store/financeStore';
+import {
+  useFinanceStore,
+  getCurrentMonthString,
+  parseBorrowDetails,
+  getMonthLockStatus,
+} from '../../store/financeStore';
 import { useSettingsStore } from '../../store/settingsStore';
 import { SPACING, TYPOGRAPHY, ThemeColors } from '../../theme/tokens';
 import { TactileButton } from '../../components/TactileButton';
@@ -127,8 +132,20 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
       const [y, m] = initialMonth.split('-').map(Number);
       return new Date(y, m - 1, 1);
     }
-    return new Date(today.getFullYear() - 1, 0, 1);
-  }, [isPastMonthMode, initialMonth, today]);
+    // Current month transactions cannot go to old closed months.
+    // Allow previous month ONLY if within 4-day grace period and actively unlocked.
+    const prevMonthDate = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+    const prevMonthStr = `${prevMonthDate.getFullYear()}-${String(prevMonthDate.getMonth() + 1).padStart(2, '0')}`;
+    const prevLockStatus = getMonthLockStatus(prevMonthStr);
+    const isPrevUnlocked = !isMonthLocked(prevMonthStr);
+
+    if (prevLockStatus.canUnlockWithPassword && isPrevUnlocked) {
+      return prevMonthDate;
+    }
+
+    // Strictly start of current month
+    return new Date(today.getFullYear(), today.getMonth(), 1);
+  }, [isPastMonthMode, initialMonth, today, isMonthLocked]);
 
   const maxDate = useMemo(() => {
     if (isPastMonthMode && initialMonth) {
@@ -932,15 +949,22 @@ export const AddTransactionScreen: React.FC<AddTransactionScreenProps> = ({ navi
       return;
     }
 
-    // Validate that transaction date does not belong to a locked month
+    // Validate that transaction date does not belong to a locked or closed month
     const txMonth = date.substring(0, 7);
     if (isMonthLocked(txMonth)) {
+      const lockStatus = getMonthLockStatus(txMonth);
       const [yStr, mStr] = txMonth.split('-');
       const d = new Date(parseInt(yStr, 10), parseInt(mStr, 10) - 1, 1);
       const lockedName = d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-      setFormError(
-        `${lockedName} is currently locked. Please unlock it from the Dashboard before logging transactions for this month.`
-      );
+      if (lockStatus.isFullyClosed) {
+        setFormError(
+          `${lockedName} is permanently closed. Transactions cannot be logged to closed months.`
+        );
+      } else {
+        setFormError(
+          `${lockedName} is currently locked. Please unlock it with password before logging transactions.`
+        );
+      }
       return;
     }
 

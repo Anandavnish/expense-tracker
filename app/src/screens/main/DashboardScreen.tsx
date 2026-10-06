@@ -1540,7 +1540,10 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
               style={styles.breakdownItem}
               onPress={() => {
                 if (creditAccounts.length > 0) {
-                  navigation.navigate('AccountDetail', { accountId: creditAccounts[0].id });
+                  navigation.navigate('AccountDetail', {
+                    accountId: creditAccounts[0].id,
+                    selectedMonth,
+                  });
                 }
               }}
               activeOpacity={0.7}
@@ -1826,7 +1829,10 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                     key={acc.id}
                     style={styles.sourceRow}
                     onPress={() =>
-                      navigation.navigate('AccountDetail', { accountId: acc.id })
+                      navigation.navigate('AccountDetail', {
+                        accountId: acc.id,
+                        selectedMonth,
+                      })
                     }
                     onLongPress={() => handleOpenEditSource(acc)}
                     activeOpacity={0.7}
@@ -1921,7 +1927,10 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation, ro
                     <TouchableOpacity
                       style={styles.creditCardSourceRow}
                       onPress={() =>
-                        navigation.navigate('AccountDetail', { accountId: card.id })
+                        navigation.navigate('AccountDetail', {
+                          accountId: card.id,
+                          selectedMonth,
+                        })
                       }
                       onLongPress={() => handleOpenEditSource(card)}
                       activeOpacity={0.7}
