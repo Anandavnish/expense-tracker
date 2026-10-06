@@ -99,18 +99,16 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
     [accounts]
   );
 
-  // Filter transactions strictly for this account, and strictly for this month if viewing a past month
+  // Filter transactions strictly for this account and strictly for the active month (both current and past months)
   const accountTransactions = useMemo(() => {
     return transactions
       .filter((t) => {
         if (t.account_id !== accountId) return false;
-        if (isPastMonth) {
-          return (t.date || '').startsWith(activeMonth);
-        }
-        return true;
+        const txDate = t.date || t.created_at || '';
+        return txDate.startsWith(activeMonth);
       })
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [transactions, accountId, isPastMonth, activeMonth]);
+  }, [transactions, accountId, activeMonth]);
 
   // Transaction filter: 'all' | 'expense' | 'income'
   const [filterType, setFilterType] = useState<'all' | 'expense' | 'income'>('all');
@@ -620,7 +618,9 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
         {/* 3. Section Header & Filter Chips */}
         <View style={styles.sectionHeaderContainer}>
           <View style={styles.sectionTitleWithCount}>
-            <Text style={styles.sectionTitle}>Account Transactions</Text>
+            <Text style={styles.sectionTitle}>
+              {formattedMonthLabel.toUpperCase()} TRANSACTIONS
+            </Text>
             <View style={styles.countBadge}>
               <Text style={styles.countBadgeText}>{filteredTransactions.length}</Text>
             </View>
@@ -665,8 +665,8 @@ export const AccountDetailScreen: React.FC<AccountDetailScreenProps> = ({
             <Text style={styles.emptyTitle}>No Transactions Yet</Text>
             <Text style={styles.emptySubtitle}>
               {filterType === 'all'
-                ? `No transactions recorded using ${account.name} yet.`
-                : `No ${filterType} records found for this account.`}
+                ? `No transactions recorded for ${formattedMonthLabel} using ${account.name}.`
+                : `No ${filterType} records found for ${formattedMonthLabel} on this account.`}
             </Text>
             <TouchableOpacity
               onPress={() =>
