@@ -2592,14 +2592,16 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
             category: optimisticTx.category,
             note: optimisticTx.note,
             date: optimisticTx.date,
-            friend_name: displayName,
             source: 'manual',
           })
           .select()
           .single();
 
         if (txError) throw txError;
-        realTx = txData as Transaction;
+        realTx = {
+          ...(txData as Transaction),
+          friend_name: displayName,
+        };
       }
 
       const { error: borrowError } = await supabase
@@ -3089,13 +3091,15 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
             category: optimisticTx.category,
             note: optimisticTx.note,
             date: optimisticTx.date,
-            friend_name: cleanName,
             source: 'manual',
           })
           .select()
           .single();
         if (txError) throw txError;
-        realTx = txData as Transaction;
+        realTx = {
+          ...(txData as Transaction),
+          friend_name: cleanName,
+        };
       }
 
       if (toSettleIds.length > 0) {
@@ -3318,14 +3322,16 @@ export const useFinanceStore = create<FinanceState>((set, get) => ({
             category: optimisticTx.category,
             note: optimisticTx.note,
             date: optimisticTx.date,
-            friend_name: cleanName,
             source: 'manual',
           })
           .select()
           .single();
 
         if (txError) throw txError;
-        realTx = txData as Transaction;
+        realTx = {
+          ...(txData as Transaction),
+          friend_name: cleanName,
+        };
         realTxId = realTx.id;
       }
 

@@ -1136,6 +1136,27 @@ Foundational architecture build for a high-performance cross-platform personal f
     - TypeScript typecheck (`npx tsc --noEmit`): 0 errors.
     - ESLint (`npm run lint`): 0 errors, 0 warnings.
 
+### 000030. Borrow Schema Rollback Fix & Shared Image Intent Navigation Restore (v1.0.26)
+- **Status**: **Implemented & Fully Verified**.
+- **Supabase Borrow Transaction Insert Payload Fix**:
+  - *Root Cause*: `addBorrowOptimistic`, `settleBorrowOptimistic`, and `settlePersonLedgerOptimistic` sent `friend_name` directly in `.from('transactions').insert(...)`. When the remote Supabase production schema lacked this column on `transactions`, PostgREST threw a schema cache error (`Could not find the 'friend_name' column of 'transactions' in the schema cache. Rolled back.`), rolling back valid borrow transactions.
+  - *Resolution*: Stripped `friend_name` from the Supabase insert payload and attached it directly to the local optimistic transaction object (matching `addPaidByFriendExpenseOptimistic` and `addTransactionOptimistic`).
+- **External Image Share Intent Navigation Fix**:
+  - *Root Cause*:
+    1. `useShareIntent` defaulted to `resetOnBackground: true`, which wiped incoming share intents during Android activity transition.
+    2. `isShareIntentConsumed` enforced an aggressive 24-hour lockout based on file path/size, preventing re-sharing or sharing similar image files.
+    3. `processSharedImage` checked `if (AppState.currentState === 'active')` before navigating; during cold-start or background intent handovers, `AppState` starts as `inactive` or `background`, preventing immediate navigation to `AddTransactionScreen`.
+    4. Auth initialization race condition during cold start dropped intents if `session` was still loading.
+  - *Resolution*:
+    1. Set `resetOnBackground: false` in `useShareIntent`.
+    2. Adjusted deduplication cooldown to a 5-second debounce window (`INTENT_DEDUPE_COOLDOWN_MS = 5000`) instead of 24 hours.
+    3. Removed `AppState` gatekeeper so incoming shared images immediately navigate to `AddTransactionScreen` with scanning indicator and queue properly until `NavigationContainer` is ready.
+    4. Guarded intent listener until auth loading completes, supporting guest mode seamlessly.
+- **Verification & Testing**:
+  - TypeScript typecheck (`npx tsc --noEmit`): 0 errors.
+  - ESLint (`npx expo lint`): 0 errors, 0 warnings.
+  - All automated test suites (`test_unified_pipeline.mjs`, `test_sms_learning_system.mjs`, `test_sms_and_guest_isolation.mjs`): 100% passed.
+
 ---
 
 ## Architecture Summary

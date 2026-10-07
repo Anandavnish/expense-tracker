@@ -61,13 +61,14 @@ if (!isRunningInExpoGo()) {
 export const navigationRef = createNavigationContainerRef<any>();
 
 const CONSUMED_SHARE_INTENT_KEY = '@consumed_share_intent_sig_v2';
+const INTENT_DEDUPE_COOLDOWN_MS = 5000; // 5-second debounce against double events, NOT 24 hours!
 
 const isShareIntentConsumed = async (sig: string): Promise<boolean> => {
   try {
     const raw = await AsyncStorage.getItem(CONSUMED_SHARE_INTENT_KEY);
     if (!raw) return false;
     const parsed = JSON.parse(raw);
-    if (parsed.sig === sig && Date.now() - (parsed.timestamp || 0) < 24 * 60 * 60 * 1000) {
+    if (parsed.sig === sig && Date.now() - (parsed.timestamp || 0) < INTENT_DEDUPE_COOLDOWN_MS) {
       return true;
     }
   } catch {}
@@ -86,7 +87,7 @@ const markShareIntentConsumed = async (sig: string) => {
 const AppStack = createNativeStackNavigator();
 
 export const RootNavigator = () => {
-  const { session, user, isLoading, initializeAuth } = useAuthStore();
+  const { session, user, isGuest, isLoading, initializeAuth } = useAuthStore();
   const { loadSettings, accent, effectiveTheme, colors, hasGeminiApiKey } = useSettingsStore();
   const {
     loadCachedData,
@@ -97,6 +98,7 @@ export const RootNavigator = () => {
 
   const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntent({
     disabled: Platform.OS === 'web',
+    resetOnBackground: false,
   });
 
   // App Release / APK Update State
@@ -109,14 +111,31 @@ export const RootNavigator = () => {
   const lastHandledIntentSignatureRef = React.useRef<string | null>(null);
 
   const navigateOrQueue = useCallback((screen: string, params: any) => {
+    const doNavigate = () => {
+      try {
+        if (navigationRef.isReady()) {
+          (navigationRef as any).navigate(screen, params);
+          return true;
+        }
+      } catch (e) {
+        console.warn('[navigateOrQueue] Navigation dispatch error:', e);
+      }
+      return false;
+    };
+
     if (navigationRef.isReady()) {
       pendingNavRef.current = null;
-      navigationRef.dispatch(CommonActions.navigate({ name: screen, params }));
+      doNavigate();
       setTimeout(() => {
         if (navigationRef.isReady() && navigationRef.getCurrentRoute()?.name !== screen) {
-          navigationRef.dispatch(CommonActions.navigate({ name: screen, params }));
+          doNavigate();
         }
-      }, 120);
+      }, 100);
+      setTimeout(() => {
+        if (navigationRef.isReady() && navigationRef.getCurrentRoute()?.name !== screen) {
+          doNavigate();
+        }
+      }, 300);
     } else {
       pendingNavRef.current = { screen, params };
     }
@@ -254,15 +273,13 @@ export const RootNavigator = () => {
         }
       }
 
-      // If active in foreground, immediately show analyzing state
-      if (AppState.currentState === 'active') {
-        navigateOrQueue('AddTransaction', {
-          imageUri: uri,
-          prefillSource: 'screenshot',
-          isAnalyzing: true,
-          scanMessage: 'Reading receipt with on-device OCR...',
-        });
-      }
+      // Always immediately navigate to AddTransaction showing analyzing / loading state
+      navigateOrQueue('AddTransaction', {
+        imageUri: uri,
+        prefillSource: 'screenshot',
+        isAnalyzing: true,
+        scanMessage: 'Reading receipt with on-device OCR...',
+      });
 
       try {
         const { accounts, categories } = useFinanceStore.getState();
@@ -467,7 +484,8 @@ export const RootNavigator = () => {
 
   // Handle incoming shared screenshot / receipt or SMS text from external apps
   useEffect(() => {
-    if (!hasShareIntent || !session) return;
+    if (!hasShareIntent || isLoading) return;
+    if (!session && !isGuest) return;
 
     let isMounted = true;
 
@@ -475,7 +493,6 @@ export const RootNavigator = () => {
       if (shareIntent?.files && shareIntent.files.length > 0) {
         const file = shareIntent.files[0];
         const imagePath = file.path;
-        resetShareIntent();
 
         if (imagePath) {
           const sig = `file:${imagePath}_${file.size || ''}`;
@@ -492,11 +509,13 @@ export const RootNavigator = () => {
           if (!isMounted) return;
           lastHandledIntentSignatureRef.current = sig;
           await markShareIntentConsumed(sig);
+          resetShareIntent();
           processSharedImage(imagePath);
+        } else {
+          resetShareIntent();
         }
       } else if (shareIntent?.text && shareIntent.text.trim()) {
         const textToProcess = shareIntent.text.trim();
-        resetShareIntent();
 
         const sig = `text:${textToProcess}`;
         if (lastHandledIntentSignatureRef.current === sig) {
@@ -512,6 +531,7 @@ export const RootNavigator = () => {
         if (!isMounted) return;
         lastHandledIntentSignatureRef.current = sig;
         await markShareIntentConsumed(sig);
+        resetShareIntent();
         processSharedText(textToProcess);
       }
     };
@@ -521,7 +541,7 @@ export const RootNavigator = () => {
     return () => {
       isMounted = false;
     };
-  }, [hasShareIntent, shareIntent, session, resetShareIntent, processSharedImage, processSharedText]);
+  }, [hasShareIntent, shareIntent, session, isGuest, isLoading, resetShareIntent, processSharedImage, processSharedText]);
 
   const appNavTheme = useMemo(() => {
     const baseNavTheme = effectiveTheme === 'light' ? DefaultTheme : DarkTheme;
@@ -557,17 +577,26 @@ export const RootNavigator = () => {
           const attempt = (delay: number) => {
             setTimeout(() => {
               if (navigationRef.isReady()) {
-                navigationRef.dispatch(CommonActions.navigate({ name: screen, params }));
+                try {
+                  (navigationRef as any).navigate(screen, params);
+                } catch {
+                  navigationRef.dispatch(CommonActions.navigate({ name: screen, params }));
+                }
                 setTimeout(() => {
                   if (navigationRef.isReady() && navigationRef.getCurrentRoute()?.name !== screen) {
-                    navigationRef.dispatch(CommonActions.navigate({ name: screen, params }));
+                    try {
+                      (navigationRef as any).navigate(screen, params);
+                    } catch {
+                      navigationRef.dispatch(CommonActions.navigate({ name: screen, params }));
+                    }
                   }
                 }, 120);
               }
             }, delay);
           };
           attempt(60);
-          attempt(250);
+          attempt(200);
+          attempt(450);
         }
       }}
     >
